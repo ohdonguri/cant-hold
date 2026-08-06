@@ -2303,28 +2303,54 @@ function update(dt) {
 function drawBoard() {
   const { cell, ox, oy } = view;
   const open = firstOpenRow();
+  const U = 16;                              // 칸 하나를 16 도트로 본다
+  const px = cell / U;
+  const dot = (x, y, i, j, w, h, c) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x + i * px), Math.round(y + j * px),
+      Math.ceil(w * px), Math.ceil(h * px));
+  };
+  // 같은 칸은 늘 같은 무늬가 나오도록 좌표에서 값을 뽑는다
+  const hash = (gx, gy) => ((gx * 73856093) ^ (gy * 19349663) ^ 0x9e3779b9) >>> 0;
 
   for (let gy = 0; gy < CFG.BOARD_H; gy++) {
     for (let gx = 0; gx < CFG.BOARD_W; gx++) {
+      if (isPath(gx, gy)) continue;
       const { x, y } = cellToPx(gx, gy);
-      ctx.fillStyle = (gx + gy) % 2 ? '#1a212c' : '#1e2732';
-      ctx.fillRect(x, y, cell - 1, cell - 1);
+      dot(x, y, 0, 0, U, U, (gx + gy) % 2 ? '#1a212e' : '#1d2533');
+      const h = hash(gx, gy);
+      for (let n = 0; n < 4; n++) {
+        const v = (h >> (n * 8)) & 255;
+        dot(x, y, v & 15, (v >> 4) & 15, 1, 1, n < 2 ? '#222b3a' : '#161c27');
+      }
     }
   }
 
-  // 경로는 칸을 칠하는 대신 웨이포인트를 따라 굵게 긋는다.
-  // 칸 단위로 칠하면 길인지 빈 칸인지 한눈에 안 들어온다.
-  ctx.strokeStyle = '#3b4552';
-  ctx.lineWidth = cell * 0.88;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  for (const L of lanes) {
-    ctx.beginPath();
-    L.points.forEach((p, i) => {
-      const x = ox + (p.x + 0.5) * cell, y = oy + (p.y + 0.5) * cell;
-      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    });
-    ctx.stroke();
+  // 경로. 모서리 타일을 따로 만들지 않고, 이웃이 경로가 아닌 면에만 테두리를
+  // 넣는다. 갈래길이든 교차로든 이 규칙 하나로 맞는다.
+  for (let gy = 0; gy < CFG.BOARD_H; gy++) {
+    for (let gx = 0; gx < CFG.BOARD_W; gx++) {
+      if (!isPath(gx, gy)) continue;
+      const { x, y } = cellToPx(gx, gy);
+      dot(x, y, 0, 0, U, U, '#46515f');
+
+      const h = hash(gx, gy);
+      for (let n = 0; n < 4; n++) {
+        const v = (h >> (n * 8)) & 255;
+        dot(x, y, v & 15, (v >> 4) & 15, 1, 1, n < 2 ? '#4d5867' : '#3e4855');
+      }
+
+      const N = isPath(gx, gy - 1), S = isPath(gx, gy + 1);
+      const W = isPath(gx - 1, gy), E = isPath(gx + 1, gy);
+      if (!N) dot(x, y, 0, 0, U, 1, '#5b6675');
+      if (!S) dot(x, y, 0, U - 1, U, 1, '#2f3742');
+      if (!W) dot(x, y, 0, 0, 1, U, '#535e6d');
+      if (!E) dot(x, y, U - 1, 0, 1, U, '#343d49');
+
+      // 진행 방향 점선. 통로가 어느 쪽으로 뻗는지 한눈에 보인다.
+      if (W || E) { dot(x, y, 2, 7, 3, 1, '#697484'); dot(x, y, 9, 7, 3, 1, '#697484'); }
+      else if (N || S) { dot(x, y, 7, 2, 1, 3, '#697484'); dot(x, y, 7, 9, 1, 3, '#697484'); }
+    }
   }
 
   // 잠긴 행은 어둡게 덮는다
