@@ -173,15 +173,25 @@ function isPath(gx, gy) { return pathCells.has(gx + ',' + gy); }
 // 타워 정의. 분기 효과는 이후 패스에서 붙인다.
 // ═════════════════════════════════════════════════════════════
 const KINDS = {
-  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.6, cd: 0.6, range: 2.4, role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
-  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제' },
-  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
-  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 0.8, cd: 1.6, range: 3.2, role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
-  marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
-  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.6, cd: 2.5, range: 4.0, role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
-  mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, role: '경제', blurb: '공격 안 함. 골드 수입만' },
+  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.6, cd: 0.6, range: 2.4, group: 'aura', role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
+  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, group: 'aura', role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제' },
+  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, group: 'aura', role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
+  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 0.8, cd: 1.6, range: 3.2, group: 'attack', role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
+  marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, group: 'attack', role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
+  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.6, cd: 2.5, range: 4.0, group: 'attack', role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
+  mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, group: 'econ', role: '경제', blurb: '공격 안 함. 골드 수입만' },
 };
 const KIND_KEYS = Object.keys(KINDS);
+
+// 타워는 일하는 방식이 둘로 갈린다. 고를 때 이게 안 보이면
+// 오라 타워를 사거리 짧은 딜러로 착각한다.
+const GROUPS = [
+  { id: 'aura',   name: '오라', color: '#79c0ff', desc: '주변에 상시로 깔린다. 어디에 놓느냐가 성능' },
+  { id: 'attack', name: '공격', color: '#f0883e', desc: '사거리 안의 적을 직접 때린다' },
+  { id: 'econ',   name: '경제', color: '#e3b341', desc: '공격하지 않는다. 골드만 번다' },
+];
+const GROUP_OF = kind => GROUPS.find(g => g.id === KINDS[kind].group) || GROUPS[1];
+const AURA_KINDS = new Set(KIND_KEYS.filter(k => KINDS[k].group === 'aura'));
 
 // ═════════════════════════════════════════════════════════════
 // 적. hp 는 waveHp() 에 곱해지는 배수, speed 는 BASE_SPEED 배수.
@@ -1251,7 +1261,7 @@ function drawPicker() {
     ctx.textAlign = 'right';
     ctx.fillStyle = k.color;
     ctx.font = '10px system-ui, sans-serif';
-    ctx.fillText(AURA_KINDS.has(r.k) ? '오라' : '사격', r.x + r.w - 14, r.y + 12);
+    ctx.fillText(GROUP_OF(r.k).name, r.x + r.w - 14, r.y + 12);
     ctx.fillStyle = '#6e7681';
     ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 30);
     ctx.globalAlpha = 1;
@@ -1277,14 +1287,33 @@ function drawPicker() {
 }
 
 // ── 덱 선택 화면 ─────────────────────────────────────────────
-function deckCardRects() {
-  const pad = 16, top = 126, bottomKeep = 96;
+// 카드 사이에 그룹 머리말이 낀다. deckCardRects 는 카드만 돌려주고
+// (히트 판정용), 그리기는 머리말까지 포함한 전체 배치를 쓴다.
+function deckLayout() {
+  const pad = 16, top = 118, bottomKeep = 92;
+  const headers = GROUPS.filter(gr => KIND_KEYS.some(k => KINDS[k].group === gr.id));
   const avail = view.h - top - bottomKeep;
   const n = KIND_KEYS.length;
-  const h = Math.min(72, (avail - (n - 1) * 8) / n);
-  const gap = n > 1 ? (avail - h * n) / (n - 1) : 0;
-  return KIND_KEYS.map((k, i) => ({ k, x: pad, y: top + i * (h + gap), w: view.w - pad * 2, h }));
+  const headH = 26, cardGap = 6, groupGap = 8;
+  const cardH = Math.min(64,
+    (avail - headers.length * headH - (n - headers.length) * cardGap - (headers.length - 1) * groupGap) / n);
+
+  const items = [];
+  let y = top;
+  for (let gi = 0; gi < headers.length; gi++) {
+    const gr = headers[gi];
+    if (gi) y += groupGap;
+    items.push({ type: 'header', gr, x: pad, y, w: view.w - pad * 2, h: headH });
+    y += headH;
+    for (const k of KIND_KEYS.filter(k => KINDS[k].group === gr.id)) {
+      items.push({ type: 'card', k, x: pad, y, w: view.w - pad * 2, h: cardH });
+      y += cardH + cardGap;
+    }
+  }
+  return items;
 }
+
+function deckCardRects() { return deckLayout().filter(i => i.type === 'card'); }
 
 function deckStartRect() {
   const pad = 16;
@@ -1305,7 +1334,18 @@ function drawDeckSelect() {
   ctx.fillStyle = '#6e7681';
   ctx.fillText('빠진 종류가 어느 웨이브에서 아플지가 이 판의 첫 결정이다.', 16, 96);
 
-  for (const r of deckCardRects()) {
+  for (const it of deckLayout()) {
+    if (it.type === 'header') {
+      ctx.fillStyle = it.gr.color;
+      ctx.font = '700 13px system-ui, sans-serif';
+      ctx.fillText(it.gr.name, it.x + 2, it.y + 8);
+      ctx.fillStyle = '#6e7681';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(it.gr.desc, it.x + 2 + ctx.measureText(it.gr.name).width + 30, it.y + 9);
+      continue;
+    }
+
+    const r = it;
     const k = KINDS[r.k];
     const on = state.deckPick.includes(r.k);
     ctx.fillStyle = on ? '#1b2b1f' : '#161b22';
@@ -1316,20 +1356,22 @@ function drawDeckSelect() {
     ctx.stroke();
 
     ctx.fillStyle = k.color;
-    ctx.font = '700 22px system-ui, sans-serif';
-    ctx.fillText(k.tag, r.x + 16, r.y + r.h / 2 - 14);
+    ctx.font = '700 21px system-ui, sans-serif';
+    ctx.fillText(k.tag, r.x + 14, r.y + r.h / 2 - 13);
 
     ctx.fillStyle = '#e6edf3';
-    ctx.font = '700 15px system-ui, sans-serif';
-    ctx.fillText(k.name, r.x + 50, r.y + 12);
+    ctx.font = '700 14px system-ui, sans-serif';
+    ctx.fillText(k.name, r.x + 48, r.y + 10);
     ctx.fillStyle = '#8b949e';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText(k.blurb, r.x + 50, r.y + 34);
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText(k.blurb, r.x + 48, r.y + 30);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = k.dmgType === 'physical' ? '#d29922' : k.dmgType === 'magic' ? '#a371f7' : '#6e7681';
     ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(k.role, r.x + r.w - 14, r.y + 13);
+    ctx.fillText(k.role, r.x + r.w - 14, r.y + 11);
+    ctx.fillStyle = '#484f58';
+    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 29);
     ctx.textAlign = 'left';
   }
 
@@ -1736,8 +1778,6 @@ function drawTower(t) {
 // 사거리는 숫자로 적어봐야 어디까지 닿는지 모른다. 그래서 원으로 그린다.
 // 오라 타워는 그 안이 상시 효과 범위라서 실선 + 진한 채움,
 // 공격만 하는 타워는 점선 + 옅은 채움으로 구분한다.
-const AURA_KINDS = new Set(['shredder', 'frost', 'eroder']);
-
 function drawRange(t, alpha) {
   const { cell } = view;
   const size = towerFootprint(t);

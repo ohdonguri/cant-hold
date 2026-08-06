@@ -178,6 +178,24 @@ function ok(name, cond, detail) {
   ok('스테이지를 고르면 덱 화면', state.phase === 'deck');
   ok('카드가 타워 종류 수만큼', g.deckCardRects().length === g.KIND_KEYS.length);
 
+  // 오라형과 공격형이 눈으로 갈려야 한다. 안 그러면 오라 타워를
+  // 사거리 짧은 딜러로 착각한다.
+  const layout = g.deckLayout();
+  const heads = layout.filter(i => i.type === 'header').map(i => i.gr.id);
+  ok('그룹 머리말이 있다', heads.length === 3, heads.join(','));
+  ok('오라가 맨 위', heads[0] === 'aura', heads[0]);
+  ok('오라형은 3종', g.AURA_KINDS.size === 3, [...g.AURA_KINDS].join(','));
+
+  // 머리말과 카드가 겹치지 않아야 탭이 엉키지 않는다
+  let overlap = 0;
+  for (let i = 1; i < layout.length; i++)
+    if (layout[i].y < layout[i - 1].y + layout[i - 1].h) overlap++;
+  ok('머리말/카드가 안 겹친다', overlap === 0, String(overlap));
+
+  // 카드가 화면 밖으로 안 나가야 한다
+  const last = layout[layout.length - 1];
+  ok('마지막 카드가 화면 안', last.y + last.h < g.deckStartRect().y, last.y + last.h + ' < ' + g.deckStartRect().y);
+
   g.toggleDeckPick('frost');
   g.toggleDeckPick('arc');
   g.startRun();
