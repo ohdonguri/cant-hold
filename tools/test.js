@@ -532,8 +532,8 @@ function ok(name, cond, detail) {
   ok('타워·적 전부 도트가 있다', missing.length === 0, missing.join(',') || '없음');
 
   const bad = Object.entries(g.SPR).filter(([, rows]) =>
-    rows.length !== 16 || rows.some(r => r.length !== 16)).map(([k]) => k);
-  ok('전부 16x16 이다', bad.length === 0, bad.join(',') || '없음');
+    rows.length !== 32 || rows.some(r => r.length !== 32)).map(([k]) => k);
+  ok('전부 32x32 이다', bad.length === 0, bad.join(',') || '없음');
 
   const chars = new Set();
   for (const rows of Object.values(g.SPR)) for (const r of rows) for (const c of r) chars.add(c);

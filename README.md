@@ -42,6 +42,7 @@ npm run sim  그리디 플레이 1회 결과
 npm run shot 레이아웃 스크린샷 (playwright 필요)
 node tools/paths.js       경로 후보 비교
 node tools/stagetune.js N 스테이지 N 의 HP 배율 역산
+npm run sprites          도트 미리보기 (emit 으로 SPR 테이블 출력)
 ```
 
 밸런스 수치를 만지면 `npm test` 를 반드시 다시 돌릴 것. 근거는 [DESIGN.md](DESIGN.md) 참고.
