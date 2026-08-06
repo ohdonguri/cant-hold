@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node tools/test.js",
     "tune": "node tools/tune.js",
-    "sim": "node tools/tune.js one"
+    "sim": "node tools/tune.js one",
+    "shot": "node tools/shot.js"
   }
 }

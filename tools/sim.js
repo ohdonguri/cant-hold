@@ -35,6 +35,7 @@ const EXPOSE = [
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'PATH_CELLS',
   'applySlow', 'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
+  'render', 'restart', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
 ];
 
 function load(overrides) {

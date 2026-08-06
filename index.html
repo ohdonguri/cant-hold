@@ -894,7 +894,7 @@ function updateCombat(dt) {
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const view = { w: 0, h: 0, cell: 0, ox: 0, oy: 0 };
-const HUD_TOP = 100, HUD_BOTTOM = 112;
+const HUD_TOP = 100, HUD_BOTTOM = 158;
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -928,17 +928,18 @@ function pxToCell(px, py) {
 // 입력
 // ═════════════════════════════════════════════════════════════
 const buttons = [];   // {x,y,w,h,label,fn,enabled}
+let drag = null;      // {id, px, py, moved}
 
 function layoutButtons() {
   buttons.length = 0;
-  const y = view.h - HUD_BOTTOM + 14;
-  const h = 52, gap = 10, pad = 12;
+  const pad = 12, gap = 10, h = 52;
+  const y = view.h - h - 14;
   const w = (view.w - pad * 2 - gap) / 2;
 
   buttons.push({
     x: pad, y, w, h,
     label: () => `소환  ${summonCost()}G`,
-    enabled: () => state.gold >= summonCost(),
+    enabled: () => state.gold >= summonCost() && state.phase !== 'over' && state.phase !== 'clear',
     fn: summon,
   });
 
@@ -950,24 +951,142 @@ function layoutButtons() {
     enabled: () => state.phase === 'build',
     fn: rushWave,
   });
+
+  // 타워를 고르면 그 위에 정보 패널과 판매/재선택이 뜬다
+  const t = selectedTower();
+  if (t) {
+    const py = y - 40;
+    const bw = (view.w - pad * 2 - gap) / 2;
+    buttons.push({
+      x: pad, y: py, w: bw, h: 32,
+      label: () => `판매  +${sellValue(t)}G`,
+      enabled: () => true,
+      fn: sellSelected,
+    });
+    buttons.push({
+      x: pad + bw + gap, y: py, w: bw, h: 32,
+      label: () => `분기 재선택  정수 1`,
+      enabled: () => state.essence > 0 && t.star >= 3,
+      fn: rechoose,
+    });
+  }
+}
+
+function selectedTower() { return state.towers.find(t => t.id === state.selected) || null; }
+function sellValue(t) { return Math.round(10 * STAR_MULT[t.star] * (mergeIsFree() ? 1 : 0.4)); }
+
+// 정수를 써서 이미 고른 분기를 다시 고른다. 편성이 바뀌어 빌드가 죽었을 때의 탈출구.
+function rechoose() {
+  const t = selectedTower();
+  if (!t || state.essence <= 0) return;
+  state.essence--;
+  const tier = t.star >= 7 ? 7 : t.star >= 5 ? 5 : 3;
+  if (tier === 3) { t.b3 = null; t.b5 = null; }
+  else if (tier === 5) t.b5 = null;
+  else t.t7 = null;
+  openChoice(t, tier);
 }
 
 function hitButton(px, py) {
   return buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
 }
 
+// ── 분기 선택 모달 ───────────────────────────────────────────
+function choiceRects() {
+  if (!state.choice) return [];
+  const n = state.choice.options.length;
+  const w = Math.min(320, view.w - 48), h = 84, gap = 12;
+  const total = n * h + (n - 1) * gap;
+  const x = (view.w - w) / 2;
+  let y = (view.h - total) / 2 + 20;
+  return state.choice.options.map(opt => {
+    const r = { opt, x, y, w, h };
+    y += h + gap;
+    return r;
+  });
+}
+
+function choiceLabel(opt) {
+  const c = state.choice;
+  const t = state.towers.find(v => v.id === c.towerId);
+  if (c.tier === 7) return TRAITS[opt];
+  return (BRANCH[t ? t.kind : 'shredder'] || {})[opt] || { name: opt, desc: '' };
+}
+
+// ── 입력 ─────────────────────────────────────────────────────
 canvas.addEventListener('pointerdown', e => {
   const px = e.clientX, py = e.clientY;
+
+  if (state.choice) {
+    const hit = choiceRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
+    if (hit) applyChoice(hit.opt);
+    return;
+  }
+
+  if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
 
   const b = hitButton(px, py);
   if (b) { if (b.enabled()) b.fn(); return; }
 
   const c = pxToCell(px, py);
   if (!c) { state.selected = null; return; }
-  const occ = occupancy();
-  const id = occ.get(c.gx + ',' + c.gy);
-  state.selected = (id !== undefined && id !== state.selected) ? id : null;
+  const id = occupancy().get(c.gx + ',' + c.gy);
+  if (id === undefined) { state.selected = null; return; }
+  drag = { id, px, py, sx: px, sy: py, moved: false };
 });
+
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  drag.px = e.clientX;
+  drag.py = e.clientY;
+  if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8) drag.moved = true;
+});
+
+canvas.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+
+  // 끌지 않았으면 그냥 선택 토글
+  if (!d.moved) {
+    state.selected = state.selected === d.id ? null : d.id;
+    return;
+  }
+
+  const from = state.towers.find(t => t.id === d.id);
+  const c = pxToCell(e.clientX, e.clientY);
+  const overId = c ? occupancy().get(c.gx + ',' + c.gy) : undefined;
+  if (!from || overId === undefined || overId === d.id) return;
+
+  const to = state.towers.find(t => t.id === overId);
+  if (canMerge(from, to)) { mergeTowers(from, to); state.selected = null; return; }
+  if (from.kind !== to.kind) toast('종류가 다름');
+  else if (from.star !== to.star) toast('성급이 다름');
+  else toast('7성이 최대');
+});
+
+canvas.addEventListener('pointercancel', () => { drag = null; });
+
+function restart() {
+  state.phase = 'build';
+  state.wave = 0;
+  state.timer = CFG.WAVE_GAP;
+  state.gold = CFG.START_GOLD;
+  state.essence = 0;
+  state.life = CFG.START_LIFE;
+  state.openRows = CFG.OPEN_ROWS;
+  state.summonedThisWave = 0;
+  state.towers.length = 0;
+  state.enemies.length = 0;
+  state.spawnQueue.length = 0;
+  state.beams.length = 0;
+  state.shells.length = 0;
+  state.patches.length = 0;
+  state.blasts.length = 0;
+  state.selected = null;
+  state.choice = null;
+  rollDeck();
+}
 
 // ═════════════════════════════════════════════════════════════
 // 진행
@@ -1092,6 +1211,10 @@ function update(dt) {
   }
   for (const t of state.towers) if (t.flash > 0) t.flash -= dt;
 
+  // 분기 선택 중에는 판을 멈춘다. 웨이브 도중에 5성이 나올 수 있는데
+  // 그때 뒤에서 적이 계속 흐르면 고를 수가 없다.
+  if (state.choice) return;
+
   if (state.phase === 'build') {
     state.timer -= dt;
     if (state.timer <= 0) startWave();
@@ -1121,11 +1244,28 @@ function drawBoard() {
   for (let gy = 0; gy < CFG.BOARD_H; gy++) {
     for (let gx = 0; gx < CFG.BOARD_W; gx++) {
       const { x, y } = cellToPx(gx, gy);
-      if (isPath(gx, gy)) ctx.fillStyle = '#2d333b';
-      else if (gy < open) ctx.fillStyle = '#12161d';
-      else ctx.fillStyle = (gx + gy) % 2 ? '#1a212c' : '#1e2732';
+      ctx.fillStyle = (gx + gy) % 2 ? '#1a212c' : '#1e2732';
       ctx.fillRect(x, y, cell - 1, cell - 1);
     }
+  }
+
+  // 경로는 칸을 칠하는 대신 웨이포인트를 따라 굵게 긋는다.
+  // 칸 단위로 칠하면 길인지 빈 칸인지 한눈에 안 들어온다.
+  ctx.strokeStyle = '#3b4552';
+  ctx.lineWidth = cell * 0.88;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  PATH.forEach((p, i) => {
+    const x = ox + (p.x + 0.5) * cell, y = oy + (p.y + 0.5) * cell;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+
+  // 잠긴 행은 어둡게 덮는다
+  if (open > 0) {
+    ctx.fillStyle = 'rgba(13,17,23,0.62)';
+    ctx.fillRect(ox, oy, cell * CFG.BOARD_W, cell * open);
   }
 
   // 잠긴 구역 경계
@@ -1267,10 +1407,12 @@ function drawEnemies() {
 
     if (e.hp < e.maxHp) {
       const bw = r * 2.2, bh = 3;
+      // 최상단 행에서는 위로 그리면 보드 밖으로 잘린다
+      const by = cy - r - 7 < oy + 2 ? cy + r + 4 : cy - r - 7;
       ctx.fillStyle = '#000a';
-      ctx.fillRect(cx - bw / 2, cy - r - 7, bw, bh);
+      ctx.fillRect(cx - bw / 2, by, bw, bh);
       ctx.fillStyle = '#3fb950';
-      ctx.fillRect(cx - bw / 2, cy - r - 7, bw * (e.hp / e.maxHp), bh);
+      ctx.fillRect(cx - bw / 2, by, bw * (e.hp / e.maxHp), bh);
     }
   }
 }
@@ -1327,10 +1469,11 @@ function drawHud() {
   ctx.fillStyle = '#e6edf3';
   ctx.font = '700 20px system-ui, sans-serif';
   const title = `웨이브 ${state.wave}`;
+  const titleW = ctx.measureText(title).width;   // 폰트를 바꾸기 전에 재야 한다
   ctx.fillText(title, 16, 16);
   ctx.fillStyle = '#6e7681';
   ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(`/ ${CFG.WAVE_MAX}`, 16 + ctx.measureText(title).width + 8, 23);
+  ctx.fillText(`/ ${CFG.WAVE_MAX}`, 16 + titleW + 8, 23);
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#e3b341';
@@ -1375,6 +1518,135 @@ function drawHud() {
   }
 }
 
+// 드래그 중인 타워와 합성 가능한 상대를 표시한다.
+function drawDrag() {
+  if (!drag || !drag.moved) return;
+  const from = state.towers.find(t => t.id === drag.id);
+  if (!from) return;
+  const { cell } = view;
+
+  for (const t of state.towers) {
+    if (!canMerge(from, t)) continue;
+    const s = towerFootprint(t);
+    const { x, y } = cellToPx(t.gx, t.gy);
+    ctx.strokeStyle = '#7ee787';
+    ctx.lineWidth = 3;
+    roundRect(x + 1, y + 1, cell * s - 3, cell * s - 3, 7);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = '#22272e';
+  ctx.strokeStyle = STAR_COLOR[from.star];
+  ctx.lineWidth = 2;
+  const r = cell * 0.42;
+  ctx.beginPath();
+  ctx.arc(drag.px, drag.py, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = KINDS[from.kind].color;
+  ctx.font = `700 ${Math.round(r)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(KINDS[from.kind].tag, drag.px, drag.py);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.globalAlpha = 1;
+}
+
+// 덱 5종. 뭐가 나올 수 있는지 모르면 합성 계획을 세울 수 없다.
+function belowBoardY() { return view.oy + view.cell * CFG.BOARD_H + 12; }
+
+function drawDeck() {
+  const y = belowBoardY();
+  const pad = 12;
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#6e7681';
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillText('덱', pad, y + 5);
+
+  let x = pad + 22;
+  for (const k of state.deck) {
+    const n = state.towers.filter(t => t.kind === k).length;
+    ctx.fillStyle = KINDS[k].color;
+    ctx.font = '700 14px system-ui, sans-serif';
+    ctx.fillText(KINDS[k].tag, x, y + 2);
+    ctx.fillStyle = '#484f58';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillText(String(n), x + 15, y + 6);
+    x += 34;
+  }
+}
+
+function drawInfo() {
+  const t = selectedTower();
+  if (!t) { drawDeck(); return; }
+  const y = belowBoardY() - 4;
+  const pad = 12;
+  const k = KINDS[t.kind];
+
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = k.color;
+  ctx.font = '700 14px system-ui, sans-serif';
+  ctx.fillText(`${k.name} ★${t.star}`, pad, y);
+
+  const parts = [];
+  if (t.b3) parts.push(BRANCH[t.kind][t.b3].name);
+  if (t.b5) parts.push(BRANCH[t.kind][t.b5].name);
+  if (t.t7) parts.push(TRAITS[t.t7].name);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillText(parts.join(' · ') || '분기 없음', pad + 96, y + 2);
+
+  const dps = t.kind === 'mint' ? 0 : towerDmg(t) / towerCd(t);
+  ctx.fillStyle = '#6e7681';
+  ctx.fillText(
+    t.kind === 'mint'
+      ? `수입 ${Math.round(CFG.MINT_BASE * STAR_MULT[t.star])}G/웨이브`
+      : `DPS ${Math.round(dps)}   사거리 ${towerRange(t).toFixed(1)}`,
+    pad, y + 19);
+}
+
+function drawChoice() {
+  if (!state.choice) return;
+  const rects = choiceRects();
+  if (!rects.length) return;
+  ctx.fillStyle = 'rgba(13,17,23,0.88)';
+  ctx.fillRect(0, 0, view.w, view.h);
+
+  const t = state.towers.find(v => v.id === state.choice.towerId);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '700 17px system-ui, sans-serif';
+  ctx.fillText(
+    `${t ? KINDS[t.kind].name : ''} ★${state.choice.tier}  분기 선택`,
+    view.w / 2, rects[0].y - 46);
+  ctx.fillStyle = '#6e7681';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillText('정수를 쓰면 나중에 다시 고를 수 있다', view.w / 2, rects[0].y - 24);
+
+  for (const r of rects) {
+    const info = choiceLabel(r.opt);
+    ctx.fillStyle = '#161b22';
+    ctx.strokeStyle = '#30363d';
+    ctx.lineWidth = 1.5;
+    roundRect(r.x, r.y, r.w, r.h, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = '700 16px system-ui, sans-serif';
+    ctx.fillText(info.name, r.x + 18, r.y + 18);
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.fillText(info.desc, r.x + 18, r.y + 45);
+    ctx.textAlign = 'center';
+  }
+  ctx.textAlign = 'left';
+}
+
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -1389,14 +1661,25 @@ function render() {
   layoutButtons();
   ctx.fillStyle = '#0d1117';
   ctx.fillRect(0, 0, view.w, view.h);
+  // 경로 선과 보드 밖에서 들어오는 적이 보드 밖으로 새지 않게 잘라낸다.
+  // 드래그 중인 타워는 손가락을 따라 보드 밖으로 나가야 하므로 클립 밖에서 그린다.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
+  ctx.clip();
   drawBoard();
-  const sel = state.towers.find(t => t.id === state.selected);
+  const sel = selectedTower();
   if (sel) drawRange(sel);
   for (const t of state.towers) drawTower(t);
   drawEffects();
   drawEnemies();
+  ctx.restore();
+
+  drawDrag();
   drawHud();
+  drawInfo();
   drawOverlay();
+  drawChoice();
 }
 
 function drawOverlay() {
@@ -1412,6 +1695,9 @@ function drawOverlay() {
   ctx.fillStyle = '#8b949e';
   ctx.font = '15px system-ui, sans-serif';
   ctx.fillText(`웨이브 ${state.wave} / ${CFG.WAVE_MAX}`, view.w / 2, view.h / 2 + 18);
+  ctx.fillStyle = '#6e7681';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText('화면을 누르면 다시 시작', view.w / 2, view.h / 2 + 52);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
 }

@@ -152,5 +152,46 @@ function ok(name, cond, detail) {
   ok('HP/데미지에 NaN 없음', w.every(v => Number.isFinite(v)));
 }
 
+// ── 렌더 경로 ────────────────────────────────────────────────
+// 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
+{
+  console.log('렌더');
+  const g = load();
+  const { state } = g;
+  const safe = (name, fn) => {
+    try { fn(); g.render(); ok(name, true); }
+    catch (err) { ok(name, false, err.message); }
+  };
+
+  safe('빈 보드', () => {});
+  safe('타워 있음', () => { state.gold = 9999; for (let i = 0; i < 6; i++) g.summon(); });
+  safe('타워 선택됨', () => { state.selected = state.towers[0].id; });
+  safe('웨이브 진행 중', () => {
+    state.phase = 'wave'; state.wave = 14;
+    state.spawnQueue = g.buildSpawnQueue(14);
+    for (let i = 0; i < 200; i++) g.update(1 / 30);
+  });
+  safe('3성 분기 모달', () => {
+    state.phase = 'build';
+    g.openChoice(state.towers[0], 3);
+    ok('  모달 선택지 2개', g.choiceRects().length === 2);
+  });
+  safe('7성 특성 모달', () => { g.openChoice(state.towers[0], 7); });
+  safe('모달 선택 반영', () => {
+    const t = state.towers[0];
+    g.openChoice(t, 3);
+    g.applyChoice('B');
+    ok('  분기가 저장됨', t.b3 === 'B', String(t.b3));
+    ok('  모달이 닫힘', state.choice === null);
+  });
+  safe('게임 오버', () => { state.phase = 'over'; });
+  safe('클리어', () => { state.phase = 'clear'; });
+  safe('재시작', () => {
+    g.restart();
+    ok('  재시작이 판을 비움', state.towers.length === 0 && state.wave === 0 && state.life > 0);
+    ok('  재시작이 덱을 다시 뽑음', state.deck.length === g.CFG.DECK_SIZE);
+  });
+}
+
 console.log(fail ? `\n실패 ${fail}건` : '\n전부 통과');
 process.exit(fail ? 1 : 0);
