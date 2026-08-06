@@ -33,7 +33,7 @@ const EXPOSE = [
   'canMerge', 'mergeTowers', 'applyChoice', 'rushWave', 'towerDmg', 'towerCd',
   'towerRange', 'towerFootprint', 'aimArc', 'posAt', 'PATH_LEN', 'buildSpawnQueue',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'PATH_CELLS',
-  'applySlow', 'applyStacks', 'debuffScale', 'effArmor', 'effMres',
+  'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
   'render', 'restart', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect',
@@ -100,11 +100,30 @@ function greedy(g, opts = {}) {
     }
   }
 
+  // 종류를 고를 수 있게 된 뒤의 플레이를 흉내낸다.
+  // 가장 낮은 성급에서 짝이 안 맞는 종류를 골라 바로 합성으로 잇는다.
+  function pickKind() {
+    let best = null, bestStar = Infinity, bestCount = Infinity;
+    for (const k of state.deck) {
+      const own = state.towers.filter(t => t.kind === k);
+      const byStar = {};
+      for (const t of own) byStar[t.star] = (byStar[t.star] || 0) + 1;
+      const odd = Object.keys(byStar).map(Number)
+        .filter(s => byStar[s] % 2 === 1)
+        .sort((a, b) => a - b)[0];
+      const star = odd === undefined ? Infinity : odd;
+      if (star < bestStar || (star === bestStar && own.length < bestCount)) {
+        bestStar = star; bestCount = own.length; best = k;
+      }
+    }
+    return best || state.deck[0];
+  }
+
   function buildPhase() {
     let guard = 0;
     while (guard++ < 400) {
       const before = state.towers.length;
-      if (state.gold >= g.summonCost()) g.summon();
+      if (state.gold >= g.summonCost()) g.summon(pickKind());
       if (state.towers.length === before) break;
       mergeAll();
     }

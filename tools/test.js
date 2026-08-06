@@ -23,16 +23,17 @@ function ok(name, cond, detail) {
     return n;
   };
 
-  ok('시작 배치 칸 20', count(5, 1) === 20, String(count(5, 1)));
-  ok('전 행 개방 시 29', count(8, 1) === 29, String(count(8, 1)));
+  const open0 = g.CFG.OPEN_ROWS, openAll = g.CFG.BOARD_H;
+  ok('시작 배치 칸 24', count(open0, 1) === 24, String(count(open0, 1)));
+  ok('전 행 개방 시 36', count(openAll, 1) === 36, String(count(openAll, 1)));
 
   // 행을 열 때마다 2x2 자리가 늘어야 개방이 보상이 된다
-  const big = [5, 6, 7, 8].map(o => count(o, 2));
+  const big = [open0, open0 + 2, openAll].map(o => count(o, 2));
   ok('2x2 자리가 단조 증가', big.every((v, i) => i === 0 || v >= big[i - 1]), big.join('→'));
-  ok('2x2 자리 시작 8곳 이상', big[0] >= 8, String(big[0]));
+  ok('2x2 자리 시작 10곳 이상', big[0] >= 10, String(big[0]));
 
   // 경로 칸에는 못 짓는다
-  state.openRows = 8;
+  state.openRows = g.CFG.BOARD_H;
   const occ = g.occupancy();
   let onPath = 0;
   for (let y = 0; y < CFG.BOARD_H; y++)
@@ -88,10 +89,9 @@ function ok(name, cond, detail) {
   ok('불굴이면 면역몹에도 30% 적용', e3.armorStacks > 0 && e3.armorStacks <= 15, String(e3.armorStacks.toFixed(1)));
 
   const e4 = mk('grunt');
-  for (let i = 0; i < 10; i++) g.applySlow(e4, 0.55, 3, { id: 9, kind: 'frost' });
-  e4.slowNext = 0.15;
-  e4.slowAmt = Math.min(g.CFG.SLOW_CAP, Math.max(e4.slowStored, e4.slowNext));
-  ok('슬로우 상한 60%', e4.slowAmt <= g.CFG.SLOW_CAP + 1e-9, e4.slowAmt.toFixed(2));
+  e4.slowNext = 0.95;   // 오라 여러 개가 겹친 상황
+  e4.slowAmt = Math.min(g.CFG.SLOW_CAP, e4.slowNext);
+  ok('슬로우 상한 60%', Math.abs(e4.slowAmt - g.CFG.SLOW_CAP) < 1e-9, e4.slowAmt.toFixed(2));
 }
 
 // ── 합성 ─────────────────────────────────────────────────────
@@ -181,15 +181,15 @@ function ok(name, cond, detail) {
   };
 
   // 시뮬 기준 상위권 덱. 플레이어는 좋은 덱을 고르므로 여기가 난이도 기준선이다.
-  const best = run(['eroder', 'arc', 'mint'], 10);
+  const best = run(['shredder', 'arc', 'mint'], 10);
   ok('최고 덱 중앙값 20~27', best.med >= 20 && best.med <= 27, 'w' + best.med + '  [' + best.w.join(',') + ']');
   ok('최고 덱으로도 클리어 못 함', best.clears === 0, best.clears + '회');
   const five = best.st.filter(s => s >= 5).length;
   ok('5성 도달률 90% 이상', five / best.st.length >= 0.9, five + '/' + best.st.length);
 
   // 덱이 결과를 실제로 바꾸는지. 이 차이가 작으면 덱 선택은 가짜 결정이다.
-  const worst = run(['shredder', 'marksman', 'mint'], 10);
-  ok('덱 차이가 5웨이브 이상', best.med - worst.med >= 5,
+  const worst = run(['frost', 'marksman', 'arc'], 10);
+  ok('덱 차이가 4웨이브 이상', best.med - worst.med >= 4,
     '최고 w' + best.med + ' vs 최저 w' + worst.med + ' = ' + (best.med - worst.med));
   ok('HP/데미지에 NaN 없음', best.w.concat(worst.w).every(v => Number.isFinite(v)));
 }

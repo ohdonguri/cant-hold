@@ -24,19 +24,18 @@
 // 설계 상수. 수치 근거는 DESIGN.md.
 // ═════════════════════════════════════════════════════════════
 const CFG = {
-  BOARD_W: 6,
-  BOARD_H: 8,
-  OPEN_ROWS: 5,        // 아래에서부터 개방된 행 수
+  BOARD_W: 7,
+  BOARD_H: 10,
+  OPEN_ROWS: 6,        // 아래에서부터 개방된 행 수
 
   WAVE_MAX: 30,
   WAVE_GAP: 20,        // 빌드 페이즈 길이(초)
-  RUSH_GOLD: 2,        // 빨리 보내기: 남은 초당 골드
 
   SLOW_CAP: 0.60,      // 슬로우 총합 상한. 넘기면 서리탑 도배가 정답이 됨
   BIG_FROM_STAR: 5,    // 이 성급부터 2x2
   STAR_MAX: 7,
 
-  START_GOLD: 90,
+  START_GOLD: 120,
   START_LIFE: 20,
 
   // 한 판에 등장하는 타워 종류 수. 7종 전부를 랜덤으로 뽑으면 같은 종류가
@@ -45,15 +44,15 @@ const CFG = {
   DECK_SIZE: 3,
 
   // 이 웨이브들을 클리어하면 보드가 한 행씩 열린다.
-  UNLOCK_AT: [6, 11, 16],
+  UNLOCK_AT: [8, 15],
 
   // ── 밸런스 상수. tools/tune.js 로 역산한 값이다. ──
   // 그리디 플레이어(대충 하는 플레이) 20회 기준 사망 웨이브 중앙값 24,
   // 범위 23~27, 클리어 0회, 5성 도달 100% / 6성 20%.
   STAR_RATIO: 2.4,     // 성급당 데미지 배수
-  DMG_SCALE: 8,        // 타워 base 에 곱하는 전역 계수
+  DMG_SCALE: 6.5,      // 타워 base 에 곱하는 전역 계수
   HP_GROWTH: 1.16,     // 웨이브당 적 HP 증가율
-  GOLD_BASE: 50,       // 웨이브 클리어 골드
+  GOLD_BASE: 70,       // 웨이브 클리어 골드
   GOLD_GROWTH: 1.11,   // 웨이브당 클리어 골드 증가율
   MINT_BASE: 12,       // 조폐소 웨이브 수입 (x 성급 계수)
 };
@@ -82,13 +81,16 @@ function waveHp(wave) {
 // 경로. 격자 좌표 웨이포인트이고, 꺾이는 지점만 적는다.
 // 보드 밖(-1, 8)에서 들어오고 나간다.
 // ═════════════════════════════════════════════════════════════
-// 가로 통로가 폭을 다 먹으면 배치 칸이 급감한다. 한 칸씩 어긋나게 짜서
-// 경로 길이(교전 시간)는 유지하면서 주머니 공간을 남긴다.
+// 3행마다 가로 통로를 놓고 양 끝에서 번갈아 내려간다.
+// 통로 사이에 남는 2행 띠가 곧 배치 공간이라, 경로를 길게 뽑으면서도
+// 2x2 자리가 줄지 않는다. 그리고 모든 배치 칸이 통로에 붙어 있어서
+// 오라형 타워(파쇄자·서리탑)가 항상 경로를 문다.
 const PATH = [
-  { x: -1, y: 0 }, { x: 3, y: 0 },
-  { x: 3, y: 2 }, { x: 0, y: 2 },
-  { x: 0, y: 5 }, { x: 5, y: 5 },
-  { x: 5, y: 8 },
+  { x: -1, y: 0 }, { x: 6, y: 0 },
+  { x: 6, y: 3 }, { x: 0, y: 3 },
+  { x: 0, y: 6 }, { x: 6, y: 6 },
+  { x: 6, y: 9 }, { x: 0, y: 9 },
+  { x: 0, y: 10 },
 ];
 
 // 웨이포인트 사이를 훑어 경로가 점유한 칸 집합을 만든다.
@@ -120,9 +122,9 @@ function isPath(gx, gy) { return PATH_CELLS.has(gx + ',' + gy); }
 // 타워 정의. 분기 효과는 이후 패스에서 붙인다.
 // ═════════════════════════════════════════════════════════════
 const KINDS = {
-  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.7, cd: 0.6, range: 2.2, role: '물리', blurb: '방어력을 깎는다. 중갑·정예에 강함' },
+  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.7, cd: 0.6, range: 2.4, role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
   eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제' },
-  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.2, role: '마법', blurb: '슬로우. 질주·군집을 붙잡는다' },
+  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
   mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.1, cd: 1.6, range: 3.2, role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
   marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
   arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.6, cd: 2.5, range: 4.0, role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
@@ -224,6 +226,7 @@ const state = {
   blasts: [],          // 폭발 시각 효과
   hasHanpa: false,     // 한파 타워 존재 여부 (프레임마다 갱신)
   selected: null,      // 선택된 타워 id
+  picker: null,        // {gx, gy} — 빈 칸에 뭘 소환할지 고르는 중
   choice: null,        // {towerId, tier, options} — 분기 선택 대기
   toast: null,         // {text, t}
 };
@@ -294,21 +297,28 @@ function canPlace(gx, gy, size, occ, ignoreId) {
   return true;
 }
 
-function summon() {
+// 종류도 자리도 플레이어가 고른다. 자리를 생략하면 빈 칸 아무 데나 놓는다.
+// 오라형 타워가 생긴 뒤로는 어디에 놓느냐가 곧 성능이라 자리 선택이 필요하다.
+function summon(kind, atX, atY) {
+  const deck = state.deck.length ? state.deck : KIND_KEYS;
+  if (!kind || !deck.includes(kind)) kind = deck[(Math.random() * deck.length) | 0];
+
   const cost = summonCost();
   if (state.gold < cost) return toast('골드 부족');
 
   const occ = occupancy();
-  const spots = [];
-  for (let gy = firstOpenRow(); gy < CFG.BOARD_H; gy++)
-    for (let gx = 0; gx < CFG.BOARD_W; gx++)
-      if (canPlace(gx, gy, 1, occ)) spots.push([gx, gy]);
-
-  if (!spots.length) return toast('빈 칸 없음');
-
-  const [gx, gy] = spots[(Math.random() * spots.length) | 0];
-  const deck = state.deck.length ? state.deck : KIND_KEYS;
-  const kind = deck[(Math.random() * deck.length) | 0];
+  let gx, gy;
+  if (atX !== undefined) {
+    if (!canPlace(atX, atY, 1, occ)) return toast('여기엔 못 놓음');
+    gx = atX; gy = atY;
+  } else {
+    const spots = [];
+    for (let y = firstOpenRow(); y < CFG.BOARD_H; y++)
+      for (let x = 0; x < CFG.BOARD_W; x++)
+        if (canPlace(x, y, 1, occ)) spots.push([x, y]);
+    if (!spots.length) return toast('빈 칸 없음');
+    [gx, gy] = spots[(Math.random() * spots.length) | 0];
+  }
 
   state.gold -= cost;
   state.summonedThisWave++;
@@ -419,8 +429,8 @@ function toast(text) { state.toast = { text, t: 1.6 }; }
 // ═════════════════════════════════════════════════════════════
 const BRANCH = {
   shredder: {
-    A:  { name: '분쇄파', desc: '주변 4마리에게도 스택 1' },
-    B:  { name: '천공', desc: '단일만, 스택당 -4, 상한 2배' },
+    A:  { name: '분쇄파', desc: '오라 범위 +50%' },
+    B:  { name: '천공', desc: '범위 -15%, 스택당 -4, 상한 2배' },
     A1: { name: '파열', desc: '스택 최대 시 폭발' },
     A2: { name: '전이', desc: '처치 시 스택 이관' },
     B1: { name: '파쇄', desc: '방어력 음수 허용 (-25)' },
@@ -435,8 +445,8 @@ const BRANCH = {
     B2: { name: '소각', desc: '최대HP 1%/초 순수딜' },
   },
   frost: {
-    A:  { name: '광역 냉각', desc: '3마리 동시 슬로우' },
-    B:  { name: '결빙', desc: '자체중첩 -55%, 5스택 시 빙결' },
+    A:  { name: '광역 냉각', desc: '오라 범위 +50%' },
+    B:  { name: '결빙', desc: '범위 -15%, 슬로우 -55%, 2.5초 머물면 빙결' },
     A1: { name: '한파', desc: '슬로우 대상 받는 딜 +12%' },
     A2: { name: '동상', desc: '슬로우 대상 초당 순수딜' },
     B1: { name: '연쇄 빙결', desc: '빙결 시 주변 2마리 0.5초' },
@@ -469,7 +479,7 @@ const BRANCH = {
   mint: {
     A:  { name: '이자', desc: '보유 골드 3% 추가 (상한 40)' },
     B:  { name: '징수', desc: '사거리 내 처치 시 +성급 G' },
-    A1: { name: '투자', desc: '빨리 보내기 보상 2배' },
+    A1: { name: '투자', desc: '웨이브 클리어 골드 +25%' },
     A2: { name: '환급', desc: '판매 100%, 합성 무료' },
     B1: { name: '현상금', desc: '정예 처치 시 +50G' },
     B2: { name: '약탈', desc: '징수 시 25% 확률 정수' },
@@ -508,7 +518,8 @@ function engraveBonus(t) {
 
 function towerRange(t) {
   let r = KINDS[t.kind].range;
-  if (t.kind === 'eroder') r *= t.b3 === 'A' ? 1.5 : t.b3 === 'B' ? 0.88 : 1;
+  if (t.kind === 'eroder' || t.kind === 'shredder' || t.kind === 'frost')
+    r *= t.b3 === 'A' ? 1.5 : t.b3 === 'B' ? 0.85 : 1;
   if (t.t7 === 'overclock') r *= 0.75;
   return r;
 }
@@ -622,13 +633,6 @@ function killEnemy(e, src) {
   }
 }
 
-function applySlow(e, amt, dur, src) {
-  const s = debuffScale(e, src);
-  if (s <= 0) return;
-  e.slowT = Math.max(e.slowT, dur);
-  e.slowStored = Math.max(e.slowStored || 0, amt * s);
-}
-
 function applyStacks(e, n, per, src) {
   const s = debuffScale(e, src);
   if (s <= 0) return;
@@ -652,6 +656,30 @@ function enemiesInRange(t) {
 
 function fireTower(t, dt) {
   const k = KINDS[t.kind];
+
+  // ── 오라 ──
+  // 디버프는 때려서 거는 게 아니라 타워 주변에 상시로 깔린다.
+  // 배치 위치가 곧 디버프 범위라서, 어디에 놓느냐가 성능이 된다.
+
+  if (t.kind === 'shredder') {
+    const per = t.b3 === 'B' ? 4 : 2;
+    const rate = 2.5;                   // 초당 쌓이는 스택
+    for (const e of enemiesInRange(t)) applyStacks(e, rate * dt, per, t);
+  }
+
+  if (t.kind === 'frost') {
+    const amt = t.b3 === 'B' ? 0.55 : 0.30;
+    for (const e of enemiesInRange(t)) {
+      const s = debuffScale(e, t);
+      if (s <= 0) continue;
+      e.slowNext = Math.max(e.slowNext, amt * s);
+      // 결빙은 오라 안에 머문 시간으로 쌓인다
+      if (t.b3 === 'B') {
+        e.frostStacks = (e.frostStacks || 0) + dt;
+        if (e.frostStacks >= 2.5) { e.frostStacks = -2.5; freeze(e, 1, t); }
+      }
+    }
+  }
 
   // 침식자와 조폐소 이자는 오라/지속형이라 쿨다운 밖에서 처리한다
   if (t.kind === 'eroder') {
@@ -688,19 +716,8 @@ function fireTower(t, dt) {
   const type = dmgType(t);
 
   if (t.kind === 'shredder') {
-    const main = targets[0];
-    applyStacks(main, 1, t.b3 === 'B' ? 4 : 2, t);
-    damage(main, dmg, type, t);
-    beam(t, main);
-    if (t.b3 === 'A') {
-      let n = 0;
-      for (const e of state.enemies) {
-        if (e === main || e.dead) continue;
-        if (Math.hypot(e.x - main.x, e.y - main.y) > 1.2) continue;
-        applyStacks(e, 1, 2, t);
-        if (++n >= 4) break;
-      }
-    }
+    damage(targets[0], dmg, type, t);
+    beam(t, targets[0]);
     return;
   }
 
@@ -712,20 +729,8 @@ function fireTower(t, dt) {
   }
 
   if (t.kind === 'frost') {
-    const list = t.b3 === 'A' ? targets.slice(0, 3) : targets.slice(0, 1);
-    for (const e of list) {
-      damage(e, dmg, type, t);
-      beam(t, e);
-      if (t.b3 === 'B') {
-        applySlow(e, 0.55, 3, t);
-        if (debuffScale(e, t) > 0) {
-          e.frostStacks = (e.frostStacks || 0) + 1;
-          if (e.frostStacks >= 5) { e.frostStacks = 0; freeze(e, 1, t); }
-        }
-      } else {
-        applySlow(e, 0.30, 3, t);
-      }
-    }
+    damage(targets[0], dmg, type, t);
+    beam(t, targets[0]);
     return;
   }
 
@@ -915,7 +920,7 @@ function updateCombat(dt) {
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const view = { w: 0, h: 0, cell: 0, ox: 0, oy: 0 };
-const HUD_TOP = 100, HUD_BOTTOM = 158;
+const HUD_TOP = 100, HUD_BOTTOM = 150;
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -953,42 +958,38 @@ let drag = null;      // {id, px, py, moved}
 
 function layoutButtons() {
   buttons.length = 0;
-  const pad = 12, gap = 10, h = 52;
-  const y = view.h - h - 14;
-  const w = (view.w - pad * 2 - gap) / 2;
+  const pad = 12, gap = 8;
+  const playing = state.phase !== 'over' && state.phase !== 'clear';
 
+  // 맨 아래: 빨리 보내기
+  const rushH = 44;
+  const rushY = view.h - rushH - 12;
   buttons.push({
-    x: pad, y, w, h,
-    label: () => `소환  ${summonCost()}G`,
-    enabled: () => state.gold >= summonCost() && state.phase !== 'over' && state.phase !== 'clear',
-    fn: summon,
-  });
-
-  buttons.push({
-    x: pad + w + gap, y, w, h,
-    label: () => state.phase === 'build'
-      ? `빨리 보내기  +${Math.ceil(state.timer) * CFG.RUSH_GOLD}G`
-      : '진행 중',
+    x: pad, y: rushY, w: view.w - pad * 2, h: rushH,
+    label: () => state.phase === 'build' ? '빨리 보내기' : '진행 중',
     enabled: () => state.phase === 'build',
     fn: rushWave,
+    quiet: true,
   });
 
-  // 타워를 고르면 그 위에 정보 패널과 판매/재선택이 뜬다
+  // 타워를 고르면 그 위에 판매/재선택이 뜬다
   const t = selectedTower();
   if (t) {
-    const py = y - 40;
+    const py = rushY - gap - 32;
     const bw = (view.w - pad * 2 - gap) / 2;
     buttons.push({
       x: pad, y: py, w: bw, h: 32,
       label: () => `판매  +${sellValue(t)}G`,
       enabled: () => true,
       fn: sellSelected,
+      quiet: true,
     });
     buttons.push({
       x: pad + bw + gap, y: py, w: bw, h: 32,
       label: () => `분기 재선택  정수 1`,
       enabled: () => state.essence > 0 && t.star >= 3,
       fn: rechoose,
+      quiet: true,
     });
   }
 }
@@ -1010,6 +1011,79 @@ function rechoose() {
 
 function hitButton(px, py) {
   return buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+}
+
+// ── 빈 칸 탭 → 소환 종류 고르기 ───────────────────────────────
+function pickerRects() {
+  if (!state.picker) return [];
+  const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
+  const w = Math.min(300, view.w - 40), h = 56, gap = 8;
+  const total = deck.length * h + (deck.length - 1) * gap;
+  const x = (view.w - w) / 2;
+
+  // 어디에 놓을지 보여주는 게 목적이라 대상 칸을 가리면 안 된다.
+  // 아래에 안 들어가면 칸 위로 올린다.
+  const cellTop = view.oy + state.picker.gy * view.cell;
+  const bottomLimit = view.h - HUD_BOTTOM - total - 6;
+  let y = cellTop + view.cell + 12;
+  if (y > bottomLimit) y = cellTop - 12 - total;
+  y = Math.max(HUD_TOP + 28, Math.min(y, bottomLimit));
+  return deck.map(k => {
+    const r = { k, x, y, w, h };
+    y += h + gap;
+    return r;
+  });
+}
+
+function drawPicker() {
+  if (!state.picker) return;
+  const rects = pickerRects();
+  if (!rects.length) return;
+
+  // 놓일 칸 강조
+  const p = cellToPx(state.picker.gx, state.picker.gy);
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 3;
+  roundRect(p.x + 1, p.y + 1, view.cell - 3, view.cell - 3, 6);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(13,17,23,0.78)';
+  ctx.fillRect(0, 0, view.w, view.h);
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 3;
+  roundRect(p.x + 1, p.y + 1, view.cell - 3, view.cell - 3, 6);
+  ctx.stroke();
+
+  const cost = summonCost();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '700 15px system-ui, sans-serif';
+  ctx.fillText(`여기에 소환   ${cost}G`, view.w / 2, rects[0].y - 28);
+
+  for (const r of rects) {
+    const k = KINDS[r.k];
+    const on = state.gold >= cost;
+    ctx.fillStyle = '#161b22';
+    ctx.strokeStyle = on ? k.color : '#30363d';
+    ctx.lineWidth = 1.5;
+    roundRect(r.x, r.y, r.w, r.h, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = on ? k.color : '#484f58';
+    ctx.font = '700 22px system-ui, sans-serif';
+    ctx.fillText(k.tag, r.x + 16, r.y + 16);
+    ctx.fillStyle = on ? '#e6edf3' : '#6e7681';
+    ctx.font = '700 15px system-ui, sans-serif';
+    ctx.fillText(k.name, r.x + 52, r.y + 10);
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText(k.blurb, r.x + 52, r.y + 32);
+    ctx.textAlign = 'center';
+  }
+  ctx.textAlign = 'left';
 }
 
 // ── 덱 선택 화면 ─────────────────────────────────────────────
@@ -1123,6 +1197,13 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
 
+  if (state.picker) {
+    const hit = pickerRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
+    if (hit) summon(hit.k, state.picker.gx, state.picker.gy);
+    state.picker = null;
+    return;
+  }
+
   if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
 
   const b = hitButton(px, py);
@@ -1131,7 +1212,12 @@ canvas.addEventListener('pointerdown', e => {
   const c = pxToCell(px, py);
   if (!c) { state.selected = null; return; }
   const id = occupancy().get(c.gx + ',' + c.gy);
-  if (id === undefined) { state.selected = null; return; }
+  if (id === undefined) {
+    state.selected = null;
+    // 빈 칸을 누르면 거기에 뭘 놓을지 고른다
+    if (canPlace(c.gx, c.gy, 1, occupancy())) state.picker = { gx: c.gx, gy: c.gy };
+    return;
+  }
   drag = { id, px, py, sx: px, sy: py, moved: false };
 });
 
@@ -1186,6 +1272,7 @@ function restart() {
   state.blasts.length = 0;
   state.selected = null;
   state.choice = null;
+  state.picker = null;
   state.deck = [];
 }
 
@@ -1194,8 +1281,8 @@ function restart() {
 // ═════════════════════════════════════════════════════════════
 function rushWave() {
   if (state.phase !== 'build') return;
-  const invest = state.towers.some(t => t.kind === 'mint' && t.b5 === 'A1') ? 2 : 1;
-  state.gold += Math.ceil(state.timer) * CFG.RUSH_GOLD * invest;
+  // 보상은 없다. 대기 시간을 건너뛰는 것 자체가 이득이고,
+  // 골드까지 주면 항상 누르는 게 정답이라 선택이 아니게 된다.
   state.timer = 0;
   startWave();
 }
@@ -1231,7 +1318,7 @@ function spawnEnemy(kind) {
     armorStacks: 0, armorPer: 2, armorT: 0,
     mresCut: 0, magicVuln: 0, arcResonance: 0, plagueT: 0, plagueCut: 0, plagueVuln: 0,
     healCut: 0, inDeepAura: false,
-    slowAmt: 0, slowNext: 0, slowT: 0, frostStacks: 0,
+    slowAmt: 0, slowNext: 0, frostStacks: 0,
     frozen: 0, stun: 0, pendingVuln: false, vulnT: 0, markT: 0,
   });
 }
@@ -1247,6 +1334,7 @@ function endWave() {
     if (t.kind !== 'mint') continue;
     state.gold += Math.round(CFG.MINT_BASE * STAR_MULT[t.star]);
     if (t.b3 === 'A') state.gold += Math.min(40 * t.star, Math.round(state.gold * 0.03));
+    if (t.b5 === 'A1') state.gold += Math.round(CFG.GOLD_BASE * Math.pow(CFG.GOLD_GROWTH, state.wave) * 0.25);
   }
 
   if (state.wave % 7 === 0) { state.essence++; toast('정수 +1'); }
@@ -1254,7 +1342,7 @@ function endWave() {
   // 행 개방. 5성이 2x2 를 먹기 때문에 보드가 안 늘어나면 6성 이상이 물리적으로
   // 불가능하다(시뮬에서 최고 성급이 5에 고정됐다).
   if (CFG.UNLOCK_AT.includes(state.wave) && state.openRows < CFG.BOARD_H) {
-    state.openRows++;
+    state.openRows = Math.min(CFG.BOARD_H, state.openRows + 2);
     toast('보드 확장');
   }
   if (state.wave >= CFG.WAVE_MAX) state.phase = 'clear';
@@ -1276,16 +1364,14 @@ function updateEnemies(dt) {
     e.markT -= dt;
     e.vulnT -= dt;
     e.stun -= dt;
-    e.slowT -= dt;
     if (e.frozen > 0) {
       e.frozen -= dt;
       if (e.frozen <= 0 && e.pendingVuln) { e.pendingVuln = false; e.vulnT = 3; }
     }
 
-    // 지속 슬로우(서리탑)와 오라 슬로우(쇠약)의 최댓값을 쓰고 상한을 건다.
-    // 합산이 아니라 최댓값인 이유: 합산하면 서리탑 도배가 곧 정답이 된다.
-    if (e.slowT <= 0) e.slowStored = 0;
-    e.slowAmt = Math.min(CFG.SLOW_CAP, Math.max(e.slowStored || 0, e.slowNext || 0));
+    // 슬로우는 전부 오라라서 매 프레임 다시 계산된다. 소스가 여러 개면
+    // 합산이 아니라 최댓값을 쓴다 — 합산하면 서리탑 도배가 곧 정답이 된다.
+    e.slowAmt = Math.min(CFG.SLOW_CAP, e.slowNext || 0);
 
     if (d.regen) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * d.regen * (1 - e.healCut) * dt);
 
@@ -1312,7 +1398,7 @@ function update(dt) {
   }
   for (const t of state.towers) if (t.flash > 0) t.flash -= dt;
 
-  if (state.phase === 'deck') return;
+  if (state.phase === 'deck' || state.picker) return;
 
   // 분기 선택 중에는 판을 멈춘다. 웨이브 도중에 5성이 나올 수 있는데
   // 그때 뒤에서 적이 계속 흐르면 고를 수가 없다.
@@ -1598,14 +1684,29 @@ function drawHud() {
 
   for (const b of buttons) {
     const on = b.enabled();
-    ctx.fillStyle = on ? '#238636' : '#21262d';
+    const k = b.kind ? KINDS[b.kind] : null;
+
+    ctx.fillStyle = on ? (b.quiet ? '#21262d' : '#1f2a20') : '#181d24';
+    ctx.strokeStyle = on ? (k ? k.color : b.quiet ? '#30363d' : '#238636') : '#262c35';
+    ctx.lineWidth = 1.5;
     roundRect(b.x, b.y, b.w, b.h, 10);
     ctx.fill();
-    ctx.fillStyle = on ? '#fff' : '#6e7681';
-    ctx.font = '600 15px system-ui, sans-serif';
+    ctx.stroke();
+
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(b.label(), b.x + b.w / 2, b.y + b.h / 2);
+    if (k) {
+      ctx.fillStyle = on ? k.color : '#484f58';
+      ctx.font = '700 20px system-ui, sans-serif';
+      ctx.fillText(k.tag, b.x + b.w / 2, b.y + 20);
+      ctx.fillStyle = on ? '#8b949e' : '#484f58';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(b.sub(), b.x + b.w / 2, b.y + b.h - 15);
+    } else {
+      ctx.fillStyle = on ? '#c9d1d9' : '#6e7681';
+      ctx.font = '600 14px system-ui, sans-serif';
+      ctx.fillText(b.label(), b.x + b.w / 2, b.y + b.h / 2);
+    }
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
   }
@@ -1787,6 +1888,7 @@ function render() {
   drawDrag();
   drawHud();
   drawInfo();
+  drawPicker();
   drawOverlay();
   drawChoice();
 }
