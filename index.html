@@ -178,7 +178,7 @@ const KINDS = {
   frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, group: 'aura', role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
   mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 0.8, cd: 1.6, range: 3.2, group: 'attack', role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
   marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, group: 'attack', role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
-  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.6, cd: 2.5, range: 4.0, group: 'attack', role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
+  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.25, cd: 2.5, range: 4.0, group: 'attack', role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
   mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, group: 'econ', role: '경제', blurb: '공격 안 함. 골드 수입만' },
 };
 const KIND_KEYS = Object.keys(KINDS);
@@ -851,9 +851,13 @@ function fireTower(t, dt) {
       const proj = vx * dirX + vy * dirY;
       if (proj < 0 || proj > r) continue;
       const perp = Math.abs(vx * dirY - vy * dirX);
-      if (perp > 0.55) continue;
+      if (perp > BEAM_HALF) continue;
       hit.push(e);
     }
+    // 발사 판정은 사거리 원이 아니라 이 직선이다. 원 안에 있다는 이유로 쏘면
+    // 선에서 벗어난 적 때문에 허공에 계속 쏜다. 충전은 유지한 채 기다린다.
+    if (!hit.length) { t.cd = 0; t.flash = 0; return; }
+
     const limit = t.b3 === 'B' ? Infinity : 5;
     for (const e of hit.slice(0, limit)) {
       damage(e, dmg, type, t);
@@ -901,21 +905,38 @@ function beam(t, e) {
   state.beams.push({ x1: c.x, y1: c.y, x2: e.x + 0.5, y2: e.y + 0.5, t: 0.09, color: KINDS[t.kind].color });
 }
 
-// 마력로는 회전하지 않는다. 배치 시점에 경로를 가장 길게 훑는 각으로 고정한다.
+// 마력로는 회전하지 않는다. 배치 시점에 각도를 고정한다.
+//
+// 점수는 "선이 지나는 경로 칸 수"가 아니라 "빔 안에 들어오는 경로 길이"다.
+// 칸 수로 세면 통로를 비스듬히 가로지르는 각도가 이기는데, 그러면 칸은 많이
+// 지나도 적이 빔 안에 머무는 시간은 짧다. 재야 하는 건 교전 시간이다.
+// 빔 반폭. 1 보다 커야 통로 옆 칸에서 통로와 나란히 쏠 수 있다.
+// 0.55 였을 때는 평행 사격이 전부 빗나가서 비스듬히 가로지르는 각도만 나왔다.
+const BEAM_HALF = 1.05;
+
 function aimArc(t) {
   const c = towerCenter(t);
   const r = towerRange(t);
+  const STEP = 0.25;
   let best = -Math.PI / 2, bestScore = -1;
-  for (let a = 0; a < Math.PI * 2; a += Math.PI / 36) {
+
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 48) {
     const dx = Math.cos(a), dy = Math.sin(a);
     let score = 0;
-    for (let d = 0.25; d <= r; d += 0.25) {
-      const px = c.x + dx * d, py = c.y + dy * d;
-      if (isPath(Math.floor(px), Math.floor(py))) score++;
+    for (let li = 0; li < lanes.length; li++) {
+      for (let d = 0; d <= lanes[li].len; d += STEP) {
+        const p = posAt(d, li);
+        const vx = p.x + 0.5 - c.x, vy = p.y + 0.5 - c.y;
+        const proj = vx * dx + vy * dy;
+        if (proj < 0 || proj > r) continue;
+        if (Math.abs(vx * dy - vy * dx) > BEAM_HALF) continue;
+        score++;
+      }
     }
     if (score > bestScore) { bestScore = score; best = a; }
   }
   t.angle = best;
+  t.aimScore = bestScore * STEP;   // 빔이 무는 경로 길이(칸)
 }
 
 function updateShells(dt) {
@@ -1789,6 +1810,32 @@ function drawRange(t, alpha) {
 
   ctx.save();
   ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+
+  // 마력로는 원이 아니라 고정된 직선으로 쏜다. 원을 그리면 그 안 전체를
+  // 때리는 줄 안다.
+  if (t.kind === 'arc') {
+    const ang = t.angle === undefined ? -Math.PI / 2 : t.angle;
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    ctx.strokeStyle = k.color;
+    ctx.lineWidth = cell * 1.1;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = (alpha === undefined ? 1 : alpha) * 0.22;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + dx * r, cy + dy * r);
+    ctx.stroke();
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + dx * r, cy + dy * r);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    return;
+  }
+
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fillStyle = k.color + (aura ? '2e' : '14');
