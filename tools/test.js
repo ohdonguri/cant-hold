@@ -574,7 +574,8 @@ function ok(name, cond, detail) {
 {
   console.log('타워 대등성 (3종 덱, 분기 A/A1)');
   const { measure, K, NAME } = require('./parity.js');
-  const { contrib, spread } = measure('A', 'A1', 4);
+  // 시행이 적으면 파쇄자가 임계 근처에서 오르내려 테스트가 들쭉날쭉해진다
+  const { contrib, spread } = measure('A', 'A1', 7);
   ok('기여도 폭 6 미만', spread < 6,
     spread.toFixed(2) + '  ' + K.map(k => NAME[k] + (contrib[k] >= 0 ? '+' : '') + contrib[k].toFixed(1)).join(' '));
   const outlier = K.filter(k => Math.abs(contrib[k]) > 3.5).map(k => NAME[k]);
