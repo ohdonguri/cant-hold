@@ -532,17 +532,17 @@ function ok(name, cond, detail) {
   ok('타워·적 전부 도트가 있다', missing.length === 0, missing.join(',') || '없음');
 
   const bad = Object.entries(g.SPR).filter(([, rows]) =>
-    rows.length !== 8 || rows.some(r => r.length !== 8)).map(([k]) => k);
-  ok('전부 8x8 이다', bad.length === 0, bad.join(',') || '없음');
+    rows.length !== 16 || rows.some(r => r.length !== 16)).map(([k]) => k);
+  ok('전부 16x16 이다', bad.length === 0, bad.join(',') || '없음');
 
   const chars = new Set();
   for (const rows of Object.values(g.SPR)) for (const r of rows) for (const c of r) chars.add(c);
-  const allowed = new Set(['.', ' ', '1', '2', '3', '4']);
+  const allowed = new Set(['.', '0', '1', '2', '3', '4']);
   const odd = [...chars].filter(c => !allowed.has(c));
   ok('명암 문자만 쓴다', odd.length === 0, odd.join(',') || '없음');
 
   // 실루엣이 서로 달라야 색 없이도 구분된다
-  const sil = k => g.SPR[k].map(r => r.replace(/[1234]/g, '#').replace(/ /g, '.')).join('/');
+  const sil = k => g.SPR[k].map(r => r.replace(/[01234]/g, '#')).join('/');
   const seen = new Map();
   const dupes = [];
   for (const k of Object.keys(g.SPR)) {
