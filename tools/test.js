@@ -202,6 +202,50 @@ function ok(name, cond, detail) {
   ok('덱 밖 타워는 안 나옴', outside.length === 0, outside.join(',') || '없음');
 }
 
+// ── 빈 칸 소환 (2단계) ────────────────────────────────────────
+{
+  console.log('빈 칸 소환');
+  const g = load();
+  const { state } = g;
+  g.pickStage(0);
+  ['shredder', 'marksman', 'arc'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.gold = 500;
+
+  // 빈 칸을 골라 피커를 연다
+  const occ = g.occupancy();
+  let spot = null;
+  for (let y = g.firstOpenRow(); y < g.CFG.BOARD_H && !spot; y++)
+    for (let x = 0; x < g.CFG.BOARD_W && !spot; x++)
+      if (g.canPlace(x, y, 1, occ)) spot = { gx: x, gy: y };
+
+  state.picker = { ...spot, kind: null };
+  ok('1단계엔 배치 버튼이 없다', g.pickerLayout().actions.length === 0);
+  ok('카드가 덱 수만큼', g.pickerRects().length === g.CFG.DECK_SIZE);
+
+  // 카드 하나를 고른다
+  const card = g.pickerRects()[0];
+  const hit = g.pickerHit(card.x + 5, card.y + 5);
+  ok('카드가 눌린다', hit && hit.k === card.k, hit ? String(hit.k) : 'null');
+  state.picker.kind = card.k;
+  ok('2단계엔 배치/취소가 뜬다', g.pickerLayout().actions.length === 2);
+  ok('고르기만 해선 안 지어진다', state.towers.length === 0, String(state.towers.length));
+
+  // 취소
+  const cancel = g.pickerLayout().actions.find(a => a.act === 'cancel');
+  ok('취소 버튼이 잡힌다', g.pickerHit(cancel.x + 5, cancel.y + 5).act === 'cancel');
+
+  // 배치
+  const place = g.pickerLayout().actions.find(a => a.act === 'place');
+  ok('배치 버튼이 잡힌다', g.pickerHit(place.x + 5, place.y + 5).act === 'place');
+  const before = state.gold;
+  g.summon(state.picker.kind, spot.gx, spot.gy);
+  ok('배치하면 그 칸에 생긴다',
+    state.towers.length === 1 && state.towers[0].gx === spot.gx && state.towers[0].gy === spot.gy,
+    state.towers.length ? state.towers[0].gx + ',' + state.towers[0].gy : 'none');
+  ok('골드가 나간다', state.gold < before, before + ' -> ' + state.gold);
+}
+
 // ── 밸런스 ────────────────────────────────────────────────────
 // 스테이지는 깨야 다음이 열리므로 "그리디가 절대 못 깬다"가 목표가 아니다.
 // 1스테이지는 대충 해도 깨지고, 뒤로 갈수록 안 깨져야 한다.
@@ -284,7 +328,8 @@ function ok(name, cond, detail) {
     ok('  분기가 저장됨', t.b3 === 'B', String(t.b3));
     ok('  모달이 닫힘', state.choice === null);
   });
-  safe('소환 피커', () => { state.picker = { gx: 2, gy: 8 }; });
+  safe('소환 피커 1단계', () => { state.picker = { gx: 2, gy: 8, kind: null }; });
+  safe('소환 피커 2단계', () => { state.picker.kind = state.deck[0]; });
   safe('게임 오버', () => { state.picker = null; state.phase = 'over'; });
   safe('클리어', () => { state.phase = 'clear'; });
   safe('재시작', () => {

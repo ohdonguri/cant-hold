@@ -1139,55 +1139,74 @@ function pickStage(i) {
   state.deckPick = [];
 }
 
-// ── 빈 칸 탭 → 소환 종류 고르기 ───────────────────────────────
-function pickerRects() {
-  if (!state.picker) return [];
+// ── 빈 칸 탭 → 소환 ───────────────────────────────────────────
+// 두 단계로 묻는다.
+//   1단계  뭘 세울지 고른다 (사거리는 아직 안 그린다)
+//   2단계  고른 것의 사거리만 보여주고 배치할지 다시 묻는다
+// 후보 셋의 범위를 한꺼번에 겹쳐 그리면 어느 원이 누구 건지 못 읽는다.
+const PICKER_ACT_H = 44;
+
+function pickerLayout() {
+  if (!state.picker) return null;
   const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
   const w = Math.min(300, view.w - 40), h = 56, gap = 8;
-  const total = deck.length * h + (deck.length - 1) * gap;
+  const actH = state.picker.kind ? PICKER_ACT_H + 10 : 0;
+  const total = deck.length * h + (deck.length - 1) * gap + actH;
   const x = (view.w - w) / 2;
 
-  // 어디에 놓을지 보여주는 게 목적이라 대상 칸을 가리면 안 된다.
-  // 아래에 안 들어가면 칸 위로 올린다.
+  // 대상 칸을 가리면 안 된다. 아래에 안 들어가면 칸 위로 올린다.
   const cellTop = view.oy + state.picker.gy * view.cell;
   const bottomLimit = view.h - HUD_BOTTOM - total - 6;
   let y = cellTop + view.cell + 12;
   if (y > bottomLimit) y = cellTop - 12 - total;
   y = Math.max(HUD_TOP + 28, Math.min(y, bottomLimit));
-  return deck.map(k => {
+
+  const cards = deck.map(k => {
     const r = { k, x, y, w, h };
     y += h + gap;
     return r;
   });
+
+  let actions = [];
+  if (state.picker.kind) {
+    const bw = (w - gap) / 2;
+    actions = [
+      { act: 'cancel', x, y: y + 2, w: bw, h: PICKER_ACT_H },
+      { act: 'place', x: x + bw + gap, y: y + 2, w: bw, h: PICKER_ACT_H },
+    ];
+  }
+  return { cards, actions };
+}
+
+function pickerRects() { const L = pickerLayout(); return L ? L.cards : []; }
+
+function pickerHit(px, py) {
+  const L = pickerLayout();
+  if (!L) return null;
+  const inside = r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  return L.actions.find(inside) || L.cards.find(inside) || null;
 }
 
 function drawPicker() {
   if (!state.picker) return;
-  const rects = pickerRects();
-  if (!rects.length) return;
-
-  // 놓일 칸 강조
-  const p = cellToPx(state.picker.gx, state.picker.gy);
-  ctx.strokeStyle = '#7ee787';
-  ctx.lineWidth = 3;
-  roundRect(p.x + 1, p.y + 1, view.cell - 3, view.cell - 3, 6);
-  ctx.stroke();
+  const L = pickerLayout();
+  if (!L) return;
+  const { gx, gy, kind } = state.picker;
 
   ctx.fillStyle = 'rgba(13,17,23,0.78)';
   ctx.fillRect(0, 0, view.w, view.h);
 
-  // 놓기 전에 어디까지 닿는지 보여준다. 종류마다 사거리가 다르므로
-  // 후보 셋을 한꺼번에 겹쳐 그린다.
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
-  ctx.clip();
-  const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
-  for (const k of deck) {
-    drawRange({ gx: state.picker.gx, gy: state.picker.gy, kind: k, star: 1, b3: null, b5: null, t7: null }, 0.75);
+  // 고른 것이 있을 때만, 그것 하나의 범위를 그린다
+  if (kind) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
+    ctx.clip();
+    drawRange({ gx, gy, kind, star: 1, b3: null, b5: null, t7: null });
+    ctx.restore();
   }
-  ctx.restore();
 
+  const p = cellToPx(gx, gy);
   ctx.strokeStyle = '#7ee787';
   ctx.lineWidth = 3;
   roundRect(p.x + 1, p.y + 1, view.cell - 3, view.cell - 3, 6);
@@ -1196,16 +1215,24 @@ function drawPicker() {
   const cost = summonCost();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = '#e6edf3';
+  // 제목이 대상 칸 위에 겹칠 수 있어서 뒤에 판을 깐다
+  const title = kind ? '여기에 놓을까?' : `여기에 소환   ${cost}G`;
   ctx.font = '700 15px system-ui, sans-serif';
-  ctx.fillText(`여기에 소환   ${cost}G`, view.w / 2, rects[0].y - 28);
+  const tw = ctx.measureText(title).width + 24;
+  ctx.fillStyle = 'rgba(13,17,23,0.9)';
+  roundRect(view.w / 2 - tw / 2, L.cards[0].y - 32, tw, 24, 12);
+  ctx.fill();
+  ctx.fillStyle = '#e6edf3';
+  ctx.fillText(title, view.w / 2, L.cards[0].y - 28);
 
-  for (const r of rects) {
+  for (const r of L.cards) {
     const k = KINDS[r.k];
     const on = state.gold >= cost;
-    ctx.fillStyle = '#161b22';
-    ctx.strokeStyle = on ? k.color : '#30363d';
-    ctx.lineWidth = 1.5;
+    const sel = kind === r.k;
+    ctx.globalAlpha = kind && !sel ? 0.4 : 1;
+    ctx.fillStyle = sel ? '#1b2b1f' : '#161b22';
+    ctx.strokeStyle = sel ? '#7ee787' : (on ? k.color : '#30363d');
+    ctx.lineWidth = sel ? 2.5 : 1.5;
     roundRect(r.x, r.y, r.w, r.h, 10);
     ctx.fill();
     ctx.stroke();
@@ -1227,7 +1254,24 @@ function drawPicker() {
     ctx.fillText(AURA_KINDS.has(r.k) ? '오라' : '사격', r.x + r.w - 14, r.y + 12);
     ctx.fillStyle = '#6e7681';
     ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 30);
+    ctx.globalAlpha = 1;
     ctx.textAlign = 'center';
+  }
+
+  for (const a of L.actions) {
+    const place = a.act === 'place';
+    const on = !place || state.gold >= cost;
+    ctx.fillStyle = place ? (on ? '#238636' : '#21262d') : '#21262d';
+    ctx.strokeStyle = place ? (on ? '#3fb950' : '#30363d') : '#30363d';
+    ctx.lineWidth = 1.5;
+    roundRect(a.x, a.y, a.w, a.h, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = place ? (on ? '#fff' : '#6e7681') : '#c9d1d9';
+    ctx.font = '600 14px system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(place ? `배치  ${cost}G` : '취소', a.x + a.w / 2, a.y + a.h / 2);
+    ctx.textBaseline = 'top';
   }
   ctx.textAlign = 'left';
 }
@@ -1350,8 +1394,10 @@ canvas.addEventListener('pointerdown', e => {
   }
 
   if (state.picker) {
-    const hit = pickerRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
-    if (hit) summon(hit.k, state.picker.gx, state.picker.gy);
+    const hit = pickerHit(px, py);
+    if (!hit) { state.picker = null; return; }          // 바깥을 누르면 닫는다
+    if (hit.k) { state.picker.kind = hit.k; return; }   // 고르면 사거리부터 보여준다
+    if (hit.act === 'place') summon(state.picker.kind, state.picker.gx, state.picker.gy);
     state.picker = null;
     return;
   }
@@ -1367,7 +1413,7 @@ canvas.addEventListener('pointerdown', e => {
   if (id === undefined) {
     state.selected = null;
     // 빈 칸을 누르면 거기에 뭘 놓을지 고른다
-    if (canPlace(c.gx, c.gy, 1, occupancy())) state.picker = { gx: c.gx, gy: c.gy };
+    if (canPlace(c.gx, c.gy, 1, occupancy())) state.picker = { gx: c.gx, gy: c.gy, kind: null };
     return;
   }
   drag = { id, px, py, sx: px, sy: py, moved: false };

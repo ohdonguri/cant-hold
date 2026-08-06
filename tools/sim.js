@@ -36,7 +36,7 @@ const EXPOSE = [
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
   'render', 'restart', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
-  'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect',
+  'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'pickerRects', 'pickerHit', 'pickerLayout',
   'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
 ];
 
