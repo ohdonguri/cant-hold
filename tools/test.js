@@ -132,24 +132,66 @@ function ok(name, cond, detail) {
   ok('조폐소 5성은 1칸 유지', mint5 && g.towerFootprint(mint5) === 1);
 }
 
+// ── 덱 선택 ───────────────────────────────────────────────────
+{
+  console.log('덱 선택');
+  const g = load();
+  const { state, CFG } = g;
+  ok('덱 선택 화면에서 시작', state.phase === 'deck');
+  ok('카드가 타워 종류 수만큼', g.deckCardRects().length === g.KIND_KEYS.length);
+
+  g.toggleDeckPick('frost');
+  g.toggleDeckPick('arc');
+  g.startRun();
+  ok('덜 고르면 시작 안 됨', state.phase === 'deck', state.phase);
+
+  g.toggleDeckPick('mint');
+  g.toggleDeckPick('mortar');
+  ok('정원 넘게 못 고름', state.deckPick.length === CFG.DECK_SIZE, String(state.deckPick.length));
+
+  g.toggleDeckPick('frost');
+  ok('다시 누르면 해제', !state.deckPick.includes('frost'), state.deckPick.join(','));
+
+  g.toggleDeckPick('shredder');
+  g.startRun();
+  ok('정원 채우면 시작됨', state.phase === 'build');
+  ok('고른 것만 덱에 들어감', state.deck.length === CFG.DECK_SIZE && state.deck.every(k => state.deckPick.includes(k)),
+    state.deck.join(','));
+
+  g.state.gold = 4000;
+  for (let i = 0; i < 25; i++) g.summon();
+  const outside = state.towers.filter(t => !state.deck.includes(t.kind)).map(t => t.kind);
+  ok('덱 밖 타워는 안 나옴', outside.length === 0, outside.join(',') || '없음');
+}
+
 // ── 밸런스 ────────────────────────────────────────────────────
 {
-  console.log('밸런스 (그리디 12회)');
-  const w = [], st = [];
-  let clears = 0;
-  for (let i = 0; i < 12; i++) {
-    const r = greedy(load());
-    if (r.result === 'clear') clears++;
-    w.push(r.result === 'clear' ? 30 : r.wave);
-    st.push(r.maxStar);
-  }
-  w.sort((x, y) => x - y);
-  const med = w[6];
-  ok('그리디 사망 중앙값 18~25', med >= 18 && med <= 25, 'w' + med + '  [' + w.join(',') + ']');
-  ok('그리디는 클리어 못 함', clears === 0, clears + '회');
-  const five = st.filter(s => s >= 5).length;
-  ok('5성 도달률 90% 이상', five / st.length >= 0.9, five + '/' + st.length + '  [' + st.join(',') + ']');
-  ok('HP/데미지에 NaN 없음', w.every(v => Number.isFinite(v)));
+  console.log('밸런스 (그리디)');
+  const run = (deck, n) => {
+    const w = [], st = [];
+    let clears = 0;
+    for (let i = 0; i < n; i++) {
+      const r = greedy(load(), { deck });
+      if (r.result === 'clear') clears++;
+      w.push(r.result === 'clear' ? 30 : r.wave);
+      st.push(r.maxStar);
+    }
+    w.sort((x, y) => x - y);
+    return { med: w[n >> 1], w, st, clears };
+  };
+
+  // 시뮬 기준 상위권 덱. 플레이어는 좋은 덱을 고르므로 여기가 난이도 기준선이다.
+  const best = run(['eroder', 'arc', 'mint'], 10);
+  ok('최고 덱 중앙값 20~27', best.med >= 20 && best.med <= 27, 'w' + best.med + '  [' + best.w.join(',') + ']');
+  ok('최고 덱으로도 클리어 못 함', best.clears === 0, best.clears + '회');
+  const five = best.st.filter(s => s >= 5).length;
+  ok('5성 도달률 90% 이상', five / best.st.length >= 0.9, five + '/' + best.st.length);
+
+  // 덱이 결과를 실제로 바꾸는지. 이 차이가 작으면 덱 선택은 가짜 결정이다.
+  const worst = run(['shredder', 'marksman', 'mint'], 10);
+  ok('덱 차이가 5웨이브 이상', best.med - worst.med >= 5,
+    '최고 w' + best.med + ' vs 최저 w' + worst.med + ' = ' + (best.med - worst.med));
+  ok('HP/데미지에 NaN 없음', best.w.concat(worst.w).every(v => Number.isFinite(v)));
 }
 
 // ── 타워 대등성 ───────────────────────────────────────────────
@@ -176,7 +218,9 @@ function ok(name, cond, detail) {
     catch (err) { ok(name, false, err.message); }
   };
 
-  safe('빈 보드', () => {});
+  safe('덱 선택 화면', () => {});
+  safe('덱 일부 고른 상태', () => { g.toggleDeckPick('frost'); g.toggleDeckPick('mortar'); });
+  safe('빈 보드', () => { g.toggleDeckPick('marksman'); g.startRun(); });
   safe('타워 있음', () => { state.gold = 9999; for (let i = 0; i < 6; i++) g.summon(); });
   safe('타워 선택됨', () => { state.selected = state.towers[0].id; });
   safe('웨이브 진행 중', () => {
@@ -202,7 +246,7 @@ function ok(name, cond, detail) {
   safe('재시작', () => {
     g.restart();
     ok('  재시작이 판을 비움', state.towers.length === 0 && state.wave === 0 && state.life > 0);
-    ok('  재시작이 덱을 다시 뽑음', state.deck.length === g.CFG.DECK_SIZE);
+    ok('  재시작하면 덱 선택으로 돌아감', state.phase === 'deck' && state.deckPick.length === 0);
   });
 }
 

@@ -36,6 +36,7 @@ const EXPOSE = [
   'applySlow', 'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
   'render', 'restart', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
+  'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect',
 ];
 
 function load(overrides) {
@@ -60,6 +61,15 @@ function greedy(g, opts = {}) {
   const { state, CFG } = g;
   const branch3 = opts.branch3 || 'A';
   const branch5 = opts.branch5 || 'A1';
+
+  // 덱 선택 화면을 건너뛴다. opts.deck 이나 미리 세팅된 state.deck 을 쓰고,
+  // 둘 다 없으면 무작위로 뽑는다.
+  if (state.phase === 'deck') {
+    const deck = opts.deck || (state.deck.length ? state.deck : null);
+    if (deck) state.deckPick = deck.slice(0, CFG.DECK_SIZE);
+    else { g.rollDeck(); state.deckPick = state.deck.slice(); }
+    g.startRun();
+  }
 
   function resolveChoice() {
     while (state.choice) {
