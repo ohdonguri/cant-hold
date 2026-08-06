@@ -110,6 +110,76 @@ const KINDS = {
 const KIND_KEYS = Object.keys(KINDS);
 
 // ═════════════════════════════════════════════════════════════
+// 적. hp 는 waveHp() 에 곱해지는 배수, speed 는 BASE_SPEED 배수.
+// leak 은 관문을 통과했을 때 깎이는 수치.
+// ═════════════════════════════════════════════════════════════
+const BASE_SPEED = 0.85;   // 칸/초
+
+const ENEMY = {
+  grunt:   { name: '보병', tag: '병', hp: 1.0,  armor: 5,  mres: 0,    speed: 1.0,  r: 0.26, leak: 1, color: '#8b949e' },
+  armored: { name: '중갑', tag: '중', hp: 0.6,  armor: 40, mres: 0,    speed: 0.85, r: 0.28, leak: 2, color: '#a8b3c4' },
+  warded:  { name: '마갑', tag: '마', hp: 0.9,  armor: 5,  mres: 0.45, speed: 1.0,  r: 0.26, leak: 2, color: '#a371f7' },
+  swift:   { name: '질주', tag: '질', hp: 0.5,  armor: 0,  mres: 0,    speed: 2.5,  r: 0.20, leak: 1, color: '#7ee787' },
+  regen:   { name: '재생', tag: '재', hp: 1.1,  armor: 8,  mres: 0.1,  speed: 0.9,  r: 0.26, leak: 2, color: '#3fb950', regen: 0.03 },
+  immune:  { name: '면역', tag: '면', hp: 1.3,  armor: 12, mres: 0.15, speed: 1.0,  r: 0.28, leak: 2, color: '#f0883e', immune: true },
+  swarm:   { name: '군집', tag: '군', hp: 0.18, armor: 0,  mres: 0,    speed: 1.2,  r: 0.15, leak: 1, color: '#58a6ff' },
+  elite:   { name: '정예', hp: 8.0, tag: '정',  armor: 25, mres: 0.25, speed: 0.7,  r: 0.42, leak: 5, color: '#f85149', elite: true },
+};
+
+// 스폰 간격(초). 군집은 촘촘히, 정예는 띄엄띄엄.
+const SPAWN_GAP = { swarm: 0.28, swift: 0.45, elite: 1.6 };
+const SPAWN_GAP_DEFAULT = 0.75;
+
+// 웨이브 편성. 커버리지 매트릭스(DESIGN.md 5장)에 맞춰 손으로 짠 표다.
+// 면역몹이 서포트 몰빵을 벌하는 역할이라 중반부터 꾸준히 섞는다.
+const WAVES = [
+  [['grunt', 6]],
+  [['grunt', 9]],
+  [['swarm', 14]],
+  [['grunt', 8], ['armored', 2]],
+  [['armored', 5]],
+  [['grunt', 10], ['swift', 3]],
+  [['swift', 8]],
+  [['warded', 5], ['grunt', 6]],
+  [['swarm', 18], ['grunt', 4]],
+  [['elite', 1], ['grunt', 8]],
+  [['armored', 6], ['warded', 4]],
+  [['regen', 6]],
+  [['swift', 10], ['swarm', 14]],
+  [['immune', 4], ['grunt', 8]],
+  [['warded', 8], ['regen', 4]],
+  [['armored', 8], ['swift', 6]],
+  [['swarm', 24], ['immune', 3]],
+  [['regen', 8], ['warded', 6]],
+  [['immune', 6], ['armored', 6]],
+  [['elite', 2], ['immune', 4]],
+  [['swift', 14], ['swarm', 20]],
+  [['armored', 10], ['regen', 6]],
+  [['warded', 10], ['immune', 5]],
+  [['swarm', 30], ['elite', 1]],
+  [['immune', 8], ['regen', 8]],
+  [['armored', 12], ['warded', 8]],
+  [['swift', 16], ['immune', 6]],
+  [['elite', 2], ['swarm', 24]],
+  [['immune', 10], ['armored', 10], ['warded', 8]],
+  [['elite', 3], ['immune', 8], ['regen', 6]],
+];
+
+// 진행 거리(칸)를 격자 좌표로 환산.
+function posAt(dist) {
+  let d = Math.max(0, dist);
+  for (let i = 0; i < PATH_SEG.length; i++) {
+    if (d <= PATH_SEG[i] || i === PATH_SEG.length - 1) {
+      const a = PATH[i], b = PATH[i + 1];
+      const t = PATH_SEG[i] === 0 ? 0 : Math.min(1, d / PATH_SEG[i]);
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    d -= PATH_SEG[i];
+  }
+  return PATH[PATH.length - 1];
+}
+
+// ═════════════════════════════════════════════════════════════
 // 상태
 // ═════════════════════════════════════════════════════════════
 const state = {
@@ -123,11 +193,14 @@ const state = {
   summonedThisWave: 0,
   towers: [],
   enemies: [],
+  spawnQueue: [],      // [{kind, at}] — at 은 웨이브 시작 기준 초
+  waveT: 0,            // 웨이브 경과 시간
   selected: null,      // 선택된 타워 id
   toast: null,         // {text, t}
 };
 
 let nextTowerId = 1;
+let nextEnemyId = 1;
 
 // 소환 비용. 웨이브가 넘어갈 때 누적분이 30% 감쇠한다.
 function summonCost() {
@@ -206,7 +279,7 @@ function toast(text) { state.toast = { text, t: 1.6 }; }
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const view = { w: 0, h: 0, cell: 0, ox: 0, oy: 0 };
-const HUD_TOP = 92, HUD_BOTTOM = 112;
+const HUD_TOP = 100, HUD_BOTTOM = 112;
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -291,18 +364,70 @@ function rushWave() {
   startWave();
 }
 
+// 웨이브 편성을 스폰 예약 목록으로 편다.
+function buildSpawnQueue(wave) {
+  const groups = WAVES[wave - 1] || WAVES[WAVES.length - 1];
+  const q = [];
+  let t = 0;
+  for (const [kind, count] of groups) {
+    const gap = SPAWN_GAP[kind] || SPAWN_GAP_DEFAULT;
+    for (let i = 0; i < count; i++) { q.push({ kind, at: t }); t += gap; }
+    t += 1.2;   // 그룹 사이 숨돌릴 틈
+  }
+  return q;
+}
+
 function startWave() {
   state.wave++;
   state.phase = 'wave';
+  state.waveT = 0;
   state.summonedThisWave = Math.floor(state.summonedThisWave * 0.7);
-  // 적 스폰은 패스 2에서.
-  endWave();
+  state.spawnQueue = buildSpawnQueue(state.wave);
+}
+
+function spawnEnemy(kind) {
+  const d = ENEMY[kind];
+  const hp = d.hp * waveHp(state.wave);
+  state.enemies.push({
+    id: nextEnemyId++, kind, hp, maxHp: hp,
+    armor: d.armor, mres: d.mres,
+    dist: 0, x: PATH[0].x, y: PATH[0].y,
+    hitFlash: 0,
+  });
 }
 
 function endWave() {
   state.phase = 'build';
   state.timer = CFG.WAVE_GAP;
+  state.gold += 20 + state.wave * 4;
+  if (state.wave % 7 === 0) { state.essence++; toast('정수 +1'); }
   if (state.wave >= CFG.WAVE_MAX) state.phase = 'clear';
+}
+
+function enemySpeed(e) {
+  return BASE_SPEED * ENEMY[e.kind].speed;
+}
+
+function updateEnemies(dt) {
+  const survivors = [];
+  for (const e of state.enemies) {
+    const d = ENEMY[e.kind];
+    if (e.hitFlash > 0) e.hitFlash -= dt;
+
+    if (d.regen) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * d.regen * dt);
+
+    e.dist += enemySpeed(e) * dt;
+    if (e.dist >= PATH_LEN) {
+      state.life -= d.leak;
+      continue;
+    }
+    const p = posAt(e.dist);
+    e.x = p.x; e.y = p.y;
+    survivors.push(e);
+  }
+  state.enemies = survivors;
+
+  if (state.life <= 0) { state.life = 0; state.phase = 'over'; }
 }
 
 function update(dt) {
@@ -315,7 +440,19 @@ function update(dt) {
   if (state.phase === 'build') {
     state.timer -= dt;
     if (state.timer <= 0) startWave();
+    return;
   }
+
+  if (state.phase !== 'wave') return;
+
+  state.waveT += dt;
+  while (state.spawnQueue.length && state.spawnQueue[0].at <= state.waveT) {
+    spawnEnemy(state.spawnQueue.shift().kind);
+  }
+
+  updateEnemies(dt);
+
+  if (state.phase === 'wave' && !state.spawnQueue.length && !state.enemies.length) endWave();
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -397,35 +534,109 @@ function drawRange(t) {
   ctx.stroke();
 }
 
+function drawEnemies() {
+  const { cell, ox, oy } = view;
+  for (const e of state.enemies) {
+    const d = ENEMY[e.kind];
+    const cx = ox + (e.x + 0.5) * cell;
+    const cy = oy + (e.y + 0.5) * cell;
+    const r = d.r * cell;
+
+    ctx.fillStyle = e.hitFlash > 0 ? '#fff' : d.color;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (d.immune) {                    // 면역몹은 테두리로 구분
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    if (e.hp < e.maxHp) {
+      const bw = r * 2.2, bh = 3;
+      ctx.fillStyle = '#000a';
+      ctx.fillRect(cx - bw / 2, cy - r - 7, bw, bh);
+      ctx.fillStyle = '#3fb950';
+      ctx.fillRect(cx - bw / 2, cy - r - 7, bw * (e.hp / e.maxHp), bh);
+    }
+  }
+}
+
+// 3웨이브 앞까지 예고. 지금 최적인 빌드가 곧 무력화된다는 걸
+// 미리 보여주는 게 이 게임의 결정 구조라서 항상 화면에 띄운다.
+function drawForecast() {
+  const start = state.wave + 1;
+  const colW = view.w / 3;
+  ctx.textBaseline = 'top';
+
+  for (let i = 0; i < 3; i++) {
+    const w = start + i;
+    if (w > CFG.WAVE_MAX) break;
+    const groups = WAVES[w - 1];
+    const x = colW * i + 12;
+
+    ctx.fillStyle = i === 0 ? '#e6edf3' : '#6e7681';
+    ctx.font = `${i === 0 ? '700 ' : ''}11px system-ui, sans-serif`;
+    ctx.fillText(`w${w}`, x, 66);
+
+    let gx = x + 26;
+    for (const [kind, count] of groups) {
+      const d = ENEMY[kind];
+      ctx.fillStyle = i === 0 ? d.color : d.color + '99';
+      ctx.font = '700 12px system-ui, sans-serif';
+      ctx.fillText(d.tag, gx, 65);
+      gx += 13;
+      ctx.fillStyle = i === 0 ? '#8b949e' : '#484f58';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(String(count), gx, 66);
+      gx += ctx.measureText(String(count)).width + 7;
+    }
+  }
+}
+
 function drawHud() {
   ctx.textBaseline = 'top';
 
+  // 최상단 진행 바
+  if (state.phase === 'build') {
+    ctx.fillStyle = '#21262d';
+    ctx.fillRect(0, 0, view.w, 3);
+    ctx.fillStyle = '#58a6ff';
+    ctx.fillRect(0, 0, view.w * (1 - state.timer / CFG.WAVE_GAP), 3);
+  } else if (state.phase === 'wave') {
+    const total = state.spawnQueue.length + state.enemies.length;
+    ctx.fillStyle = '#21262d';
+    ctx.fillRect(0, 0, view.w, 3);
+    ctx.fillStyle = '#f85149';
+    ctx.fillRect(0, 0, view.w * (state.enemies.length / Math.max(1, total)), 3);
+  }
+
   ctx.fillStyle = '#e6edf3';
   ctx.font = '700 20px system-ui, sans-serif';
-  ctx.fillText(`웨이브 ${state.wave}`, 16, 18);
+  const title = `웨이브 ${state.wave}`;
+  ctx.fillText(title, 16, 16);
   ctx.fillStyle = '#6e7681';
   ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(`/ ${CFG.WAVE_MAX}`, 16 + ctx.measureText(`웨이브 ${state.wave}`).width + 44, 25);
+  ctx.fillText(`/ ${CFG.WAVE_MAX}`, 16 + ctx.measureText(title).width + 8, 23);
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#e3b341';
   ctx.font = '700 18px system-ui, sans-serif';
-  ctx.fillText(`${state.gold} G`, view.w - 16, 18);
-  ctx.fillStyle = '#7ee787';
+  ctx.fillText(`${state.gold} G`, view.w - 16, 16);
+  ctx.fillStyle = state.life <= 5 ? '#f85149' : '#7ee787';
   ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(`정수 ${state.essence}   관문 ${state.life}`, view.w - 16, 44);
+  ctx.fillText(`정수 ${state.essence}   관문 ${state.life}`, view.w - 16, 42);
   ctx.textAlign = 'left';
 
-  if (state.phase === 'build') {
-    ctx.fillStyle = '#8b949e';
-    ctx.font = '13px system-ui, sans-serif';
-    ctx.fillText(`다음 웨이브까지 ${state.timer.toFixed(1)}s`, 16, 48);
-    const barW = view.w - 32;
-    ctx.fillStyle = '#21262d';
-    ctx.fillRect(16, 68, barW, 4);
-    ctx.fillStyle = '#58a6ff';
-    ctx.fillRect(16, 68, barW * (1 - state.timer / CFG.WAVE_GAP), 4);
-  }
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText(
+    state.phase === 'build' ? `다음 웨이브까지 ${state.timer.toFixed(1)}s`
+                            : `남은 적 ${state.enemies.length + state.spawnQueue.length}`,
+    16, 42);
+
+  drawForecast();
 
   for (const b of buttons) {
     const on = b.enabled();
@@ -470,7 +681,26 @@ function render() {
   const sel = state.towers.find(t => t.id === state.selected);
   if (sel) drawRange(sel);
   for (const t of state.towers) drawTower(t);
+  drawEnemies();
   drawHud();
+  drawOverlay();
+}
+
+function drawOverlay() {
+  if (state.phase !== 'over' && state.phase !== 'clear') return;
+  ctx.fillStyle = 'rgba(13,17,23,0.85)';
+  ctx.fillRect(0, 0, view.w, view.h);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = state.phase === 'over' ? '#f85149' : '#7ee787';
+  ctx.font = '700 26px system-ui, sans-serif';
+  ctx.fillText(state.phase === 'over' ? '이번 웨이브는 못 막았습니다' : '전부 막았습니다',
+    view.w / 2, view.h / 2 - 16);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '15px system-ui, sans-serif';
+  ctx.fillText(`웨이브 ${state.wave} / ${CFG.WAVE_MAX}`, view.w / 2, view.h / 2 + 18);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
 }
 
 // ═════════════════════════════════════════════════════════════
