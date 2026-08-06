@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>이번 웨이브는 못 막습니다</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #0d1117; overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────────────────────
+// 설계 상수. 수치 근거는 DESIGN.md 참고.
+// ─────────────────────────────────────────────────────────────
+const CFG = {
+  BOARD_W: 6,          // 보드 가로 칸
+  BOARD_H: 8,          // 보드 세로 칸 (최대)
+  OPEN_ROWS: 5,        // 시작 시 개방된 세로 칸
+
+  WAVE_MAX: 30,
+  WAVE_GAP: 20,        // 웨이브 간격(초)
+  RUSH_GOLD: 2,        // 빨리 보내기: 남은 초당 골드
+
+  SLOW_CAP: 0.60,      // 슬로우 총합 상한. 넘기면 서리탑 도배가 정답이 됨
+  BIG_FROM_STAR: 5,    // 이 성급부터 2x2
+  STAR_MAX: 7,
+};
+
+// 성급별 데미지 계수 (base x 계수). 대략 2.3배씩.
+const STAR_MULT = [0, 1.0, 2.3, 5.3, 12, 28, 65, 149];
+
+// 워3식 방어력 감쇠. 음수 방어력(파쇄 분기)도 그대로 처리됨.
+function armorReduction(armor) {
+  return armor * 0.06 / (1 + 0.06 * Math.abs(armor));
+}
+function applyArmor(raw, armor) {
+  return raw * (1 - armorReduction(armor));
+}
+
+// 웨이브별 적 HP
+function waveHp(wave) {
+  return 100 * Math.pow(1.18, wave);
+}
+
+// 소환 비용. 웨이브마다 누적분이 30% 감쇠한다.
+function summonCost(summonedThisWave) {
+  return 10 + 2 * summonedThisWave;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 상태
+// ─────────────────────────────────────────────────────────────
+const state = {
+  wave: 0,
+  gold: 60,
+  essence: 0,          // 분기 재선택 자원
+  openRows: CFG.OPEN_ROWS,
+  towers: [],          // {gx, gy, kind, star, branch3, branch5, trait7}
+  enemies: [],
+};
+
+// ─────────────────────────────────────────────────────────────
+// 캔버스 / 레이아웃
+// ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const view = { w: 0, h: 0, cell: 0, ox: 0, oy: 0 };
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  view.w = window.innerWidth;
+  view.h = window.innerHeight;
+  canvas.width = Math.round(view.w * dpr);
+  canvas.height = Math.round(view.h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // 보드는 화면 가로에 맞추되, HUD 자리를 위아래로 남긴다.
+  const padX = 12;
+  const hudTop = 88, hudBottom = 108;
+  const cellByW = (view.w - padX * 2) / CFG.BOARD_W;
+  const cellByH = (view.h - hudTop - hudBottom) / CFG.BOARD_H;
+  view.cell = Math.floor(Math.min(cellByW, cellByH));
+  view.ox = Math.round((view.w - view.cell * CFG.BOARD_W) / 2);
+  view.oy = hudTop;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─────────────────────────────────────────────────────────────
+// 렌더
+// ─────────────────────────────────────────────────────────────
+function drawBoard() {
+  const { cell, ox, oy } = view;
+  for (let gy = 0; gy < CFG.BOARD_H; gy++) {
+    const locked = gy < CFG.BOARD_H - state.openRows;
+    for (let gx = 0; gx < CFG.BOARD_W; gx++) {
+      const x = ox + gx * cell, y = oy + gy * cell;
+      ctx.fillStyle = locked ? '#12161d' : ((gx + gy) % 2 ? '#1a212c' : '#1e2732');
+      ctx.fillRect(x, y, cell - 1, cell - 1);
+    }
+  }
+  ctx.strokeStyle = '#2a3441';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(ox + 0.5, oy + 0.5, cell * CFG.BOARD_W - 1, cell * CFG.BOARD_H - 1);
+}
+
+function drawHud() {
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '600 15px system-ui, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`웨이브 ${state.wave} / ${CFG.WAVE_MAX}`, 16, 20);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#e3b341';
+  ctx.fillText(`${state.gold} G`, view.w - 16, 20);
+  ctx.fillStyle = '#7ee787';
+  ctx.fillText(`정수 ${state.essence}`, view.w - 16, 42);
+  ctx.textAlign = 'left';
+
+  ctx.fillStyle = '#6e7681';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText('스캐폴드 — 게임 로직 미구현', 16, 44);
+}
+
+function render() {
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, view.w, view.h);
+  drawBoard();
+  drawHud();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 루프
+// ─────────────────────────────────────────────────────────────
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05); // 탭 전환 후 점프 방지
+  last = now;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+
+function update(dt) {
+  // TODO: 웨이브 진행, 적 이동, 타워 발사, 디버프 스택
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
