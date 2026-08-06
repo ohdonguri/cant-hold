@@ -32,6 +32,15 @@ function ok(name, cond, detail) {
   ok('2x2 자리가 단조 증가', big.every((v, i) => i === 0 || v >= big[i - 1]), big.join('→'));
   ok('2x2 자리 시작 10곳 이상', big[0] >= 10, String(big[0]));
 
+  // 잠긴 구역은 언제 열리는지 알려줘야 한다. 규칙이 안 보이면 못 쓰는 칸으로 읽힌다.
+  state.openRows = g.CFG.OPEN_ROWS;
+  state.wave = 0;
+  ok('개방 예정 웨이브를 안내한다', g.nextUnlockWave() === g.CFG.UNLOCK_AT[0], String(g.nextUnlockWave()));
+  state.wave = g.CFG.UNLOCK_AT[0];
+  ok('지난 개방은 건너뛴다', g.nextUnlockWave() === (g.CFG.UNLOCK_AT[1] ?? null), String(g.nextUnlockWave()));
+  state.openRows = g.CFG.BOARD_H;
+  ok('다 열리면 안내 없음', g.nextUnlockWave() === null, String(g.nextUnlockWave()));
+
   // 경로 칸에는 못 짓는다
   state.openRows = g.CFG.BOARD_H;
   const occ = g.occupancy();

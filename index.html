@@ -353,6 +353,13 @@ function occupancy(exclude) {
 
 function firstOpenRow() { return CFG.BOARD_H - state.openRows; }
 
+// 다음으로 행이 열리는 웨이브. 더 열릴 게 없으면 null.
+function nextUnlockWave() {
+  if (state.openRows >= CFG.BOARD_H) return null;
+  const w = CFG.UNLOCK_AT.find(v => v > state.wave);
+  return w === undefined ? null : w;
+}
+
 function canPlace(gx, gy, size, occ, ignoreId) {
   for (let dy = 0; dy < size; dy++) {
     for (let dx = 0; dx < size; dx++) {
@@ -1726,7 +1733,8 @@ function drawBoard() {
     ctx.fillRect(ox, oy, cell * CFG.BOARD_W, cell * open);
   }
 
-  // 잠긴 구역 경계
+  // 잠긴 구역 경계와 안내.
+  // 규칙이 있는데 안 보이면 그냥 못 쓰는 칸으로 읽힌다.
   if (open > 0) {
     ctx.strokeStyle = '#3d444d';
     ctx.setLineDash([5, 4]);
@@ -1736,6 +1744,17 @@ function drawBoard() {
     ctx.lineTo(ox + cell * CFG.BOARD_W, oy + open * cell - 0.5);
     ctx.stroke();
     ctx.setLineDash([]);
+
+    const next = nextUnlockWave();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#6e7681';
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.fillText(
+      next === null ? '잠김' : `웨이브 ${next} 클리어 시 개방`,
+      ox + cell * CFG.BOARD_W / 2, oy + open * cell / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
   }
 
   // 관문. 레인마다 하나씩이고, 겹치면 한 번만 그려진다.
