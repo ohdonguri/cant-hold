@@ -89,6 +89,35 @@ function ok(name, cond, detail) {
   for (let i = 0; i < 50; i++) g.applyStacks(e1, 1, 2, shredder);
   ok('방깎 스택 상한 = 성급x3', e1.armorStacks === 15, String(e1.armorStacks));
 
+  // 오라를 벗어나면 서서히 빠진다. 한 번에 0 이 되면 언제 풀렸는지 알 수 없다.
+  {
+    const g2 = load();
+    const st = g2.state;
+    g2.pickStage(0);
+    ['shredder', 'marksman', 'mint'].forEach(k => g2.toggleDeckPick(k));
+    g2.startRun();
+    st.phase = 'wave'; st.wave = 5; st.gold = 99999;
+    g2.summon('shredder', 3, 4);
+    const tw = st.towers[0];
+    tw.star = 4;
+    const sz = g2.towerFootprint(tw);
+    const cc = { x: tw.gx + sz / 2, y: tw.gy + sz / 2 };
+    g2.spawnEnemy('grunt');
+    const en = st.enemies[0];
+    en.maxHp = 1e9;
+    const inx = cc.x - 0.5, iny = cc.y - 0.5;
+    for (let i = 0; i < 120; i++) { en.hp = 1e9; en.x = inx; en.y = iny; g2.update(1 / 30); }
+    const peak = en.armorStacks;
+    ok('오라 안에서 스택이 쌓인다', peak > 0, peak.toFixed(1));
+
+    // 멀리 치워 두고 관찰
+    const far = { x: 0, y: 0 };
+    let after1 = null;
+    for (let i = 0; i < 60; i++) { en.hp = 1e9; en.x = far.x; en.y = far.y; g2.update(1 / 30); if (i === 29) after1 = en.armorStacks; }
+    ok('나가면 서서히 빠진다', after1 < peak && after1 > 0, peak.toFixed(1) + ' → ' + after1.toFixed(1));
+    ok('결국 0 이 된다', en.armorStacks < after1, after1.toFixed(1) + ' → ' + en.armorStacks.toFixed(1));
+  }
+
   const e2 = mk('immune');
   for (let i = 0; i < 50; i++) g.applyStacks(e2, 1, 2, shredder);
   ok('면역몹엔 스택 안 붙음', e2.armorStacks === 0, String(e2.armorStacks));

@@ -699,7 +699,11 @@ function killEnemy(e, src) {
       const d = Math.hypot(o.x - e.x, o.y - e.y);
       if (d < bd) { bd = d; best = o; }
     }
-    if (best) { best.armorStacks = e.armorStacks; best.armorPer = e.armorPer; best.armorT = 4; }
+    if (best) {
+      best.armorStacks = e.armorStacks;
+      best.armorPer = e.armorPer;
+      best.armorCap = Math.max(best.armorCap || 0, e.armorCap || e.armorStacks);
+    }
   }
 
   if (src && src.kind === 'arc' && src.b5 === 'B1') src.arcKills = (src.arcKills || 0) + 1;
@@ -722,8 +726,9 @@ function applyStacks(e, n, per, src) {
   if (s <= 0) return;
   const cap = (src.b3 === 'B' ? 6 : 3) * src.star;
   e.armorPer = per;
+  e.armorCap = Math.max(e.armorCap || 0, cap);
   e.armorStacks = Math.min(cap, e.armorStacks + n * s);
-  e.armorT = 4;
+  e.armorFed = true;   // 이번 프레임에 오라가 닿았다
 
   // 파열: 상한 도달 시 스택을 태워 폭발
   if (src.b5 === 'A1' && e.armorStacks >= cap) {
@@ -970,6 +975,7 @@ function updateCombat(dt) {
 
   // 프레임마다 재계산되는 오라 값 초기화
   for (const e of state.enemies) {
+    e.armorFed = false;
     e.mresCut = e.plagueT > 0 ? e.plagueCut : 0;
     e.magicVuln = e.plagueT > 0 ? e.plagueVuln : 0;
     e.healCut = 0;
@@ -1575,7 +1581,7 @@ function spawnEnemy(kind) {
     id: nextEnemyId++, kind, hp, maxHp: hp,
     lane, dist: 0, x: start.x, y: start.y,
     hitFlash: 0, dead: false,
-    armorStacks: 0, armorPer: 2, armorT: 0,
+    armorStacks: 0, armorPer: 2, armorCap: 0, armorFed: false,
     mresCut: 0, magicVuln: 0, arcResonance: 0, plagueT: 0, plagueCut: 0, plagueVuln: 0,
     healCut: 0, inDeepAura: false,
     slowAmt: 0, slowNext: 0, frostStacks: 0,
@@ -1627,7 +1633,12 @@ function updateEnemies(dt) {
     if (e.hitFlash > 0) e.hitFlash -= dt;
 
     // 타이머
-    e.armorT -= dt; if (e.armorT <= 0) e.armorStacks = 0;
+    // 오라 밖에서는 초당 3씩 빠진다. 4초 뒤 한 번에 0 으로 만들면
+    // 언제 풀렸는지 알 수가 없고 막대가 뚝 사라진다.
+    if (!e.armorFed && e.armorStacks > 0) {
+      e.armorStacks = Math.max(0, e.armorStacks - 3 * dt);
+      if (e.armorStacks === 0) e.armorCap = 0;
+    }
     e.plagueT -= dt;
     e.markT -= dt;
     e.vulnT -= dt;
@@ -1923,10 +1934,19 @@ function drawEnemies() {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-    if (e.armorStacks > 0) {           // 방깎 스택은 하단 주황 점으로
-      ctx.fillStyle = '#f0883e';
-      ctx.fillRect(cx - r, cy + r + 1, r * 2 * Math.min(1, e.armorStacks / (e.armorPer === 4 ? 12 : 9)), 2);
-    }
+    // 디버프 막대. 방깎은 주황, 마방깎·마법취약은 보라.
+    // 수치가 안 보이면 디버프 타워가 일하는지 알 수가 없다.
+    let bar = cy + r + 2;
+    const drawBar = (ratio, color) => {
+      ctx.fillStyle = '#0006';
+      ctx.fillRect(cx - r, bar, r * 2, 2);
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - r, bar, r * 2 * Math.min(1, ratio), 2);
+      bar += 3;
+    };
+    if (e.armorStacks > 0 && e.armorCap > 0) drawBar(e.armorStacks / e.armorCap, '#f0883e');
+    const mag = (e.mresCut || 0) + (e.magicVuln || 0);
+    if (mag > 0) drawBar(mag / 0.5, '#a371f7');
 
     if (e.hp < e.maxHp) {
       const bw = r * 2.2, bh = 3;
