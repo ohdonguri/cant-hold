@@ -509,6 +509,65 @@ function ok(name, cond, detail) {
   ok('HP/데미지에 NaN 없음', rows.every(r => r.w.every(v => Number.isFinite(v))));
 }
 
+// ── 세이브 ────────────────────────────────────────────────────
+// 스냅샷은 웨이브 사이에만 찍는다. 되살렸을 때 판이 그대로여야 한다.
+{
+  console.log('세이브');
+  const g = load();
+  const { state, CFG } = g;
+  g.pickStage(0);
+  ['shredder', 'frost', 'marksman'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.gold = 5000;
+  for (let i = 0; i < 8; i++) g.summon(state.deck[i % 3]);
+  state.towers[0].star = 4;
+  state.towers[0].b3 = 'B';
+  state.essence = 2;
+  state.wave = 5;
+
+  const snap = g.snapshotRun();
+  ok('준비 단계면 스냅샷이 찍힌다', !!snap);
+  ok('타워가 전부 들어간다', snap.towers.length === state.towers.length,
+    snap.towers.length + '/' + state.towers.length);
+
+  state.phase = 'wave';
+  ok('웨이브 중에는 안 찍는다', g.snapshotRun() === null);
+  state.phase = 'build';
+
+  // 판을 헝클어 놓고 되살린다
+  const before = {
+    towers: state.towers.map(t => t.kind + t.star + (t.b3 || '')).sort().join(','),
+    gold: Math.round(state.gold), wave: state.wave, essence: state.essence,
+    deck: state.deck.slice().sort().join(','),
+  };
+  g.restart();
+  ok('재시작하면 판이 비워진다', state.towers.length === 0);
+
+  ok('스냅샷이 되살아난다', g.restoreRun(snap) === true);
+  const after = {
+    towers: state.towers.map(t => t.kind + t.star + (t.b3 || '')).sort().join(','),
+    gold: Math.round(state.gold), wave: state.wave, essence: state.essence,
+    deck: state.deck.slice().sort().join(','),
+  };
+  for (const k of Object.keys(before))
+    ok('  ' + k + ' 가 같다', before[k] === after[k], before[k] + ' vs ' + after[k]);
+  ok('되살린 판은 준비 단계', state.phase === 'build', state.phase);
+  ok('적·발사체는 비어 있다', state.enemies.length === 0 && state.shells.length === 0);
+
+  // 지금 규칙과 안 맞는 스냅샷은 통째로 버린다
+  ok('덱 수가 안 맞으면 버린다', g.restoreRun({ ...snap, deck: ['frost'] }) === false);
+  ok('없는 스테이지면 버린다', g.restoreRun({ ...snap, stage: 99 }) === false);
+  ok('빈 값이면 버린다', g.restoreRun(null) === false);
+
+  // 세이브는 줄어들면 안 된다
+  const merged = g.mergeBundle(
+    { v: 1, unlocked: 3, best: [20, 5, 0, 0], run: { stage: 0, wave: 9 } },
+    { v: 1, unlocked: 2, best: [12, 25, 0, 0], run: { stage: 1, wave: 3 } });
+  ok('해금은 큰 쪽을 쓴다', merged.unlocked === 3, String(merged.unlocked));
+  ok('최고 기록은 칸마다 큰 쪽', merged.best.join(',') === '20,25,0,0', merged.best.join(','));
+  ok('이어할 판은 더 나아간 쪽', merged.run.stage === 1, 'stage ' + merged.run.stage);
+}
+
 // ── 타워 대등성 ───────────────────────────────────────────────
 // 한 타워가 정답이거나 함정이면 덱과 합성 선택이 의미를 잃는다.
 // 전체 측정은 npm run parity, 여기서는 가벼운 한 분기만 본다.

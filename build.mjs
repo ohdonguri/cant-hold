@@ -128,6 +128,10 @@ function verify({ html, out, minJs }) {
   const must = [
     'STAGES', 'SPR', 'loadStage', 'mergeTowers', 'summon', 'canPlace',
     'requestAnimationFrame(frame)', '이번 웨이브는 못 막습니다', 'cant-hold-progress',
+    // 동적 import 주소는 문자열 안에 // 가 들어 있다. 주석 제거가 이걸 먹으면
+    // 로그인이 통째로 죽는데 화면에는 아무 표시도 안 난다.
+    'https://www.gstatic.com/firebasejs/', 'eastbirdstudio-abfb5', 'games/canthold/saves',
+    'snapshotRun', 'restoreRun', 'mergeBundle',
   ];
   const missing = must.filter(k => !out.includes(k));
   if (missing.length) throw new Error('압축본에서 사라진 것: ' + missing.join(', '));

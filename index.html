@@ -326,6 +326,7 @@ function toggleDeckPick(kind) {
 
 function startRun() {
   if (state.deckPick.length !== CFG.DECK_SIZE) return;
+  savedRun = null;
   state.deck = state.deckPick.slice();
   state.phase = 'build';
   state.timer = CFG.WAVE_GAP;
@@ -1678,24 +1679,242 @@ function hitButton(px, py) {
   return buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
 }
 
-// ── 스테이지 선택 ────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+// 세이브
+//
+// 판 스냅샷은 웨이브 사이에만 찍는다. 웨이브 도중에 찍으려면 적·발사체·장판까지
+// 다 넣어야 하는데, 어차피 합성도 준비 단계에서만 되므로 이어하기의 의미가 없다.
+//
+// 저장은 로컬이 먼저다. 로그인은 기기를 옮길 때 쓰는 것이지 없으면 못 하는 게 아니다.
+// ═════════════════════════════════════════════════════════════
 const SAVE_KEY = 'cant-hold-progress';
+const SAVE_VERSION = 1;
 
-function loadProgress() {
-  try {
-    const n = parseInt(localStorage.getItem(SAVE_KEY), 10);
-    return Number.isFinite(n) ? Math.max(1, Math.min(STAGES.length, n)) : 1;
-  } catch { return 1; }
-}
-function saveProgress(n) {
-  try { localStorage.setItem(SAVE_KEY, String(n)); } catch { /* 저장 못 해도 게임은 돈다 */ }
-}
 let unlocked = 1;
+let best = [];              // 스테이지별 최고 웨이브
+let savedRun = null;        // 이어할 판. 없으면 null
+
+// 판 스냅샷. 준비 단계가 아니면 찍지 않는다.
+function snapshotRun() {
+  if (state.phase !== 'build') return null;
+  return {
+    stage: state.stage,
+    deck: state.deck.slice(),
+    wave: state.wave,
+    gold: Math.round(state.gold),
+    essence: state.essence,
+    life: state.life,
+    openRows: state.openRows,
+    summoned: state.summonedThisWave,
+    towers: state.towers.map(t => ({
+      x: t.gx, y: t.gy, k: t.kind, s: t.star,
+      b3: t.b3, b5: t.b5, t7: t.t7, a: t.angle,
+    })),
+  };
+}
+
+// 스냅샷을 되살린다. 스테이지나 덱이 지금 규칙과 안 맞으면 통째로 버린다 —
+// 어중간하게 복원하면 못 깨는 판이 만들어진다.
+function restoreRun(r) {
+  if (!r || !STAGES[r.stage]) return false;
+  const deck = (r.deck || []).filter(k => KINDS[k]);
+  if (deck.length !== CFG.DECK_SIZE) return false;
+
+  loadStage(r.stage);
+  state.deck = deck;
+  state.deckPick = deck.slice();
+  state.phase = 'build';
+  state.paused = false;
+  state.wave = Math.max(0, r.wave | 0);
+  state.timer = CFG.WAVE_GAP;
+  state.gold = Math.max(0, r.gold | 0);
+  state.essence = Math.max(0, r.essence | 0);
+  state.life = Math.max(1, r.life | 0);
+  state.openRows = Math.min(CFG.BOARD_H, Math.max(CFG.OPEN_ROWS, r.openRows | 0));
+  state.summonedThisWave = Math.max(0, r.summoned | 0);
+
+  state.towers = (r.towers || [])
+    .filter(t => KINDS[t.k] && t.s >= 1 && t.s <= CFG.STAR_MAX)
+    .map(t => ({
+      id: nextTowerId++, gx: t.x | 0, gy: t.y | 0, kind: t.k, star: t.s | 0,
+      b3: t.b3 || null, b5: t.b5 || null, t7: t.t7 || null,
+      cd: 0, angle: typeof t.a === 'number' ? t.a : -Math.PI / 2, flash: 0,
+      streak: 0, lastTarget: null, arcKills: 0,
+    }));
+
+  state.enemies.length = 0;
+  state.spawnQueue.length = 0;
+  state.beams.length = 0;
+  state.shells.length = 0;
+  state.patches.length = 0;
+  state.blasts.length = 0;
+  state.selected = null;
+  state.choice = null;
+  state.picker = null;
+  return true;
+}
+
+function saveBundle() {
+  return { v: SAVE_VERSION, unlocked, best: best.slice(), run: savedRun };
+}
+
+function applyBundle(b) {
+  if (!b) return;
+  if (Number.isFinite(b.unlocked)) unlocked = Math.max(1, Math.min(STAGES.length, b.unlocked));
+  if (Array.isArray(b.best)) best = b.best.map(v => (Number.isFinite(v) ? v : 0));
+  if (b.run && STAGES[b.run.stage]) savedRun = b.run;
+}
+
+// 어느 쪽이 더 나아간 기록인지 고른다. 세이브는 줄어들면 안 된다.
+function mergeBundle(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const best2 = [];
+  for (let i = 0; i < STAGES.length; i++)
+    best2[i] = Math.max((a.best && a.best[i]) || 0, (b.best && b.best[i]) || 0);
+  const pick = (x, y) => {
+    if (!x) return y;
+    if (!y) return x;
+    // 더 뒤 스테이지, 같으면 더 뒤 웨이브
+    if (x.stage !== y.stage) return x.stage > y.stage ? x : y;
+    return (x.wave || 0) >= (y.wave || 0) ? x : y;
+  };
+  return {
+    v: SAVE_VERSION,
+    unlocked: Math.max(a.unlocked || 1, b.unlocked || 1),
+    best: best2,
+    run: pick(a.run, b.run),
+  };
+}
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    // 예전에는 해금 개수만 숫자로 넣었다
+    if (/^\d+$/.test(raw)) return { v: 0, unlocked: parseInt(raw, 10), best: [], run: null };
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function saveLocal() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(saveBundle())); }
+  catch { /* 저장 못 해도 게임은 돈다 */ }
+}
+
+// 로컬은 항상, 클라우드는 로그인했을 때만. 클라우드가 실패해도 판은 계속된다.
+function persist() {
+  saveLocal();
+  if (typeof cloudSave === 'function') cloudSave();
+}
+
+// ═════════════════════════════════════════════════════════════
+// 계정 (선택)
+//
+// 스튜디오 공용 Firebase 프로젝트를 쓴다. 게임들이 같은 오리진에 있어서
+// 한 번 로그인하면 어디서나 같은 사람이다 (eastbird-studio/docs/sso-migration.md).
+//
+// config 값은 공개돼도 되는 식별자다 — 실제 접근 통제는 Firestore 보안 규칙이 한다.
+// 규칙은 README 의 "계정" 절에 있고, 콘솔에서 사람이 넣어야 한다.
+//
+// 로그인은 기기를 옮길 때 쓰는 것이지 없으면 못 하는 게 아니다. SDK 를 못 받아와도,
+// 로그인을 안 해도 게임은 로컬 저장만으로 끝까지 돌아간다.
+// ═════════════════════════════════════════════════════════════
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyApyN5BFgzOHu6JUdHO1gYRzJiuKm-TKzQ',
+  authDomain: 'eastbirdstudio-abfb5.firebaseapp.com',
+  projectId: 'eastbirdstudio-abfb5',
+  storageBucket: 'eastbirdstudio-abfb5.firebasestorage.app',
+  messagingSenderId: '955865945066',
+  appId: '1:955865945066:web:d6bead1199048c8d535893',
+};
+const SAVE_PATH = 'games/canthold/saves';
+const SDK = 'https://www.gstatic.com/firebasejs/11.0.2/';
+
+const cloud = { ready: false, user: null, busy: false, msg: '' };
+let fb = null;                       // { auth, db, doc, getDoc, setDoc, ... }
+
+async function cloudInit() {
+  if (fb) return fb;
+  const [{ initializeApp }, authMod, dbMod] = await Promise.all([
+    import(SDK + 'firebase-app.js'),
+    import(SDK + 'firebase-auth.js'),
+    import(SDK + 'firebase-firestore.js'),
+  ]);
+  const app = initializeApp(FIREBASE_CONFIG);
+  fb = {
+    auth: authMod.getAuth(app),
+    db: dbMod.getFirestore(app),
+    GoogleAuthProvider: authMod.GoogleAuthProvider,
+    signInWithPopup: authMod.signInWithPopup,
+    signOut: authMod.signOut,
+    onAuthStateChanged: authMod.onAuthStateChanged,
+    doc: dbMod.doc, getDoc: dbMod.getDoc, setDoc: dbMod.setDoc,
+    serverTimestamp: dbMod.serverTimestamp,
+  };
+  fb.onAuthStateChanged(fb.auth, async u => {
+    cloud.user = u;
+    cloud.ready = true;
+    if (u) await cloudPull();
+  });
+  return fb;
+}
+
+// 로그인하면 서버 것과 로컬 것을 합친다. 어느 쪽도 줄어들면 안 된다.
+async function cloudPull() {
+  if (!fb || !cloud.user) return;
+  try {
+    cloud.busy = true;
+    const snap = await fb.getDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid));
+    const remote = snap.exists() ? snap.data() : null;
+    const merged = mergeBundle(saveBundle(), remote);
+    applyBundle(merged);
+    savedRun = merged.run || null;
+    saveLocal();
+    await cloudSave();
+    cloud.msg = '기록을 불러왔다';
+  } catch (e) {
+    cloud.msg = '기록을 못 불러왔다';
+  } finally {
+    cloud.busy = false;
+  }
+}
+
+async function cloudSave() {
+  if (!fb || !cloud.user) return;
+  try {
+    await fb.setDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid),
+      { ...saveBundle(), updatedAt: fb.serverTimestamp() });
+  } catch { /* 못 올려도 로컬에는 남아 있다 */ }
+}
+
+async function cloudToggle() {
+  if (cloud.busy) return;
+  cloud.busy = true;
+  cloud.msg = '';
+  try {
+    await cloudInit();
+    if (cloud.user) {
+      await cloudSave();
+      await fb.signOut(fb.auth);
+      cloud.msg = '로그아웃했다';
+    } else {
+      await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
+    }
+  } catch (e) {
+    cloud.msg = String(e && e.code || e).includes('popup') ? '로그인 창이 닫혔다' : '로그인 실패';
+  } finally {
+    cloud.busy = false;
+  }
+}
+
+// ── 스테이지 선택 ────────────────────────────────────────────
 
 function stageCardRects() {
   const pad = 16, top = 132, gap = 12;
   const n = STAGES.length;
-  const h = Math.min(88, (view.h - top - 40 - (n - 1) * gap) / n);
+  // 아래에 이어하기와 로그인 줄이 들어간다
+  const h = Math.min(88, (view.h - top - 150 - (n - 1) * gap) / n);
   return STAGES.map((def, i) => ({ i, def, x: pad, y: top + i * (h + gap), w: view.w - pad * 2, h }));
 }
 
@@ -1739,7 +1958,70 @@ function drawStageSelect() {
       (r.def.lanes.length > 1 ? `갈래 ${r.def.lanes.length}` : '한 갈래'),
       r.x + 16, r.y + 58);
   }
+  // 이어하기. 웨이브 사이 스냅샷이 있을 때만 뜬다.
+  if (savedRun) {
+    const r = resumeRect();
+    const st = STAGES[savedRun.stage];
+    ctx.fillStyle = '#1b2b1f';
+    ctx.strokeStyle = '#3fb950';
+    ctx.lineWidth = 2;
+    roundRect(r.x, r.y, r.w, r.h, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = '700 15px system-ui, sans-serif';
+    ctx.fillText('이어하기', r.x + 16, r.y + 11);
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(`${st ? st.name : ''} · 웨이브 ${savedRun.wave} · 타워 ${(savedRun.towers || []).length}`,
+      r.x + 16, r.y + 31);
+  }
+
+  // 로그인. 없어도 게임은 돌고, 기기를 옮길 때만 필요하다.
+  {
+    const r = cloudRect();
+    ctx.fillStyle = '#161b22';
+    ctx.strokeStyle = '#30363d';
+    ctx.lineWidth = 1.5;
+    roundRect(r.x, r.y, r.w, r.h, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = cloud.user ? '#7ee787' : '#8b949e';
+    ctx.font = '600 13px system-ui, sans-serif';
+    const label = cloud.busy ? '연결 중…'
+      : cloud.user ? `${cloud.user.displayName || '로그인됨'} · 로그아웃`
+      : '구글로 로그인 — 다른 기기에서 이어하기';
+    ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    if (cloud.msg) {
+      ctx.fillStyle = '#6e7681';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(cloud.msg, view.w / 2, r.y + r.h + 6);
+      ctx.textAlign = 'left';
+    }
+  }
+
   ctx.textAlign = 'left';
+}
+
+function resumeRect() {
+  const pad = 16, b = stageCardRects();
+  const y = b.length ? b[b.length - 1].y + b[b.length - 1].h + 14 : 400;
+  return { x: pad, y, w: view.w - pad * 2, h: 52 };
+}
+function cloudRect() {
+  const r = resumeRect();
+  return { x: r.x, y: r.y + r.h + 10, w: r.w, h: 42 };
+}
+
+function resumeRun() {
+  if (!savedRun) return;
+  if (!restoreRun(savedRun)) { savedRun = null; persist(); toast('이어할 수 없는 기록'); return; }
+  state.selected = null;
 }
 
 function pickStage(i) {
@@ -2022,8 +2304,11 @@ canvas.addEventListener('pointerdown', e => {
   if (state.paused) { state.paused = false; return; }
 
   if (state.phase === 'stage') {
-    const hit = stageCardRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
-    if (hit) pickStage(hit.i);
+    const inside = r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+    const hit = stageCardRects().find(inside);
+    if (hit) { pickStage(hit.i); return; }
+    if (savedRun && inside(resumeRect())) { resumeRun(); return; }
+    if (inside(cloudRect())) cloudToggle();
     return;
   }
 
@@ -2213,9 +2498,13 @@ function endWave() {
     state.phase = 'clear';
     if (state.stage + 1 >= unlocked && unlocked < STAGES.length) {
       unlocked = state.stage + 2;
-      saveProgress(unlocked);
     }
   }
+
+  best[state.stage] = Math.max(best[state.stage] || 0, state.wave);
+  // 스냅샷은 준비 단계에서만 찍힌다. 클리어했으면 이어할 판이 없다.
+  savedRun = state.phase === 'build' ? snapshotRun() : null;
+  persist();
 }
 
 function enemySpeed(e) {
@@ -2263,7 +2552,13 @@ function updateEnemies(dt) {
   }
   state.enemies = survivors;
 
-  if (state.life <= 0) { state.life = 0; state.phase = 'over'; }
+  if (state.life <= 0) {
+    state.life = 0;
+    state.phase = 'over';
+    best[state.stage] = Math.max(best[state.stage] || 0, state.wave);
+    savedRun = null;
+    persist();
+  }
 }
 
 // 타격 효과는 웨이브가 끝나도 사라져야 한다. 감쇠를 전투 루프 안에 두면
@@ -2922,7 +3217,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-unlocked = loadProgress();
+applyBundle(loadLocal());
 loadStage(0);
 requestAnimationFrame(frame);
 </script>

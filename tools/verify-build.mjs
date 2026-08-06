@@ -24,7 +24,10 @@ catch {
 // 난수는 시드로 고정하고, 프레임 시각도 가상 시계로 고정한다 —
 // 실제 시각을 쓰면 빔·피격 표시 같은 짧은 효과가 프레임마다 어긋나서
 // 픽셀 비교가 늘 실패한다.
+// 둘 다 file:// 라 같은 오리진이다. 앞 실행이 남긴 세이브를 뒤가 읽으면
+// 시작 상태부터 달라진다.
 const SEED_SCRIPT = `(() => {
+  try { localStorage.clear(); } catch {}
   let s = 12345;
   Math.random = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
   const raf = window.requestAnimationFrame.bind(window);
