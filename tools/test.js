@@ -109,17 +109,25 @@ function ok(name, cond, detail) {
     return t;
   };
 
-  const a = put('marksman', 1, 1, 6), b = put('marksman', 1, 2, 6);
+  const a = put('marksman', 1, 2, 4), b = put('marksman', 1, 3, 4);
   ok('같은 종류·같은 성은 합성 가능', g.canMerge(a, b));
-  ok('다른 종류는 불가', !g.canMerge(a, put('mortar', 1, 3, 6)));
+  ok('다른 종류는 불가', !g.canMerge(a, put('mortar', 1, 4, 4)));
   const m = g.mergeTowers(a, b);
   ok('합성 결과가 2성', m && m.star === 2, m ? String(m.star) : 'null');
   ok('합성하면 타워 수가 준다', state.towers.length === 2, String(state.towers.length));
+  // 드래그해서 손을 뗀 자리(뒤 인자)에 생겨야 한다. 출발 자리에 생기면 오조작처럼 느껴진다.
+  ok('결과는 놓은 자리에 생긴다', m && m.gx === 3 && m.gy === 4, m ? m.gx + ',' + m.gy : 'null');
+
+  // 반대 방향으로 끌어도 마찬가지
+  state.towers.length = 0;
+  const c1 = put('marksman', 1, 5, 4), c2 = put('marksman', 1, 2, 4);
+  const m2 = g.mergeTowers(c1, c2);
+  ok('반대로 끌면 반대 자리', m2 && m2.gx === 2 && m2.gy === 4, m2 ? m2.gx + ',' + m2.gy : 'null');
 
   // 4성 두 개를 5성으로 → 2x2 자리가 필요하다
   state.towers.length = 0;
-  state.openRows = 5;
-  const c = put('marksman', 4, 4, 6), d = put('marksman', 4, 5, 6);
+  state.openRows = CFG.BOARD_H;
+  const c = put('marksman', 4, 2, 4), d = put('marksman', 4, 3, 4);
   const big = g.mergeTowers(c, d);
   ok('5성은 2x2 로 커진다', big && g.towerFootprint(big) === 2, big ? String(g.towerFootprint(big)) : 'null');
   ok('5성 진입 시 분기 선택이 뜬다', !!state.choice && state.choice.tier === 5);
@@ -127,7 +135,7 @@ function ok(name, cond, detail) {
   // 조폐소는 5성이어도 1칸
   state.towers.length = 0;
   state.choice = null;
-  const e = put('mint', 4, 1, 6), f = put('mint', 4, 2, 6);
+  const e = put('mint', 4, 1, 7), f = put('mint', 4, 2, 7);
   const mint5 = g.mergeTowers(e, f);
   ok('조폐소 5성은 1칸 유지', mint5 && g.towerFootprint(mint5) === 1);
 }

@@ -399,9 +399,12 @@ function canMerge(a, b) {
 
 // 합성 결과를 놓을 자리를 찾는다. 5성부터 2x2 라서 자리가 없으면 합성 자체가 막힌다.
 // 이게 이 게임의 공간 압박이고, 조용히 우회시키면 안 된다.
+//
+// 순서가 중요하다. b 는 드래그를 "놓은" 타워라서 여기가 먼저다.
+// a(집어든 타워)를 먼저 보면 결과가 손을 뗀 자리가 아니라 출발 자리에 생긴다.
 function mergeSpot(a, b, size) {
   const occ = occupancy(new Set([a.id, b.id]));
-  for (const base of [a, b]) {
+  for (const base of [b, a]) {
     for (let dy = 0; dy > -size; dy--) {
       for (let dx = 0; dx > -size; dx--) {
         if (canPlace(base.gx + dx, base.gy + dy, size, occ)) return { gx: base.gx + dx, gy: base.gy + dy };
@@ -964,10 +967,6 @@ function updateCombat(dt) {
   }
 
   state.enemies = state.enemies.filter(e => !e.dead);
-  for (const b of state.beams) b.t -= dt;
-  state.beams = state.beams.filter(b => b.t > 0);
-  for (const b of state.blasts) b.t -= dt;
-  state.blasts = state.blasts.filter(b => b.t > 0);
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -1176,6 +1175,19 @@ function drawPicker() {
 
   ctx.fillStyle = 'rgba(13,17,23,0.78)';
   ctx.fillRect(0, 0, view.w, view.h);
+
+  // 놓기 전에 어디까지 닿는지 보여준다. 종류마다 사거리가 다르므로
+  // 후보 셋을 한꺼번에 겹쳐 그린다.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
+  ctx.clip();
+  const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
+  for (const k of deck) {
+    drawRange({ gx: state.picker.gx, gy: state.picker.gy, kind: k, star: 1, b3: null, b5: null, t7: null }, 0.75);
+  }
+  ctx.restore();
+
   ctx.strokeStyle = '#7ee787';
   ctx.lineWidth = 3;
   roundRect(p.x + 1, p.y + 1, view.cell - 3, view.cell - 3, 6);
@@ -1208,6 +1220,13 @@ function drawPicker() {
     ctx.fillStyle = '#8b949e';
     ctx.font = '11px system-ui, sans-serif';
     ctx.fillText(k.blurb, r.x + 52, r.y + 32);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = k.color;
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillText(AURA_KINDS.has(r.k) ? '오라' : '사격', r.x + r.w - 14, r.y + 12);
+    ctx.fillStyle = '#6e7681';
+    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 30);
     ctx.textAlign = 'center';
   }
   ctx.textAlign = 'left';
@@ -1462,6 +1481,8 @@ function spawnEnemy(kind) {
 
 function endWave() {
   state.phase = 'build';
+  state.shells.length = 0;
+  state.patches.length = 0;
   state.timer = CFG.WAVE_GAP;
   state.gold += Math.round(CFG.GOLD_BASE * Math.pow(CFG.GOLD_GROWTH, state.wave));
 
@@ -1534,14 +1555,24 @@ function updateEnemies(dt) {
   if (state.life <= 0) { state.life = 0; state.phase = 'over'; }
 }
 
+// 타격 효과는 웨이브가 끝나도 사라져야 한다. 감쇠를 전투 루프 안에 두면
+// 마지막 한 방의 빔이 화면에 그대로 남는다.
+function decayEffects(dt) {
+  for (const b of state.beams) b.t -= dt;
+  state.beams = state.beams.filter(b => b.t > 0);
+  for (const b of state.blasts) b.t -= dt;
+  state.blasts = state.blasts.filter(b => b.t > 0);
+}
+
 function update(dt) {
   if (state.toast) {
     state.toast.t -= dt;
     if (state.toast.t <= 0) state.toast = null;
   }
   for (const t of state.towers) if (t.flash > 0) t.flash -= dt;
+  decayEffects(dt);
 
-  if (state.phase === 'deck' || state.phase === 'stage' || state.picker) return;
+  if (state.phase === 'deck' || state.phase === 'stage') return;
 
   // 분기 선택 중에는 판을 멈춘다. 웨이브 도중에 5성이 나올 수 있는데
   // 그때 뒤에서 적이 계속 흐르면 고를 수가 없다.
@@ -1656,18 +1687,32 @@ function drawTower(t) {
   ctx.textBaseline = 'alphabetic';
 }
 
-function drawRange(t) {
+// 사거리는 숫자로 적어봐야 어디까지 닿는지 모른다. 그래서 원으로 그린다.
+// 오라 타워는 그 안이 상시 효과 범위라서 실선 + 진한 채움,
+// 공격만 하는 타워는 점선 + 옅은 채움으로 구분한다.
+const AURA_KINDS = new Set(['shredder', 'frost', 'eroder']);
+
+function drawRange(t, alpha) {
   const { cell } = view;
   const size = towerFootprint(t);
   const { x, y } = cellToPx(t.gx, t.gy);
   const cx = x + cell * size / 2, cy = y + cell * size / 2;
-  ctx.strokeStyle = 'rgba(88,166,255,0.5)';
-  ctx.fillStyle = 'rgba(88,166,255,0.07)';
-  ctx.lineWidth = 1.5;
+  const r = towerRange(t) * cell;   // 분기 보정까지 반영된 실제 사거리
+  const k = KINDS[t.kind];
+  const aura = AURA_KINDS.has(t.kind);
+
+  ctx.save();
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
   ctx.beginPath();
-  ctx.arc(cx, cy, KINDS[t.kind].range * cell, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = k.color + (aura ? '2e' : '14');
   ctx.fill();
+  ctx.strokeStyle = k.color;
+  ctx.lineWidth = 2;
+  if (!aura) ctx.setLineDash([7, 5]);
   ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
 }
 
 function drawEffects() {
@@ -1962,7 +2007,7 @@ function drawInfo() {
   ctx.fillText(
     t.kind === 'mint'
       ? `수입 ${Math.round(CFG.MINT_BASE * STAR_MULT[t.star])}G/웨이브`
-      : `DPS ${Math.round(dps)}   사거리 ${towerRange(t).toFixed(1)}`,
+      : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}`,
     pad, y + 19);
 }
 
