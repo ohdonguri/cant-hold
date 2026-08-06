@@ -1,0 +1,10 @@
+{
+  "name": "cant-hold",
+  "private": true,
+  "description": "이번 웨이브는 못 막습니다 — 성급 합성 타워디펜스",
+  "scripts": {
+    "test": "node tools/test.js",
+    "tune": "node tools/tune.js",
+    "sim": "node tools/tune.js one"
+  }
+}
