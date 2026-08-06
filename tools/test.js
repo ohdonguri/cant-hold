@@ -140,11 +140,11 @@ function ok(name, cond, detail) {
   ok('조폐소 5성은 1칸 유지', mint5 && g.towerFootprint(mint5) === 1);
 }
 
-// ── 마력로 조준 ───────────────────────────────────────────────
-// 마력로는 사거리 원이 아니라 고정된 직선으로 쏜다. 원 안에 있다고 쏘면
-// 선에서 벗어난 적 때문에 허공에 계속 발사한다.
+// ── 마력로 ────────────────────────────────────────────────────
+// 대상을 향해 회전하고, 그 직선 위의 적을 전부 꿴다.
+// 각도를 배치 시점에 고정해 봤더니 "겨냥한 놈한테 안 쏜다"로만 읽혔다.
 {
-  console.log('마력로 조준');
+  console.log('마력로');
   const g = load();
   const { state } = g;
   g.pickStage(0);
@@ -155,61 +155,70 @@ function ok(name, cond, detail) {
   state.gold = 99999;
   g.summon('arc', 3, 4);
   const t = state.towers[0];
-  t.star = 4;              // 5성이면 2x2 라 중심이 바뀐다. 조준각은 배치 시점 기준이다.
+  t.star = 4;
   const size = g.towerFootprint(t);
   const c = { x: t.gx + size / 2, y: t.gy + size / 2 };
   const r = g.towerRange(t);
 
-  // 적을 한자리에 붙잡아 두고 누적 피해를 잰다.
-  // 프레임마다 HP 를 되돌리므로 합산해야 한다 — 마지막 프레임만 보면
-  // 쿨다운 때문에 0 이 나온다.
-  const run = (place) => {
+  // 적을 한자리에 붙잡아 두고 누적 피해를 잰다. 프레임마다 HP 를 되돌리므로
+  // 합산해야 한다 — 마지막 프레임만 보면 쿨다운 때문에 0 이 나온다.
+  const run = (places) => {
     state.enemies.length = 0;
-    state.beams.length = 0;
-    g.spawnEnemy('grunt');
-    const e = state.enemies[0];
-    e.maxHp = 1e9;
-    place(e);
-    const x0 = e.x, y0 = e.y;
-    let dealt = 0, shots = 0;
+    const es = places.map(pl => {
+      g.spawnEnemy('grunt');
+      const e = state.enemies[state.enemies.length - 1];
+      e.maxHp = 1e9;
+      pl(e);
+      return { e, x: e.x, y: e.y };
+    });
+    const dealt = es.map(() => 0);
     for (let i = 0; i < 300; i++) {
-      e.hp = 1e9; e.x = x0; e.y = y0;
-      const before = state.beams.length;
+      es.forEach(o => { o.e.hp = 1e9; o.e.x = o.x; o.e.y = o.y; });
       g.update(1 / 30);
-      dealt += 1e9 - e.hp;
-      if (state.beams.length > before) shots++;
+      es.forEach((o, k) => { dealt[k] += 1e9 - o.e.hp; });
     }
-    return { shots, dealt };
+    return dealt;
+  };
+  const at = (deg, dist) => e => {
+    const a = deg * Math.PI / 180;
+    e.x = c.x + Math.cos(a) * dist - 0.5;
+    e.y = c.y + Math.sin(a) * dist - 0.5;
   };
 
-  // 직선 위
-  const on = run(e => {
-    e.x = c.x + Math.cos(t.angle) * (r * 0.5) - 0.5;
-    e.y = c.y + Math.sin(t.angle) * (r * 0.5) - 0.5;
-  });
-  ok('직선 위 적은 맞는다', on.dealt > 0, Math.round(on.dealt) + ' 딜');
+  const dirs = [0, 45, 90, 135, 180, 225, 270, 315];
+  const missed = dirs.filter(d => run([at(d, r * 0.6)])[0] === 0);
+  ok('사거리 안이면 어느 방향이든 맞는다', missed.length === 0, missed.join(',') + '도 빗나감');
 
-  // 사거리 안이지만 직선에서 벗어남
-  const off = run(e => {
-    const perp = t.angle + Math.PI / 2;
-    e.x = c.x + Math.cos(perp) * 2 - 0.5;
-    e.y = c.y + Math.sin(perp) * 2 - 0.5;
-  });
-  ok('선 밖 적에겐 안 쏜다', off.shots === 0 && off.dealt === 0, off.shots + '발 / ' + Math.round(off.dealt) + ' 딜');
+  ok('사거리 밖은 안 맞는다', run([at(0, r + 3)])[0] === 0);
 
-  // 사거리 밖
-  const far = run(e => {
-    e.x = c.x + Math.cos(t.angle) * (r + 3) - 0.5;
-    e.y = c.y + Math.sin(t.angle) * (r + 3) - 0.5;
-  });
-  ok('사거리 밖은 안 맞는다', far.dealt === 0, Math.round(far.dealt) + ' 딜');
+  // 한 줄로 세우면 전부 꿰야 한다
+  const line = run([at(0, r * 0.3), at(0, r * 0.6), at(0, r * 0.9)]);
+  ok('직선 위 여러 마리를 관통한다', line.every(v => v > 0), line.map(v => Math.round(v)).join(' / '));
 
-  // 조준각은 경로를 향해야 한다
-  const dx = Math.cos(t.angle), dy = Math.sin(t.angle);
-  let onPath = 0;
-  for (let d = 0.25; d <= r; d += 0.25)
-    if (g.isPath(Math.floor(c.x + dx * d), Math.floor(c.y + dy * d))) onPath++;
-  ok('조준선이 경로를 지난다', onPath > 0, onPath + '개 지점');
+  // 두 무리 중 많은 쪽을 고른다
+  const pick = run([at(90, r * 0.5), at(270, r * 0.4), at(270, r * 0.7)]);
+  ok('더 많이 꿰는 방향을 고른다', pick[1] > 0 && pick[2] > 0 && pick[1] >= pick[0],
+    pick.map(v => Math.round(v)).join(' / '));
+}
+
+// ── 첫 웨이브 ─────────────────────────────────────────────────
+{
+  console.log('첫 웨이브');
+  const g = load();
+  const { state } = g;
+  g.pickStage(0);
+  ['arc', 'marksman', 'mint'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  ok('시작 직후엔 웨이브 0', state.wave === 0, String(state.wave));
+  for (let i = 0; i < 60 * 30; i++) g.update(1 / 30);
+  ok('가만히 두면 안 시작한다', state.wave === 0 && state.phase === 'build', 'w' + state.wave + ' ' + state.phase);
+  g.rushWave();
+  ok('눌러야 시작한다', state.wave === 1 && state.phase === 'wave', 'w' + state.wave + ' ' + state.phase);
+  // 두 번째부터는 자동
+  state.phase = 'build';
+  state.timer = 0.05;
+  for (let i = 0; i < 10; i++) g.update(1 / 30);
+  ok('둘째 웨이브부터는 자동', state.wave === 2, String(state.wave));
 }
 
 // ── 스테이지 ─────────────────────────────────────────────────

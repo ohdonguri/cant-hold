@@ -31,7 +31,7 @@ const EXPOSE = [
   'CFG', 'state', 'update', 'KINDS', 'KIND_KEYS', 'ENEMY', 'WAVES', 'STAR_MULT',
   'waveHp', 'summon', 'summonCost', 'canPlace', 'occupancy', 'firstOpenRow',
   'canMerge', 'mergeTowers', 'applyChoice', 'rushWave', 'towerDmg', 'towerCd',
-  'towerRange', 'towerFootprint', 'aimArc', 'posAt', 'buildSpawnQueue',
+  'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
