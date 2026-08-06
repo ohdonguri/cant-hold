@@ -177,7 +177,7 @@ const KINDS = {
   shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.6, cd: 0.6, range: 2.4, group: 'aura', role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
   eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, group: 'aura', role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제' },
   frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, group: 'aura', role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
-  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 0.8, cd: 1.6, range: 3.2, group: 'attack', role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
+  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.2, cd: 1.6, range: 3.2, group: 'attack', role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
   marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, group: 'attack', role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
   arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 0.7, cd: 2.5, range: 4.0, group: 'attack', role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
   mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, group: 'econ', role: '경제', blurb: '공격 안 함. 골드 수입만' },
@@ -583,7 +583,12 @@ const TRAIT_KEYS = Object.keys(TRAITS);
 // 전투
 // ═════════════════════════════════════════════════════════════
 function towerCenter(t) { const s = towerFootprint(t); return { x: t.gx + s / 2, y: t.gy + s / 2 }; }
-function distTo(t, e) { const a = towerCenter(t); return Math.hypot(a.x - (e.x + 0.5), a.y - (e.y + 0.5)); }
+// 사거리는 원이 아니라 정사각형이다. 격자 게임에서 원을 쓰면 모서리 칸이
+// 걸치는지 아닌지를 눈으로 판단할 수 없다. 표시와 판정이 같아야 한다.
+function distTo(t, e) {
+  const a = towerCenter(t);
+  return Math.max(Math.abs(a.x - (e.x + 0.5)), Math.abs(a.y - (e.y + 0.5)));
+}
 
 // 각인은 타워당 1개만 적용한다. 중첩되면 7성 벽 세우기가 정답이 된다.
 function engraveBonus(t) {
@@ -1832,8 +1837,7 @@ function drawRange(t, alpha) {
   ctx.save();
   ctx.globalAlpha = alpha === undefined ? 1 : alpha;
 
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  roundRect(cx - r, cy - r, r * 2, r * 2, 6);
   ctx.fillStyle = k.color + (aura ? '2e' : '14');
   ctx.fill();
   ctx.strokeStyle = k.color;
@@ -1852,9 +1856,10 @@ function drawAuraFields() {
     if (!AURA_KINDS.has(t.kind)) continue;
     const size = towerFootprint(t);
     const { x, y } = cellToPx(t.gx, t.gy);
+    const r = towerRange(t) * cell;
+    const cx = x + cell * size / 2, cy = y + cell * size / 2;
     ctx.fillStyle = KINDS[t.kind].color + '16';
-    ctx.beginPath();
-    ctx.arc(x + cell * size / 2, y + cell * size / 2, towerRange(t) * cell, 0, Math.PI * 2);
+    roundRect(cx - r, cy - r, r * 2, r * 2, 6);
     ctx.fill();
   }
 }

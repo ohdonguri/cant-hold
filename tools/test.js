@@ -50,6 +50,23 @@ function ok(name, cond, detail) {
       if (g.isPath(x, y) && g.canPlace(x, y, 1, occ)) onPath++;
   ok('경로 위에는 배치 불가', onPath === 0, String(onPath));
 
+  // 사거리는 정사각형이다. 원이면 격자에서 모서리 칸이 걸치는지 눈으로 못 읽는다.
+  {
+    const t = { gx: 3, gy: 4, kind: 'marksman', star: 1, b3: null, b5: null, t7: null };
+    const R = g.towerRange(t);
+    const at = (dx, dy) => ({ x: 3.5 + dx - 0.5, y: 4.5 + dy - 0.5, kind: 'grunt' });
+    const inRange = e => {
+      state.enemies.length = 0;
+      g.spawnEnemy('grunt');
+      const en = state.enemies[0];
+      en.x = e.x; en.y = e.y;
+      return g.towerRange(t) >= Math.max(Math.abs(3.5 - (en.x + 0.5)), Math.abs(4.5 - (en.y + 0.5)));
+    };
+    ok('정면 끝은 사거리 안', inRange(at(R - 0.1, 0)));
+    ok('대각 모서리도 사거리 안', inRange(at(R - 0.1, R - 0.1)), '원이면 여기서 빠진다');
+    ok('네모 밖은 사거리 밖', !inRange(at(R + 0.2, 0)));
+  }
+
   // 경로는 끊기지 않아야 한다
   let gaps = 0;
   for (let d = 0; d < g.PATH_LEN; d += 0.5) {
