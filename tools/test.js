@@ -243,6 +243,58 @@ function ok(name, cond, detail) {
   ok('둘째 웨이브부터는 자동', state.wave === 2, String(state.wave));
 }
 
+// ── 서리탑 장판 ───────────────────────────────────────────────
+{
+  console.log('서리탑 장판');
+  const g = load();
+  const { state, CFG } = g;
+  g.pickStage(0);
+  ['frost', 'marksman', 'mint'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.phase = 'wave';
+  state.wave = 5;
+  state.gold = 99999;
+  g.summon('frost', 3, 4);
+  const t = state.towers[0];
+  t.star = 4;
+  const size = g.towerFootprint(t);
+  const c = { x: t.gx + size / 2, y: t.gy + size / 2 };
+
+  const ring = (n, dist) => {
+    state.enemies.length = 0;
+    const es = [];
+    for (let i = 0; i < n; i++) {
+      g.spawnEnemy('grunt');
+      const e = state.enemies[i];
+      e.maxHp = 1e9;
+      const a = i * 2 * Math.PI / n;
+      e.x = c.x + Math.cos(a) * dist - 0.5;
+      e.y = c.y + Math.sin(a) * dist - 0.5;
+      es.push({ e, x: e.x, y: e.y });
+    }
+    const dealt = es.map(() => 0);
+    for (let i = 0; i < 150; i++) {
+      es.forEach(o => { o.e.hp = 1e9; o.e.x = o.x; o.e.y = o.y; });
+      g.update(1 / 30);
+      es.forEach((o, k) => { dealt[k] += 1e9 - o.e.hp; });
+    }
+    return { dealt, slow: es[0].e.slowAmt };
+  };
+
+  const few = ring(3, 1.2);
+  ok('장판이 범위 안 전원을 때린다', few.dealt.every(v => v > 0), few.dealt.map(v => Math.round(v)).join('/'));
+  ok('슬로우도 같이 걸린다', few.slow > 0, (few.slow * 100).toFixed(0) + '%');
+
+  // 대상 수 제한이 없으면 군집에서 박격포 역할을 먹는다
+  const many = ring(10, 1.2);
+  const touched = many.dealt.filter(v => v > 0).length;
+  ok('동시 타격 수에 상한이 있다', touched <= CFG.FROST_TARGETS, touched + '/10 (상한 ' + CFG.FROST_TARGETS + ')');
+
+  // 사거리 밖은 안 맞는다
+  const out = ring(2, g.towerRange(t) + 2);
+  ok('사거리 밖은 안 맞는다', out.dealt.every(v => v === 0), out.dealt.map(v => Math.round(v)).join('/'));
+}
+
 // ── 스테이지 ─────────────────────────────────────────────────
 {
   console.log('스테이지');

@@ -55,6 +55,8 @@ const CFG = {
   GOLD_BASE: 70,       // 웨이브 클리어 골드
   GOLD_GROWTH: 1.11,   // 웨이브당 클리어 골드 증가율
   MINT_BASE: 12,       // 조폐소 웨이브 수입 (x 성급 계수)
+  FROST_FIELD: 0.30,
+  FROST_TARGETS: 4,    // 장판이 동시에 때리는 최대 수. 없으면 군집에서 박격포를 먹는다   // 서리탑 장판 딜 계수 (단일 DPS 대비)
 };
 
 // 성급별 데미지 계수 (base x 계수).
@@ -750,7 +752,12 @@ function fireTower(t, dt) {
 
   if (t.kind === 'frost') {
     const amt = t.b3 === 'B' ? 0.55 : 0.30;
+    // 딜도 장판이다. 단일 빔이면 오라 타워인지 딜러인지 안 읽힌다.
+    // 사거리 안 전원에게 동시에 들어가므로 단일 DPS 보다 훨씬 세다 → 계수로 깎는다.
+    const dps = towerDmg(t) / towerCd(t) * CFG.FROST_FIELD;
+    let hit = 0;
     for (const e of enemiesInRange(t)) {
+      if (hit++ < CFG.FROST_TARGETS) damage(e, dps * dt, 'magic', t);
       const s = debuffScale(e, t);
       if (s <= 0) continue;
       e.slowNext = Math.max(e.slowNext, amt * s);
@@ -809,11 +816,7 @@ function fireTower(t, dt) {
     return;
   }
 
-  if (t.kind === 'frost') {
-    damage(targets[0], dmg, type, t);
-    beam(t, targets[0]);
-    return;
-  }
+  if (t.kind === 'frost') return;   // 딜은 위 장판에서 이미 나갔다
 
   if (t.kind === 'mortar') {
     const c = towerCenter(t);
@@ -1826,6 +1829,21 @@ function drawRange(t, alpha) {
   ctx.restore();
 }
 
+// 오라는 눈에 안 보이면 없는 것과 같다. 선택하지 않아도 범위를 깔아 두면
+// 적이 그 안에 들어온 순간이 그대로 읽힌다.
+function drawAuraFields() {
+  const { cell } = view;
+  for (const t of state.towers) {
+    if (!AURA_KINDS.has(t.kind)) continue;
+    const size = towerFootprint(t);
+    const { x, y } = cellToPx(t.gx, t.gy);
+    ctx.fillStyle = KINDS[t.kind].color + '16';
+    ctx.beginPath();
+    ctx.arc(x + cell * size / 2, y + cell * size / 2, towerRange(t) * cell, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 function drawEffects() {
   const { cell, ox, oy } = view;
   const P = (gx, gy) => ({ x: ox + gx * cell, y: oy + gy * cell });
@@ -1892,13 +1910,6 @@ function drawEnemies() {
     if (e.armorStacks > 0) {           // 방깎 스택은 하단 주황 점으로
       ctx.fillStyle = '#f0883e';
       ctx.fillRect(cx - r, cy + r + 1, r * 2 * Math.min(1, e.armorStacks / (e.armorPer === 4 ? 12 : 9)), 2);
-    }
-    if (e.slowAmt > 0 && e.frozen <= 0) {
-      ctx.strokeStyle = 'rgba(121,192,255,0.8)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r + 2.5, 0, Math.PI * 2);
-      ctx.stroke();
     }
 
     if (e.hp < e.maxHp) {
@@ -2187,6 +2198,7 @@ function render() {
   ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
   ctx.clip();
   drawBoard();
+  drawAuraFields();
   const sel = selectedTower();
   if (sel) drawRange(sel);
   for (const t of state.towers) drawTower(t);
