@@ -81,51 +81,102 @@ function waveHp(wave) {
 // 경로. 격자 좌표 웨이포인트이고, 꺾이는 지점만 적는다.
 // 보드 밖(-1, 8)에서 들어오고 나간다.
 // ═════════════════════════════════════════════════════════════
-// 3행마다 가로 통로를 놓고 양 끝에서 번갈아 내려간다.
-// 통로 사이에 남는 2행 띠가 곧 배치 공간이라, 경로를 길게 뽑으면서도
-// 2x2 자리가 줄지 않는다. 그리고 모든 배치 칸이 통로에 붙어 있어서
-// 오라형 타워(파쇄자·서리탑)가 항상 경로를 문다.
-const PATH = [
-  { x: -1, y: 0 }, { x: 6, y: 0 },
-  { x: 6, y: 3 }, { x: 0, y: 3 },
-  { x: 0, y: 6 }, { x: 6, y: 6 },
-  { x: 6, y: 9 }, { x: 0, y: 9 },
-  { x: 0, y: 10 },
+// ═════════════════════════════════════════════════════════════
+// 스테이지. 맵 하나로 모든 요구를 만족시킬 수 없어서(경로 밀도와
+// 2x2 주머니는 정면 충돌한다) 맵 자체를 진행 콘텐츠로 만든다.
+// 레인이 여러 개면 갈래길과 양방향 침공이 같은 구조로 처리된다.
+// 후보 맵의 수치 비교는 tools/paths.js 참고.
+// ═════════════════════════════════════════════════════════════
+const P = (x, y) => ({ x, y });
+
+const STAGES = [
+  {
+    name: '외곽 도로',
+    desc: '한 갈래. 통로가 3행마다 규칙적이라 어디에 놓아도 비슷하다',
+    w: 7, h: 10, openRows: 6, unlockAt: [8, 15], hpMult: 1.0, waves: 20,
+    lanes: [[P(-1, 0), P(6, 0), P(6, 3), P(0, 3), P(0, 6), P(6, 6), P(6, 9), P(0, 9), P(0, 10)]],
+  },
+  {
+    name: '이중 병목',
+    desc: '경로가 좁은 목을 두 번 스친다. 그 옆 칸이 압도적으로 좋다',
+    w: 7, h: 10, openRows: 6, unlockAt: [8, 15], hpMult: 1.0, waves: 25,
+    lanes: [[P(-1, 0), P(6, 0), P(6, 3), P(1, 3), P(1, 1), P(3, 1), P(3, 6), P(6, 6), P(6, 9), P(0, 9), P(0, 10)]],
+  },
+  {
+    name: '갈래길',
+    desc: '적이 두 갈래로 나뉜다. 한쪽만 막으면 절반이 샌다',
+    w: 7, h: 10, openRows: 6, unlockAt: [8, 15], hpMult: 0.6, waves: 30,
+    lanes: [
+      [P(-1, 0), P(3, 0), P(3, 3), P(0, 3), P(0, 7), P(3, 7), P(3, 9), P(6, 9), P(6, 10)],
+      [P(-1, 0), P(3, 0), P(3, 3), P(6, 3), P(6, 7), P(3, 7), P(3, 9), P(6, 9), P(6, 10)],
+    ],
+  },
+  {
+    // 지형은 이중 병목과 같고 규칙만 다르다. 양쪽에서 오면 병목 옆자리
+    // 하나로는 못 막는다 — 같은 맵을 다시 읽게 만드는 게 목적이다.
+    name: '역류',
+    desc: '이중 병목을 양쪽 끝에서 동시에 밀고 들어온다',
+    w: 7, h: 10, openRows: 8, unlockAt: [10], hpMult: 0.8, waves: 30,
+    lanes: [
+      [P(-1, 0), P(6, 0), P(6, 3), P(1, 3), P(1, 1), P(3, 1), P(3, 6), P(6, 6), P(6, 9), P(0, 9), P(0, 10)],
+      [P(0, 10), P(0, 9), P(6, 9), P(6, 6), P(3, 6), P(3, 1), P(1, 1), P(1, 3), P(6, 3), P(6, 0), P(-1, 0)],
+    ],
+  },
 ];
 
-// 웨이포인트 사이를 훑어 경로가 점유한 칸 집합을 만든다.
-const PATH_CELLS = (() => {
+// 현재 스테이지의 런타임 데이터. loadStage() 가 제자리에서 갈아끼운다.
+// 재할당하면 밖에서 잡은 참조가 끊기므로 항상 같은 객체를 유지한다.
+const lanes = [];        // [{points, seg, len}]
+const pathCells = new Set();
+
+function laneCells(points) {
   const set = new Set();
-  for (let i = 0; i < PATH.length - 1; i++) {
-    const a = PATH[i], b = PATH[i + 1];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
     const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
     let x = a.x, y = a.y;
     set.add(x + ',' + y);
-    while (x !== b.x || y !== b.y) {
+    let guard = 0;
+    while ((x !== b.x || y !== b.y) && guard++ < 999) {
       x += dx; y += dy;
       set.add(x + ',' + y);
     }
   }
   return set;
-})();
+}
 
-// 웨이포인트 구간별 길이 — 적 이동 진행도 계산에 쓴다.
-const PATH_SEG = PATH.slice(0, -1).map((a, i) => {
-  const b = PATH[i + 1];
-  return Math.hypot(b.x - a.x, b.y - a.y);
-});
-const PATH_LEN = PATH_SEG.reduce((s, v) => s + v, 0);
+function loadStage(index) {
+  const def = STAGES[Math.max(0, Math.min(STAGES.length - 1, index))];
+  state.stage = STAGES.indexOf(def);
 
-function isPath(gx, gy) { return PATH_CELLS.has(gx + ',' + gy); }
+  CFG.BOARD_W = def.w;
+  CFG.BOARD_H = def.h;
+  CFG.OPEN_ROWS = def.openRows;
+  CFG.UNLOCK_AT = def.unlockAt;
+  CFG.WAVE_MAX = def.waves;
+
+  lanes.length = 0;
+  for (const points of def.lanes) {
+    const seg = points.slice(0, -1).map((a, i) => Math.hypot(points[i + 1].x - a.x, points[i + 1].y - a.y));
+    lanes.push({ points, seg, len: seg.reduce((s, v) => s + v, 0) });
+  }
+
+  pathCells.clear();
+  for (const l of lanes) for (const c of laneCells(l.points)) pathCells.add(c);
+
+  resize();
+}
+
+function isPath(gx, gy) { return pathCells.has(gx + ',' + gy); }
 
 // ═════════════════════════════════════════════════════════════
 // 타워 정의. 분기 효과는 이후 패스에서 붙인다.
 // ═════════════════════════════════════════════════════════════
 const KINDS = {
-  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.7, cd: 0.6, range: 2.4, role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
+  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.6, cd: 0.6, range: 2.4, role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
   eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제' },
   frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
-  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.1, cd: 1.6, range: 3.2, role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
+  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 0.8, cd: 1.6, range: 3.2, role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
   marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
   arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.6, cd: 2.5, range: 4.0, role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
   mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, role: '경제', blurb: '공격 안 함. 골드 수입만' },
@@ -189,24 +240,29 @@ const WAVES = [
 ];
 
 // 진행 거리(칸)를 격자 좌표로 환산.
-function posAt(dist) {
+function posAt(dist, lane) {
+  const L = lanes[lane || 0] || lanes[0];
+  const pts = L.points;
   let d = Math.max(0, dist);
-  for (let i = 0; i < PATH_SEG.length; i++) {
-    if (d <= PATH_SEG[i] || i === PATH_SEG.length - 1) {
-      const a = PATH[i], b = PATH[i + 1];
-      const t = PATH_SEG[i] === 0 ? 0 : Math.min(1, d / PATH_SEG[i]);
+  for (let i = 0; i < L.seg.length; i++) {
+    if (d <= L.seg[i] || i === L.seg.length - 1) {
+      const a = pts[i], b = pts[i + 1];
+      const t = L.seg[i] === 0 ? 0 : Math.min(1, d / L.seg[i]);
       return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
     }
-    d -= PATH_SEG[i];
+    d -= L.seg[i];
   }
-  return PATH[PATH.length - 1];
+  return pts[pts.length - 1];
 }
+
+function laneLen(lane) { return (lanes[lane || 0] || lanes[0]).len; }
 
 // ═════════════════════════════════════════════════════════════
 // 상태
 // ═════════════════════════════════════════════════════════════
 const state = {
-  phase: 'deck',       // deck | build | wave | over | clear
+  phase: 'stage',      // stage | deck | build | wave | over | clear
+  stage: 0,
   wave: 0,
   timer: CFG.WAVE_GAP,
   gold: CFG.START_GOLD,
@@ -662,8 +718,8 @@ function fireTower(t, dt) {
   // 배치 위치가 곧 디버프 범위라서, 어디에 놓느냐가 성능이 된다.
 
   if (t.kind === 'shredder') {
-    const per = t.b3 === 'B' ? 4 : 2;
-    const rate = 2.5;                   // 초당 쌓이는 스택
+    const per = t.b3 === 'B' ? 2.4 : 1.2;
+    const rate = 1.5;                   // 초당 쌓이는 스택                   // 초당 쌓이는 스택
     for (const e of enemiesInRange(t)) applyStacks(e, rate * dt, per, t);
   }
 
@@ -741,7 +797,7 @@ function fireTower(t, dt) {
     for (let i = 0; i < shots; i++) {
       const aim = targets[Math.min(i, targets.length - 1)];
       // 착탄 지연만큼 앞을 겨냥한다. 그래도 질주몹은 놓치는데, 그게 의도된 약점이다.
-      const lead = posAt(aim.dist + enemySpeed(aim) * 0.5);
+      const lead = posAt(aim.dist + enemySpeed(aim) * 0.5, aim.lane);
       const jitter = shots > 1 ? (i - 1) * 0.6 : 0;
       state.shells.push({
         x: c.x, y: c.y, tx: lead.x + 0.5 + jitter, ty: lead.y + 0.5,
@@ -860,7 +916,7 @@ function updateShells(dt) {
       if (e.dead) continue;
       if (Math.hypot(e.x + 0.5 - s.tx, e.y + 0.5 - s.ty) > s.radius) continue;
       damage(e, s.dmg, 'physical', t);
-      if (t.b5 === 'B1' && debuffScale(e, t) > 0) e.stun = Math.max(e.stun, 0.5);
+      if (t.b5 === 'B1' && debuffScale(e, t) > 0) e.stun = Math.max(e.stun, 0.3);
     }
     if (t.b5 === 'A2') state.patches.push({ x: s.tx, y: s.ty, r: s.radius, dps: s.dmg * 0.5, t: 3, tower: t.id });
     state.blasts.push({ x: s.tx, y: s.ty, r: s.radius, t: 0.25 });
@@ -1011,6 +1067,77 @@ function rechoose() {
 
 function hitButton(px, py) {
   return buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+}
+
+// ── 스테이지 선택 ────────────────────────────────────────────
+const SAVE_KEY = 'cant-hold-progress';
+
+function loadProgress() {
+  try {
+    const n = parseInt(localStorage.getItem(SAVE_KEY), 10);
+    return Number.isFinite(n) ? Math.max(1, Math.min(STAGES.length, n)) : 1;
+  } catch { return 1; }
+}
+function saveProgress(n) {
+  try { localStorage.setItem(SAVE_KEY, String(n)); } catch { /* 저장 못 해도 게임은 돈다 */ }
+}
+let unlocked = 1;
+
+function stageCardRects() {
+  const pad = 16, top = 132, gap = 12;
+  const n = STAGES.length;
+  const h = Math.min(88, (view.h - top - 40 - (n - 1) * gap) / n);
+  return STAGES.map((def, i) => ({ i, def, x: pad, y: top + i * (h + gap), w: view.w - pad * 2, h }));
+}
+
+function drawStageSelect() {
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, view.w, view.h);
+  ctx.textBaseline = 'top';
+
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '700 22px system-ui, sans-serif';
+  ctx.fillText('스테이지', 16, 44);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText('맵마다 좋은 자리가 다르다. 깨면 다음이 열린다.', 16, 78);
+  ctx.fillStyle = '#6e7681';
+  ctx.fillText(`${unlocked} / ${STAGES.length} 해금`, 16, 100);
+
+  for (const r of stageCardRects()) {
+    const open = r.i < unlocked;
+    ctx.fillStyle = open ? '#161b22' : '#111519';
+    ctx.strokeStyle = open ? '#30363d' : '#21262d';
+    ctx.lineWidth = 1.5;
+    roundRect(r.x, r.y, r.w, r.h, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = open ? '#e6edf3' : '#484f58';
+    ctx.font = '700 16px system-ui, sans-serif';
+    ctx.fillText(`${r.i + 1}. ${r.def.name}`, r.x + 16, r.y + 12);
+
+    ctx.fillStyle = open ? '#8b949e' : '#3d444d';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(open ? r.def.desc : '이전 스테이지를 깨야 열린다', r.x + 16, r.y + 36);
+
+    ctx.fillStyle = open ? '#6e7681' : '#3d444d';
+    ctx.font = '11px system-ui, sans-serif';
+    // hpMult 를 그대로 보여주면 오해한다. 레인이 갈리면 배율이 1 미만이어도
+    // 타워가 한쪽만 커버해서 더 어렵다. 그래서 순서대로 난이도를 매긴다.
+    ctx.fillText(
+      `${'●'.repeat(r.i + 1)}${'○'.repeat(STAGES.length - r.i - 1)}   웨이브 ${r.def.waves}   ` +
+      (r.def.lanes.length > 1 ? `갈래 ${r.def.lanes.length}` : '한 갈래'),
+      r.x + 16, r.y + 58);
+  }
+  ctx.textAlign = 'left';
+}
+
+function pickStage(i) {
+  if (i >= unlocked) { toast('아직 잠김'); return; }
+  loadStage(i);
+  state.phase = 'deck';
+  state.deckPick = [];
 }
 
 // ── 빈 칸 탭 → 소환 종류 고르기 ───────────────────────────────
@@ -1183,6 +1310,12 @@ function choiceLabel(opt) {
 canvas.addEventListener('pointerdown', e => {
   const px = e.clientX, py = e.clientY;
 
+  if (state.phase === 'stage') {
+    const hit = stageCardRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
+    if (hit) pickStage(hit.i);
+    return;
+  }
+
   if (state.phase === 'deck') {
     const hit = deckCardRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
     if (hit) { toggleDeckPick(hit.k); return; }
@@ -1254,7 +1387,7 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('pointercancel', () => { drag = null; });
 
 function restart() {
-  state.phase = 'deck';
+  state.phase = 'stage';
   state.deckPick = [];
   state.wave = 0;
   state.timer = CFG.WAVE_GAP;
@@ -1308,12 +1441,16 @@ function startWave() {
   state.spawnQueue = buildSpawnQueue(state.wave);
 }
 
+let laneCursor = 0;
+
 function spawnEnemy(kind) {
   const d = ENEMY[kind];
-  const hp = d.hp * waveHp(state.wave);
+  const hp = d.hp * waveHp(state.wave) * STAGES[state.stage].hpMult;
+  const lane = lanes.length > 1 ? (laneCursor++ % lanes.length) : 0;
+  const start = lanes[lane].points[0];
   state.enemies.push({
     id: nextEnemyId++, kind, hp, maxHp: hp,
-    dist: 0, x: PATH[0].x, y: PATH[0].y,
+    lane, dist: 0, x: start.x, y: start.y,
     hitFlash: 0, dead: false,
     armorStacks: 0, armorPer: 2, armorT: 0,
     mresCut: 0, magicVuln: 0, arcResonance: 0, plagueT: 0, plagueCut: 0, plagueVuln: 0,
@@ -1345,7 +1482,13 @@ function endWave() {
     state.openRows = Math.min(CFG.BOARD_H, state.openRows + 2);
     toast('보드 확장');
   }
-  if (state.wave >= CFG.WAVE_MAX) state.phase = 'clear';
+  if (state.wave >= CFG.WAVE_MAX) {
+    state.phase = 'clear';
+    if (state.stage + 1 >= unlocked && unlocked < STAGES.length) {
+      unlocked = state.stage + 2;
+      saveProgress(unlocked);
+    }
+  }
 }
 
 function enemySpeed(e) {
@@ -1378,11 +1521,11 @@ function updateEnemies(dt) {
     if (e.frozen > 0 || e.stun > 0) { survivors.push(e); continue; }
 
     e.dist += enemySpeed(e) * dt;
-    if (e.dist >= PATH_LEN) {
+    if (e.dist >= laneLen(e.lane)) {
       state.life -= d.leak;
       continue;
     }
-    const p = posAt(e.dist);
+    const p = posAt(e.dist, e.lane);
     e.x = p.x; e.y = p.y;
     survivors.push(e);
   }
@@ -1398,7 +1541,7 @@ function update(dt) {
   }
   for (const t of state.towers) if (t.flash > 0) t.flash -= dt;
 
-  if (state.phase === 'deck' || state.picker) return;
+  if (state.phase === 'deck' || state.phase === 'stage' || state.picker) return;
 
   // 분기 선택 중에는 판을 멈춘다. 웨이브 도중에 5성이 나올 수 있는데
   // 그때 뒤에서 적이 계속 흐르면 고를 수가 없다.
@@ -1444,12 +1587,14 @@ function drawBoard() {
   ctx.lineWidth = cell * 0.88;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.beginPath();
-  PATH.forEach((p, i) => {
-    const x = ox + (p.x + 0.5) * cell, y = oy + (p.y + 0.5) * cell;
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  });
-  ctx.stroke();
+  for (const L of lanes) {
+    ctx.beginPath();
+    L.points.forEach((p, i) => {
+      const x = ox + (p.x + 0.5) * cell, y = oy + (p.y + 0.5) * cell;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+  }
 
   // 잠긴 행은 어둡게 덮는다
   if (open > 0) {
@@ -1469,12 +1614,18 @@ function drawBoard() {
     ctx.setLineDash([]);
   }
 
-  // 관문
-  const exit = PATH[PATH.length - 1];
-  const ep = cellToPx(exit.x, exit.y - 1);
+  // 관문. 레인마다 하나씩이고, 겹치면 한 번만 그려진다.
   ctx.strokeStyle = '#f85149';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(ep.x + 2, ep.y + cell - 5, cell - 5, 3);
+  ctx.lineWidth = 4;
+  for (const L of lanes) {
+    const a = L.points[L.points.length - 2], b = L.points[L.points.length - 1];
+    const cx = ox + (b.x + 0.5) * cell, cy = oy + (b.y + 0.5) * cell;
+    const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+    ctx.beginPath();
+    ctx.moveTo(cx - dy * cell * 0.4 - dx * cell * 0.4, cy - dx * cell * 0.4 - dy * cell * 0.4);
+    ctx.lineTo(cx + dy * cell * 0.4 - dx * cell * 0.4, cy + dx * cell * 0.4 - dy * cell * 0.4);
+    ctx.stroke();
+  }
 }
 
 function drawTower(t) {
@@ -1866,6 +2017,7 @@ function roundRect(x, y, w, h, r) {
 }
 
 function render() {
+  if (state.phase === 'stage') { drawStageSelect(); drawToast(); return; }
   if (state.phase === 'deck') { drawDeckSelect(); drawToast(); return; }
 
   layoutButtons();
@@ -1901,7 +2053,7 @@ function drawOverlay() {
   ctx.textBaseline = 'middle';
   ctx.fillStyle = state.phase === 'over' ? '#f85149' : '#7ee787';
   ctx.font = '700 26px system-ui, sans-serif';
-  ctx.fillText(state.phase === 'over' ? '이번 웨이브는 못 막았습니다' : '전부 막았습니다',
+  ctx.fillText(state.phase === 'over' ? '이번 웨이브는 못 막았습니다' : STAGES[state.stage].name + ' 클리어',
     view.w / 2, view.h / 2 - 16);
   ctx.fillStyle = '#8b949e';
   ctx.font = '15px system-ui, sans-serif';
@@ -1924,6 +2076,9 @@ function frame(now) {
   render();
   requestAnimationFrame(frame);
 }
+
+unlocked = loadProgress();
+loadStage(0);
 requestAnimationFrame(frame);
 </script>
 </body>

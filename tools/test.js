@@ -132,12 +132,42 @@ function ok(name, cond, detail) {
   ok('조폐소 5성은 1칸 유지', mint5 && g.towerFootprint(mint5) === 1);
 }
 
+// ── 스테이지 ─────────────────────────────────────────────────
+{
+  console.log('스테이지');
+  const g = load();
+  const { state } = g;
+  ok('스테이지 선택 화면에서 시작', state.phase === 'stage', state.phase);
+  ok('카드가 스테이지 수만큼', g.stageCardRects().length === g.STAGES.length);
+
+  g.pickStage(1);
+  ok('잠긴 스테이지는 못 고름', state.phase === 'stage', state.phase);
+
+  g.pickStage(0);
+  ok('열린 스테이지는 골라진다', state.phase === 'deck');
+  ok('맵이 실려 있다', g.lanes.length >= 1 && g.pathCells.size > 0,
+    '레인 ' + g.lanes.length + ', 경로칸 ' + g.pathCells.size);
+
+  // 스테이지마다 맵과 규칙이 실제로 다른지
+  const seen = new Set();
+  for (let i = 0; i < g.STAGES.length; i++) {
+    g.loadStage(i);
+    seen.add([...g.pathCells].sort().join('|') + '#' + g.lanes.length);
+  }
+  ok('스테이지마다 맵이 다르다', seen.size === g.STAGES.length, seen.size + '/' + g.STAGES.length);
+
+  // 후반 스테이지는 레인이 여러 개
+  g.loadStage(g.STAGES.length - 1);
+  ok('마지막 스테이지는 다중 레인', g.lanes.length > 1, String(g.lanes.length));
+}
+
 // ── 덱 선택 ───────────────────────────────────────────────────
 {
   console.log('덱 선택');
   const g = load();
   const { state, CFG } = g;
-  ok('덱 선택 화면에서 시작', state.phase === 'deck');
+  g.pickStage(0);
+  ok('스테이지를 고르면 덱 화면', state.phase === 'deck');
   ok('카드가 타워 종류 수만큼', g.deckCardRects().length === g.KIND_KEYS.length);
 
   g.toggleDeckPick('frost');
@@ -165,33 +195,37 @@ function ok(name, cond, detail) {
 }
 
 // ── 밸런스 ────────────────────────────────────────────────────
+// 스테이지는 깨야 다음이 열리므로 "그리디가 절대 못 깬다"가 목표가 아니다.
+// 1스테이지는 대충 해도 깨지고, 뒤로 갈수록 안 깨져야 한다.
 {
-  console.log('밸런스 (그리디)');
-  const run = (deck, n) => {
-    const w = [], st = [];
-    let clears = 0;
+  console.log('밸런스 (스테이지 곡선, 각 8회)');
+  const DECK = ['shredder', 'arc', 'mint'];
+  const rows = [];
+  const n = 8;
+  for (let st = 0; st < load().STAGES.length; st++) {
+    const w = [];
+    let clears = 0, five = 0;
     for (let i = 0; i < n; i++) {
-      const r = greedy(load(), { deck });
+      const g = load();
+      const r = greedy(g, { stage: st, deck: DECK });
       if (r.result === 'clear') clears++;
-      w.push(r.result === 'clear' ? 30 : r.wave);
-      st.push(r.maxStar);
+      if (r.maxStar >= 5) five++;
+      w.push(r.result === 'clear' ? g.CFG.WAVE_MAX : r.wave);
     }
-    w.sort((x, y) => x - y);
-    return { med: w[n >> 1], w, st, clears };
-  };
+    w.sort((a, b) => a - b);
+    rows.push({ st, clears, med: w[n >> 1], w, five });
+  }
 
-  // 시뮬 기준 상위권 덱. 플레이어는 좋은 덱을 고르므로 여기가 난이도 기준선이다.
-  const best = run(['shredder', 'arc', 'mint'], 10);
-  ok('최고 덱 중앙값 20~27', best.med >= 20 && best.med <= 27, 'w' + best.med + '  [' + best.w.join(',') + ']');
-  ok('최고 덱으로도 클리어 못 함', best.clears === 0, best.clears + '회');
-  const five = best.st.filter(s => s >= 5).length;
-  ok('5성 도달률 90% 이상', five / best.st.length >= 0.9, five + '/' + best.st.length);
+  for (const r of rows) console.log('    S' + (r.st + 1) + '  클리어 ' + r.clears + '/' + n + '  중앙 w' + r.med);
 
-  // 덱이 결과를 실제로 바꾸는지. 이 차이가 작으면 덱 선택은 가짜 결정이다.
-  const worst = run(['frost', 'marksman', 'arc'], 10);
-  ok('덱 차이가 4웨이브 이상', best.med - worst.med >= 4,
-    '최고 w' + best.med + ' vs 최저 w' + worst.med + ' = ' + (best.med - worst.med));
-  ok('HP/데미지에 NaN 없음', best.w.concat(worst.w).every(v => Number.isFinite(v)));
+  ok('1스테이지는 대충 해도 깨진다', rows[0].clears >= 4, rows[0].clears + '/' + n);
+  ok('마지막 스테이지는 안 깨진다', rows[rows.length - 1].clears <= 1, rows[rows.length - 1].clears + '/' + n);
+  ok('뒤 스테이지가 더 어렵다', rows[0].clears > rows[rows.length - 1].clears);
+  ok('어느 스테이지도 초반 전멸은 없다', rows.every(r => r.w[0] >= Math.min(10, r.med)),
+    rows.map(r => 'S' + (r.st + 1) + ':' + r.w[0]).join(' '));
+  ok('5성 도달률 90% 이상', rows.every(r => r.five / n >= 0.9),
+    rows.map(r => r.five + '/' + n).join(' '));
+  ok('HP/데미지에 NaN 없음', rows.every(r => r.w.every(v => Number.isFinite(v))));
 }
 
 // ── 타워 대등성 ───────────────────────────────────────────────
@@ -218,7 +252,8 @@ function ok(name, cond, detail) {
     catch (err) { ok(name, false, err.message); }
   };
 
-  safe('덱 선택 화면', () => {});
+  safe('스테이지 선택 화면', () => {});
+  safe('덱 선택 화면', () => { g.pickStage(0); });
   safe('덱 일부 고른 상태', () => { g.toggleDeckPick('frost'); g.toggleDeckPick('mortar'); });
   safe('빈 보드', () => { g.toggleDeckPick('marksman'); g.startRun(); });
   safe('타워 있음', () => { state.gold = 9999; for (let i = 0; i < 6; i++) g.summon(); });
@@ -241,12 +276,13 @@ function ok(name, cond, detail) {
     ok('  분기가 저장됨', t.b3 === 'B', String(t.b3));
     ok('  모달이 닫힘', state.choice === null);
   });
-  safe('게임 오버', () => { state.phase = 'over'; });
+  safe('소환 피커', () => { state.picker = { gx: 2, gy: 8 }; });
+  safe('게임 오버', () => { state.picker = null; state.phase = 'over'; });
   safe('클리어', () => { state.phase = 'clear'; });
   safe('재시작', () => {
     g.restart();
     ok('  재시작이 판을 비움', state.towers.length === 0 && state.wave === 0 && state.life > 0);
-    ok('  재시작하면 덱 선택으로 돌아감', state.phase === 'deck' && state.deckPick.length === 0);
+    ok('  재시작하면 스테이지 선택으로 돌아감', state.phase === 'stage' && state.deckPick.length === 0);
   });
 }
 

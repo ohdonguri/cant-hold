@@ -31,25 +31,34 @@ const EXPOSE = [
   'CFG', 'state', 'update', 'KINDS', 'KIND_KEYS', 'ENEMY', 'WAVES', 'STAR_MULT',
   'waveHp', 'summon', 'summonCost', 'canPlace', 'occupancy', 'firstOpenRow',
   'canMerge', 'mergeTowers', 'applyChoice', 'rushWave', 'towerDmg', 'towerCd',
-  'towerRange', 'towerFootprint', 'aimArc', 'posAt', 'PATH_LEN', 'buildSpawnQueue',
-  'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'PATH_CELLS',
+  'towerRange', 'towerFootprint', 'aimArc', 'posAt', 'buildSpawnQueue',
+  'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
   'render', 'restart', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect',
+  'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
 ];
 
 function load(overrides) {
   const html = fs.readFileSync(HTML, 'utf8');
   const js = patch(html.split('<script>')[1].split('</' + 'script>')[0], overrides);
   const canvas = { getContext: () => stubCtx(), addEventListener: () => {}, width: 0, height: 0, style: {} };
-  const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame',
+
+  const store = new Map();
+  const localStorageStub = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+  };
+
+  const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame', 'localStorage',
     js + '\nreturn {' + EXPOSE.join(',') + '};');
   return fn(
     { getElementById: () => canvas },
     { innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener: () => {} },
     { now: () => 0 },
     () => {},
+    localStorageStub,
   );
 }
 
@@ -62,8 +71,12 @@ function greedy(g, opts = {}) {
   const branch3 = opts.branch3 || 'A';
   const branch5 = opts.branch5 || 'A1';
 
-  // 덱 선택 화면을 건너뛴다. opts.deck 이나 미리 세팅된 state.deck 을 쓰고,
-  // 둘 다 없으면 무작위로 뽑는다.
+  // 스테이지/덱 선택 화면을 건너뛴다.
+  if (state.phase === 'stage') {
+    g.loadStage(opts.stage || 0);
+    state.phase = 'deck';
+    state.deckPick = [];
+  }
   if (state.phase === 'deck') {
     const deck = opts.deck || (state.deck.length ? state.deck : null);
     if (deck) state.deckPick = deck.slice(0, CFG.DECK_SIZE);
