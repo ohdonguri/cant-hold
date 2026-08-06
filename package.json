@@ -8,6 +8,9 @@
     "sim": "node tools/tune.js one",
     "shot": "node tools/shot.js",
     "parity": "node tools/parity.js",
-    "sprites": "node tools/sprites.js"
+    "sprites": "node tools/sprites.js",
+    "build": "node build.mjs",
+    "verify:build": "node tools/verify-build.mjs",
+    "deploy": "node build.mjs && npx --yes wrangler@4 deploy"
   }
 }

@@ -1,6 +1,6 @@
 # 이번 웨이브는 못 막습니다
 
-**플레이: https://ohdonguri.github.io/cant-hold/**
+**플레이: https://eastbirdstudio.com/games/canthold/**
 
 성급 합성 타워디펜스. 모바일 세로, 한 판 6~8분.
 
@@ -30,8 +30,19 @@
 ## 실행
 
 ```
-open index.html
+open index.html          원본 그대로 (주석 포함)
+npm run build            dist/games/canthold/index.html 로 압축
+npm run verify:build     원본과 압축본을 헤드리스로 렌더해 비교 (playwright 필요)
+npm run deploy           빌드 + Cloudflare 배포
 ```
+
+**배포는 반드시 `npm run deploy` 로 한다.** 빌드와 배포가 한 줄로 묶여 있어서
+빌드를 빼먹고 옛 페이지가 나가는 사고를 막는다. 웹에 나가는 건 항상 압축본이다 —
+원본 주석에 밸런스를 왜 그 값으로 잡았는지가 길게 들어 있어서 그대로 내보내면
+개발자도구에서 다 읽히고 전송량도 매번 나간다.
+
+작품은 대문과 같은 오리진의 경로(`/games/canthold/`)로 서빙한다. 서브도메인을
+따로 두면 Firebase Auth 세션이 갈린다 (`eastbird-studio/docs/sso-migration.md`).
 
 빌드 도구 없음. 의존성 없음. **이미지 파일도 없다** — 도트는 문자열로 적어 캔버스에 굽는다.
 `index.html` 하나가 게임 전부.

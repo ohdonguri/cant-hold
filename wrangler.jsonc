@@ -1,0 +1,32 @@
+{
+  // Cloudflare Workers 배포 설정. 서버 코드는 없고 정적 자산만 올린다.
+  //
+  // 올리는 건 원본이 아니라 압축본이다. build.mjs 가 index.html 을
+  // dist/games/canthold/index.html 로 압축해 두고, 여기서는 그 폴더만 올린다.
+  // 원본 주석에는 밸런스를 왜 그 값으로 잡았는지가 길게 들어 있어서
+  // 그대로 내보내면 개발자도구에서 다 읽힌다.
+  //
+  // 빌드를 빼먹으면 옛 페이지가 그대로 나간다. 그래서 배포는 `npm run deploy` 로
+  // 한다 — 빌드와 배포가 한 줄로 묶여 있어서 건너뛸 수가 없다.
+  "name": "canthold",
+  "compatibility_date": "2026-08-07",
+
+  "assets": {
+    "directory": "./dist"
+  },
+
+  // 서브도메인을 따로 두지 않는다. 대문과 같은 오리진의 경로로 서빙해야
+  // Firebase Auth 세션이 갈리지 않는다 (eastbird-studio/docs/sso-migration.md 의 A안).
+  // 기존 게임들은 서브도메인이 먼저 있어서 301 스크립트를 달았지만,
+  // 이 게임은 처음부터 경로만 쓰므로 리다이렉트할 옛 주소가 없다.
+  "routes": [
+    {
+      "pattern": "eastbirdstudio.com/games/canthold*",
+      "zone_name": "eastbirdstudio.com"
+    }
+  ],
+
+  // *.workers.dev 주소를 닫는다. 다른 작품들도 같은 이유로 닫아 뒀다 —
+  // 살아 있는 입구가 늘수록 어느 링크를 받았느냐에 따라 다른 걸 보게 된다.
+  "workers_dev": false
+}
