@@ -99,6 +99,7 @@ function ok(name, cond, detail) {
   console.log('합성');
   const g = load();
   const { state, CFG } = g;
+  state.phase = 'build';   // 합성은 준비 단계에서만 된다
   state.towers.length = 0;
   state.gold = 99999;
 
@@ -132,9 +133,21 @@ function ok(name, cond, detail) {
   ok('5성은 2x2 로 커진다', big && g.towerFootprint(big) === 2, big ? String(g.towerFootprint(big)) : 'null');
   ok('5성 진입 시 분기 선택이 뜬다', !!state.choice && state.choice.tier === 5);
 
+  // 웨이브 중에는 합칠 수 없다. 결과 타워가 자리를 옮기면
+  // 오라 범위와 마력로 조준선이 한복판에서 흔들린다.
+  state.towers.length = 0;
+  state.choice = null;
+  const w1 = put('marksman', 1, 2, 4), w2 = put('marksman', 1, 3, 4);
+  state.phase = 'wave';
+  ok('웨이브 중엔 합성 불가', !g.canMerge(w1, w2) && g.mergeTowers(w1, w2) === null);
+  ok('타워가 그대로 남는다', state.towers.length === 2, String(state.towers.length));
+  state.phase = 'build';
+  ok('준비 단계로 오면 다시 된다', g.canMerge(w1, w2));
+
   // 조폐소는 5성이어도 1칸
   state.towers.length = 0;
   state.choice = null;
+  state.phase = 'build';
   const e = put('mint', 4, 1, 7), f = put('mint', 4, 2, 7);
   const mint5 = g.mergeTowers(e, f);
   ok('조폐소 5성은 1칸 유지', mint5 && g.towerFootprint(mint5) === 1);

@@ -405,8 +405,12 @@ function summon(kind, atX, atY) {
 function mergeCost(star) { return 8 * star; }
 function mergeIsFree() { return state.towers.some(t => t.kind === 'mint' && t.b5 === 'A2'); }
 
+// 합성은 준비 단계에서만 된다. 웨이브 중에 합치면 결과 타워가 자리를 옮기고,
+// 그러면 오라 범위와 마력로 조준선이 한복판에서 통째로 흔들린다.
+function mergeAllowed() { return state.phase === 'build'; }
+
 function canMerge(a, b) {
-  return !!a && !!b && a.id !== b.id && a.kind === b.kind
+  return mergeAllowed() && !!a && !!b && a.id !== b.id && a.kind === b.kind
       && a.star === b.star && a.star < CFG.STAR_MAX;
 }
 
@@ -1483,7 +1487,8 @@ canvas.addEventListener('pointerup', e => {
 
   const to = state.towers.find(t => t.id === overId);
   if (canMerge(from, to)) { mergeTowers(from, to); state.selected = null; return; }
-  if (from.kind !== to.kind) toast('종류가 다름');
+  if (!mergeAllowed()) toast('웨이브 중엔 합성 불가');
+  else if (from.kind !== to.kind) toast('종류가 다름');
   else if (from.star !== to.star) toast('성급이 다름');
   else toast('7성이 최대');
 });
