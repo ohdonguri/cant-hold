@@ -285,10 +285,20 @@ function ok(name, cond, detail) {
   ok('장판이 범위 안 전원을 때린다', few.dealt.every(v => v > 0), few.dealt.map(v => Math.round(v)).join('/'));
   ok('슬로우도 같이 걸린다', few.slow > 0, (few.slow * 100).toFixed(0) + '%');
 
-  // 대상 수 제한이 없으면 군집에서 박격포 역할을 먹는다
+  // 지속딜이 피격 플래시를 내면 장판 안의 적이 계속 흰색이라
+  // 슬로우 색을 비롯한 다른 상태 표시가 전부 묻힌다.
+  const flashing = state.enemies.filter(e => e.hitFlash > 0).length;
+  ok('지속딜은 피격 플래시를 안 낸다', flashing === 0, flashing + '마리 깜빡임');
+
+  // 총량 고정 분배. 범위 안이면 전원이 맞아야 "왜 쟤는 안 맞지"가 없다.
   const many = ring(10, 1.2);
   const touched = many.dealt.filter(v => v > 0).length;
-  ok('동시 타격 수에 상한이 있다', touched <= CFG.FROST_TARGETS, touched + '/10 (상한 ' + CFG.FROST_TARGETS + ')');
+  ok('범위 안이면 전원이 맞는다', touched === 10, touched + '/10');
+
+  // 적이 늘어도 총 피해는 그대로여야 군집에서 박격포를 먹지 않는다
+  const sum = a => a.reduce((x, y) => x + y, 0);
+  const ratio = sum(many.dealt) / sum(few.dealt);
+  ok('총 피해가 적 수에 비례하지 않는다', ratio < 1.35, '3마리 대비 10마리 총딜 ' + ratio.toFixed(2) + '배');
 
   // 사거리 밖은 안 맞는다
   const out = ring(2, g.towerRange(t) + 2);

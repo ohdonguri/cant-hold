@@ -55,8 +55,7 @@ const CFG = {
   GOLD_BASE: 70,       // 웨이브 클리어 골드
   GOLD_GROWTH: 1.11,   // 웨이브당 클리어 골드 증가율
   MINT_BASE: 12,       // 조폐소 웨이브 수입 (x 성급 계수)
-  FROST_FIELD: 0.30,
-  FROST_TARGETS: 4,    // 장판이 동시에 때리는 최대 수. 없으면 군집에서 박격포를 먹는다   // 서리탑 장판 딜 계수 (단일 DPS 대비)
+  FROST_FIELD: 1.2,    // 서리탑 장판 총 딜 계수 (범위 안 인원수로 나눠 들어간다)   // 서리탑 장판 딜 계수 (단일 DPS 대비)
 };
 
 // 성급별 데미지 계수 (base x 계수).
@@ -665,7 +664,9 @@ function ampAll(e) {
 }
 function ampMagic(e) { return (e.magicVuln || 0) + (e.inDeepAura ? 0.15 : 0); }
 
-function damage(e, raw, type, src) {
+// tick = 매 프레임 들어가는 지속딜. 피격 플래시를 내지 않는다.
+// 안 그러면 장판 안의 적이 계속 흰색이라 다른 상태 표시가 전부 묻힌다.
+function damage(e, raw, type, src, tick) {
   let d = raw;
   if (type === 'physical') {
     let armor = effArmor(e);
@@ -681,7 +682,7 @@ function damage(e, raw, type, src) {
   }
   d *= 1 + ampAll(e);
   e.hp -= d;
-  e.hitFlash = 0.08;
+  if (!tick) e.hitFlash = 0.08;
   if (e.hp <= 0) killEnemy(e, src);
   return d;
 }
@@ -754,10 +755,13 @@ function fireTower(t, dt) {
     const amt = t.b3 === 'B' ? 0.55 : 0.30;
     // 딜도 장판이다. 단일 빔이면 오라 타워인지 딜러인지 안 읽힌다.
     // 사거리 안 전원에게 동시에 들어가므로 단일 DPS 보다 훨씬 세다 → 계수로 깎는다.
-    const dps = towerDmg(t) / towerCd(t) * CFG.FROST_FIELD;
-    let hit = 0;
-    for (const e of enemiesInRange(t)) {
-      if (hit++ < CFG.FROST_TARGETS) damage(e, dps * dt, 'magic', t);
+    // 장판 딜은 총량이 고정이고 범위 안 인원수로 나눈다.
+    // 인원수 상한을 두면 "범위 안인데 안 맞는 적"이 생기고, 누가 맞는지가
+    // 스폰 순서라 눈으로 못 읽는다. 총량 고정이면 군집에서 박격포를 먹지도 않는다.
+    const list = enemiesInRange(t);
+    const each = list.length ? towerDmg(t) / towerCd(t) * CFG.FROST_FIELD / list.length : 0;
+    for (const e of list) {
+      damage(e, each * dt, 'magic', t, true);
       const s = debuffScale(e, t);
       if (s <= 0) continue;
       e.slowNext = Math.max(e.slowNext, amt * s);
@@ -786,7 +790,7 @@ function fireTower(t, dt) {
         if (t.b5 === 'A2') e.slowNext = Math.max(e.slowNext, 0.15 * s);
       }
       if (t.b3 === 'B') e.inDeepAura = true;
-      if (t.b5 === 'B2') damage(e, e.maxHp * 0.010 * dt, 'pure', t);
+      if (t.b5 === 'B2') damage(e, e.maxHp * 0.010 * dt, 'pure', t, true);
     }
   }
 
@@ -955,7 +959,7 @@ function updatePatches(dt) {
     for (const e of state.enemies) {
       if (e.dead) continue;
       if (Math.hypot(e.x + 0.5 - p.x, e.y + 0.5 - p.y) > p.r) continue;
-      damage(e, p.dps * dt, 'physical', t);
+      damage(e, p.dps * dt, 'physical', t, true);
     }
   }
   state.patches = state.patches.filter(p => p.t > 0);
@@ -982,7 +986,7 @@ function updateCombat(dt) {
   for (const t of state.towers) {
     if (t.kind !== 'frost' || t.b5 !== 'A2') continue;
     for (const e of enemiesInRange(t)) {
-      if (e.slowAmt > 0) damage(e, STAR_MULT[t.star] * 0.25 * dt, 'pure', t);
+      if (e.slowAmt > 0) damage(e, STAR_MULT[t.star] * 0.25 * dt, 'pure', t, true);
     }
   }
 
@@ -1889,6 +1893,14 @@ function drawEffects() {
   }
 }
 
+// 두 색을 섞는다. 디버프 강도를 색 농도로 보여주는 데 쓴다.
+function mixColor(a, b, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
+  const m = (x, y) => Math.round(x + (y - x) * t);
+  return `rgb(${m(r1, r2)},${m(g1, g2)},${m(b1, b2)})`;
+}
+
 function drawEnemies() {
   const { cell, ox, oy } = view;
   for (const e of state.enemies) {
@@ -1897,7 +1909,11 @@ function drawEnemies() {
     const cy = oy + (e.y + 0.5) * cell;
     const r = d.r * cell;
 
-    ctx.fillStyle = e.hitFlash > 0 ? '#fff' : (e.frozen > 0 ? '#79c0ff' : d.color);
+    // 디버프는 적 색으로 읽힌다. 테두리보다 눈에 잘 들어온다.
+    ctx.fillStyle = e.hitFlash > 0 ? '#fff'
+      : e.frozen > 0 ? '#79c0ff'
+      : e.slowAmt > 0 ? mixColor(d.color, '#79c0ff', Math.min(1, e.slowAmt / CFG.SLOW_CAP) * 0.75)
+      : d.color;
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fill();
