@@ -37,7 +37,7 @@ const EXPOSE = [
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
   'render', 'restart', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
-  'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
+  'SPR', 'sprite', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
 ];
 
 function load(overrides) {
@@ -54,7 +54,11 @@ function load(overrides) {
   const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame', 'localStorage',
     js + '\nreturn {' + EXPOSE.join(',') + '};');
   return fn(
-    { getElementById: () => canvas },
+    {
+      getElementById: () => canvas,
+      // 스프라이트를 오프스크린 캔버스에 굽는다
+      createElement: () => ({ width: 0, height: 0, getContext: () => stubCtx() }),
+    },
     { innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener: () => {} },
     { now: () => 0 },
     () => {},

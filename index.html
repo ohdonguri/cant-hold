@@ -579,6 +579,217 @@ const TRAITS = {
 };
 const TRAIT_KEYS = Object.keys(TRAITS);
 
+
+// ═════════════════════════════════════════════════════════════
+// 픽셀 스프라이트
+//
+// 이미지 파일을 두지 않기 위해 도트를 문자열로 적고 오프스크린 캔버스에
+// 한 번 구워서 캐시한다. 확대는 imageSmoothingEnabled=false 로 한다.
+//
+// 색은 타워/적마다 다르므로 명암만 적고(1 어둡게 2 기본 3 밝게 4 하이라이트)
+// 실제 색은 구울 때 주입한다. 그래서 스프라이트 한 벌로 7종을 다 그린다.
+// 성급은 스프라이트로 만들지 않는다 — 7종 x 7성급 = 49장은 관리가 안 된다.
+// ═════════════════════════════════════════════════════════════
+const SPR = {
+  // 타워: 톱니(파쇄) 렌즈(침식) 결정(서리) 포신(박격) 총열(관측) 코일(마력) 동전(조폐)
+  shredder: [
+    '2.2.2.2.',
+    '22222222',
+    '.322223.',
+    '.311113.',
+    '..3223..',
+    '..3223..',
+    '.331133.',
+    '.11..11.',
+  ],
+  eroder: [
+    '..3333..',
+    '.32222 3',
+    '32.11.23',
+    '32.11.23',
+    '32.11.23',
+    '.322223.',
+    '..3333..',
+    '...11...',
+  ],
+  frost: [
+    '...2....',
+    '.3.2.3..',
+    '..323...',
+    '3332333.',
+    '..323...',
+    '.3.2.3..',
+    '...2....',
+    '..111...',
+  ],
+  mortar: [
+    '......33',
+    '.....332',
+    '....3322',
+    '...2222.',
+    '..22221.',
+    '.1222.1.',
+    '.111111.',
+    '11111111',
+  ],
+  marksman: [
+    '........',
+    '3.......',
+    '33333332',
+    '.222222.',
+    '..1122..',
+    '..11....',
+    '.1111...',
+    '111.111.',
+  ],
+  arc: [
+    '........',
+    '.33333..',
+    '.32222..',
+    '.322223.',
+    '.3222233',
+    '.322223.',
+    '.33333..',
+    '.111111.',
+  ],
+  mint: [
+    '........',
+    '..3333..',
+    '.322223.',
+    '..3333..',
+    '.322223.',
+    '32222223',
+    '.311113.',
+    '..1111..',
+  ],
+
+  // 적
+  grunt: [
+    '..2222..',
+    '.322223.',
+    '32222223',
+    '32211223',
+    '32222223',
+    '.322223.',
+    '..2222..',
+    '........',
+  ],
+  armored: [
+    '33333333',
+    '32222223',
+    '32222223',
+    '32211223',
+    '32222223',
+    '.322223.',
+    '..3223..',
+    '...33...',
+  ],
+  warded: [
+    '...22...',
+    '..3223..',
+    '.322223.',
+    '32211223',
+    '.322223.',
+    '..3223..',
+    '...22...',
+    '........',
+  ],
+  swift: [
+    '........',
+    '..3.....',
+    '.332....',
+    '33222...',
+    '3322222.',
+    '33222...',
+    '.332....',
+    '..3.....',
+  ],
+  regen: [
+    '...22...',
+    '...22...',
+    '.3322333',
+    '32222223',
+    '.3322333',
+    '...22...',
+    '...22...',
+    '........',
+  ],
+  immune: [
+    '..3333..',
+    '.3....3.',
+    '3.2222.3',
+    '3.2112.3',
+    '3.2112.3',
+    '3.2222.3',
+    '.3....3.',
+    '..3333..',
+  ],
+  swarm: [
+    '.22..22.',
+    '.22..22.',
+    '........',
+    '........',
+    '.22..22.',
+    '.22..22.',
+    '........',
+    '........',
+  ],
+  elite: [
+    '..3333..',
+    '.322223.',
+    '32211223',
+    '32111123',
+    '32111123',
+    '32211223',
+    '.322223.',
+    '..3333..',
+  ],
+};
+
+const sprCache = new Map();
+
+// 명암 문자 하나를 실제 색으로 바꾼다
+function shade(hex, level) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [r, g, b] = p(hex);
+  const mix = (v, to, t) => Math.round(v + (to - v) * t);
+  if (level === 1) return `rgb(${mix(r, 0, 0.55)},${mix(g, 0, 0.55)},${mix(b, 0, 0.55)})`;
+  if (level === 3) return `rgb(${mix(r, 255, 0.42)},${mix(g, 255, 0.42)},${mix(b, 255, 0.42)})`;
+  if (level === 4) return '#ffffff';
+  return hex;
+}
+
+function sprite(key, color) {
+  const id = key + '|' + color;
+  let c = sprCache.get(id);
+  if (c) return c;
+  const rows = SPR[key];
+  if (!rows) return null;
+  c = document.createElement('canvas');
+  c.width = rows[0].length;
+  c.height = rows.length;
+  const g = c.getContext('2d');
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x];
+      if (ch === '.' || ch === ' ') continue;
+      g.fillStyle = shade(color, Number(ch));
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+  sprCache.set(id, c);
+  return c;
+}
+
+function drawSprite(key, color, cx, cy, size) {
+  const c = sprite(key, color);
+  if (!c) return false;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(c, Math.round(cx - size / 2), Math.round(cy - size / 2), size, size);
+  ctx.imageSmoothingEnabled = true;
+  return true;
+}
+
 // ═════════════════════════════════════════════════════════════
 // 전투
 // ═════════════════════════════════════════════════════════════
@@ -1809,11 +2020,14 @@ function drawTower(t) {
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = k.color;
-  ctx.font = `700 ${Math.round(cell * 0.42 * size)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(k.tag, x + 2 + (w - 2) / 2, y + 2 + (w - 2) / 2 - cell * 0.06);
+  const icx = x + 2 + (w - 2) / 2, icy = y + 2 + (w - 2) / 2 - cell * 0.08;
+  if (!drawSprite(t.kind, k.color, icx, icy, cell * 0.62 * size)) {
+    ctx.fillStyle = k.color;
+    ctx.font = `700 ${Math.round(cell * 0.42 * size)}px system-ui, sans-serif`;
+    ctx.fillText(k.tag, icx, icy);
+  }
 
   ctx.fillStyle = STAR_COLOR[t.star];
   ctx.font = `700 ${Math.round(cell * 0.26)}px system-ui, sans-serif`;
@@ -1910,11 +2124,11 @@ function drawEffects() {
 }
 
 // 두 색을 섞는다. 디버프 강도를 색 농도로 보여주는 데 쓴다.
-function mixColor(a, b, t) {
+function mixHex(a, b, t) {
   const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
   const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
-  const m = (x, y) => Math.round(x + (y - x) * t);
-  return `rgb(${m(r1, r2)},${m(g1, g2)},${m(b1, b2)})`;
+  const m = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
+  return '#' + m(r1, r2) + m(g1, g2) + m(b1, b2);
 }
 
 function drawEnemies() {
@@ -1926,18 +2140,16 @@ function drawEnemies() {
     const r = d.r * cell;
 
     // 디버프는 적 색으로 읽힌다. 테두리보다 눈에 잘 들어온다.
-    ctx.fillStyle = e.hitFlash > 0 ? '#fff'
+    // 디버프는 적 색으로 읽힌다. 스프라이트 전체가 그 색으로 구워진다.
+    const tint = e.hitFlash > 0 ? '#ffffff'
       : e.frozen > 0 ? '#79c0ff'
-      : e.slowAmt > 0 ? mixColor(d.color, '#79c0ff', Math.min(1, e.slowAmt / CFG.SLOW_CAP) * 0.75)
+      : e.slowAmt > 0 ? mixHex(d.color, '#79c0ff', Math.min(1, e.slowAmt / CFG.SLOW_CAP) * 0.75)
       : d.color;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-
-    if (d.immune) {                    // 면역몹은 테두리로 구분
-      ctx.strokeStyle = '#ffd700';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    if (!drawSprite(e.kind, tint, cx, cy, r * 2.0)) {
+      ctx.fillStyle = tint;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
     }
     // 디버프 막대. 방깎은 주황, 마방깎·마법취약은 보라.
     // 수치가 안 보이면 디버프 타워가 일하는지 알 수가 없다.

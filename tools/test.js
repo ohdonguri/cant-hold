@@ -522,6 +522,37 @@ function ok(name, cond, detail) {
   ok('혼자 튀는 타워 없음', outlier.length === 0, outlier.join(',') || '없음');
 }
 
+// ── 스프라이트 ────────────────────────────────────────────────
+// 이미지 파일 없이 문자열 도트를 캔버스에 굽는다.
+{
+  console.log('스프라이트');
+  const g = load();
+  const missing = g.KIND_KEYS.filter(k => !g.SPR[k])
+    .concat(Object.keys(g.ENEMY).filter(k => !g.SPR[k]));
+  ok('타워·적 전부 도트가 있다', missing.length === 0, missing.join(',') || '없음');
+
+  const bad = Object.entries(g.SPR).filter(([, rows]) =>
+    rows.length !== 8 || rows.some(r => r.length !== 8)).map(([k]) => k);
+  ok('전부 8x8 이다', bad.length === 0, bad.join(',') || '없음');
+
+  const chars = new Set();
+  for (const rows of Object.values(g.SPR)) for (const r of rows) for (const c of r) chars.add(c);
+  const allowed = new Set(['.', ' ', '1', '2', '3', '4']);
+  const odd = [...chars].filter(c => !allowed.has(c));
+  ok('명암 문자만 쓴다', odd.length === 0, odd.join(',') || '없음');
+
+  // 실루엣이 서로 달라야 색 없이도 구분된다
+  const sil = k => g.SPR[k].map(r => r.replace(/[1234]/g, '#').replace(/ /g, '.')).join('/');
+  const seen = new Map();
+  const dupes = [];
+  for (const k of Object.keys(g.SPR)) {
+    const s2 = sil(k);
+    if (seen.has(s2)) dupes.push(seen.get(s2) + '=' + k);
+    else seen.set(s2, k);
+  }
+  ok('실루엣이 겹치지 않는다', dupes.length === 0, dupes.join(',') || '없음');
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {
