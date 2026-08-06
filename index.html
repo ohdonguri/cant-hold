@@ -20,27 +20,32 @@
 <script>
 'use strict';
 
-// ─────────────────────────────────────────────────────────────
-// 설계 상수. 수치 근거는 DESIGN.md 참고.
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+// 설계 상수. 수치 근거는 DESIGN.md.
+// ═════════════════════════════════════════════════════════════
 const CFG = {
-  BOARD_W: 6,          // 보드 가로 칸
-  BOARD_H: 8,          // 보드 세로 칸 (최대)
-  OPEN_ROWS: 5,        // 시작 시 개방된 세로 칸
+  BOARD_W: 6,
+  BOARD_H: 8,
+  OPEN_ROWS: 5,        // 아래에서부터 개방된 행 수
 
   WAVE_MAX: 30,
-  WAVE_GAP: 20,        // 웨이브 간격(초)
+  WAVE_GAP: 20,        // 빌드 페이즈 길이(초)
   RUSH_GOLD: 2,        // 빨리 보내기: 남은 초당 골드
 
   SLOW_CAP: 0.60,      // 슬로우 총합 상한. 넘기면 서리탑 도배가 정답이 됨
   BIG_FROM_STAR: 5,    // 이 성급부터 2x2
   STAR_MAX: 7,
+
+  START_GOLD: 90,
+  START_LIFE: 20,
 };
 
 // 성급별 데미지 계수 (base x 계수). 대략 2.3배씩.
 const STAR_MULT = [0, 1.0, 2.3, 5.3, 12, 28, 65, 149];
 
-// 워3식 방어력 감쇠. 음수 방어력(파쇄 분기)도 그대로 처리됨.
+const STAR_COLOR = ['#000', '#8b949e', '#58a6ff', '#3fb950', '#d29922', '#f85149', '#a371f7', '#ffd700'];
+
+// 워3식 방어력 감쇠. 음수 방어력(파쇄 분기)도 그대로 처리된다.
 function armorReduction(armor) {
   return armor * 0.06 / (1 + 0.06 * Math.abs(armor));
 }
@@ -48,34 +53,160 @@ function applyArmor(raw, armor) {
   return raw * (1 - armorReduction(armor));
 }
 
-// 웨이브별 적 HP
 function waveHp(wave) {
   return 100 * Math.pow(1.18, wave);
 }
 
-// 소환 비용. 웨이브마다 누적분이 30% 감쇠한다.
-function summonCost(summonedThisWave) {
-  return 10 + 2 * summonedThisWave;
-}
+// ═════════════════════════════════════════════════════════════
+// 경로. 격자 좌표 웨이포인트이고, 꺾이는 지점만 적는다.
+// 보드 밖(-1, 8)에서 들어오고 나간다.
+// ═════════════════════════════════════════════════════════════
+// 가로 통로가 폭을 다 먹으면 배치 칸이 급감한다. 한 칸씩 어긋나게 짜서
+// 경로 길이(교전 시간)는 유지하면서 주머니 공간을 남긴다.
+const PATH = [
+  { x: -1, y: 0 }, { x: 3, y: 0 },
+  { x: 3, y: 2 }, { x: 0, y: 2 },
+  { x: 0, y: 5 }, { x: 5, y: 5 },
+  { x: 5, y: 8 },
+];
 
-// ─────────────────────────────────────────────────────────────
+// 웨이포인트 사이를 훑어 경로가 점유한 칸 집합을 만든다.
+const PATH_CELLS = (() => {
+  const set = new Set();
+  for (let i = 0; i < PATH.length - 1; i++) {
+    const a = PATH[i], b = PATH[i + 1];
+    const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+    let x = a.x, y = a.y;
+    set.add(x + ',' + y);
+    while (x !== b.x || y !== b.y) {
+      x += dx; y += dy;
+      set.add(x + ',' + y);
+    }
+  }
+  return set;
+})();
+
+// 웨이포인트 구간별 길이 — 적 이동 진행도 계산에 쓴다.
+const PATH_SEG = PATH.slice(0, -1).map((a, i) => {
+  const b = PATH[i + 1];
+  return Math.hypot(b.x - a.x, b.y - a.y);
+});
+const PATH_LEN = PATH_SEG.reduce((s, v) => s + v, 0);
+
+function isPath(gx, gy) { return PATH_CELLS.has(gx + ',' + gy); }
+
+// ═════════════════════════════════════════════════════════════
+// 타워 정의. 분기 효과는 이후 패스에서 붙인다.
+// ═════════════════════════════════════════════════════════════
+const KINDS = {
+  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.7, cd: 0.6, range: 2.2 },
+  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.5, cd: 1.2, range: 2.0 },
+  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.2 },
+  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.4, cd: 1.6, range: 3.2 },
+  marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5 },
+  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.8, cd: 2.5, range: 4.0 },
+  mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0 },
+};
+const KIND_KEYS = Object.keys(KINDS);
+
+// ═════════════════════════════════════════════════════════════
 // 상태
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 const state = {
+  phase: 'build',      // build | wave | over | clear
   wave: 0,
-  gold: 60,
-  essence: 0,          // 분기 재선택 자원
+  timer: CFG.WAVE_GAP,
+  gold: CFG.START_GOLD,
+  essence: 0,
+  life: CFG.START_LIFE,
   openRows: CFG.OPEN_ROWS,
-  towers: [],          // {gx, gy, kind, star, branch3, branch5, trait7}
+  summonedThisWave: 0,
+  towers: [],
   enemies: [],
+  selected: null,      // 선택된 타워 id
+  toast: null,         // {text, t}
 };
 
-// ─────────────────────────────────────────────────────────────
+let nextTowerId = 1;
+
+// 소환 비용. 웨이브가 넘어갈 때 누적분이 30% 감쇠한다.
+function summonCost() {
+  return Math.round(10 + 2 * state.summonedThisWave);
+}
+
+function towerSize(t) { return t.star >= CFG.BIG_FROM_STAR ? 2 : 1; }
+
+// 조폐소는 5성이어도 1칸. 경제 타워가 공간까지 먹으면 아무도 안 쓴다.
+function towerFootprint(t) { return t.kind === 'mint' ? 1 : towerSize(t); }
+
+function occupancy() {
+  const occ = new Map();
+  for (const t of state.towers) {
+    const s = towerFootprint(t);
+    for (let dy = 0; dy < s; dy++)
+      for (let dx = 0; dx < s; dx++)
+        occ.set((t.gx + dx) + ',' + (t.gy + dy), t.id);
+  }
+  return occ;
+}
+
+function firstOpenRow() { return CFG.BOARD_H - state.openRows; }
+
+function canPlace(gx, gy, size, occ, ignoreId) {
+  for (let dy = 0; dy < size; dy++) {
+    for (let dx = 0; dx < size; dx++) {
+      const x = gx + dx, y = gy + dy;
+      if (x < 0 || x >= CFG.BOARD_W || y < 0 || y >= CFG.BOARD_H) return false;
+      if (y < firstOpenRow()) return false;
+      if (isPath(x, y)) return false;
+      const o = occ.get(x + ',' + y);
+      if (o !== undefined && o !== ignoreId) return false;
+    }
+  }
+  return true;
+}
+
+function summon() {
+  const cost = summonCost();
+  if (state.gold < cost) return toast('골드 부족');
+
+  const occ = occupancy();
+  const spots = [];
+  for (let gy = firstOpenRow(); gy < CFG.BOARD_H; gy++)
+    for (let gx = 0; gx < CFG.BOARD_W; gx++)
+      if (canPlace(gx, gy, 1, occ)) spots.push([gx, gy]);
+
+  if (!spots.length) return toast('빈 칸 없음');
+
+  const [gx, gy] = spots[(Math.random() * spots.length) | 0];
+  const kind = KIND_KEYS[(Math.random() * KIND_KEYS.length) | 0];
+
+  state.gold -= cost;
+  state.summonedThisWave++;
+  state.towers.push({
+    id: nextTowerId++, gx, gy, kind, star: 1,
+    b3: null, b5: null, t7: null,
+    cd: 0, angle: -Math.PI / 2, flash: 0,
+  });
+}
+
+function sellSelected() {
+  const t = state.towers.find(v => v.id === state.selected);
+  if (!t) return;
+  state.gold += Math.round(10 * STAR_MULT[t.star] * 0.4);
+  state.towers = state.towers.filter(v => v.id !== t.id);
+  state.selected = null;
+}
+
+function toast(text) { state.toast = { text, t: 1.6 }; }
+
+// ═════════════════════════════════════════════════════════════
 // 캔버스 / 레이아웃
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const view = { w: 0, h: 0, cell: 0, ox: 0, oy: 0 };
+const HUD_TOP = 92, HUD_BOTTOM = 112;
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -85,64 +216,266 @@ function resize() {
   canvas.height = Math.round(view.h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  // 보드는 화면 가로에 맞추되, HUD 자리를 위아래로 남긴다.
-  const padX = 12;
-  const hudTop = 88, hudBottom = 108;
+  const padX = 10;
   const cellByW = (view.w - padX * 2) / CFG.BOARD_W;
-  const cellByH = (view.h - hudTop - hudBottom) / CFG.BOARD_H;
+  const cellByH = (view.h - HUD_TOP - HUD_BOTTOM) / CFG.BOARD_H;
   view.cell = Math.floor(Math.min(cellByW, cellByH));
   view.ox = Math.round((view.w - view.cell * CFG.BOARD_W) / 2);
-  view.oy = hudTop;
+  view.oy = HUD_TOP + Math.round((view.h - HUD_TOP - HUD_BOTTOM - view.cell * CFG.BOARD_H) / 2);
 }
 window.addEventListener('resize', resize);
 resize();
 
-// ─────────────────────────────────────────────────────────────
+function cellToPx(gx, gy) {
+  return { x: view.ox + gx * view.cell, y: view.oy + gy * view.cell };
+}
+function pxToCell(px, py) {
+  const gx = Math.floor((px - view.ox) / view.cell);
+  const gy = Math.floor((py - view.oy) / view.cell);
+  if (gx < 0 || gx >= CFG.BOARD_W || gy < 0 || gy >= CFG.BOARD_H) return null;
+  return { gx, gy };
+}
+
+// ═════════════════════════════════════════════════════════════
+// 입력
+// ═════════════════════════════════════════════════════════════
+const buttons = [];   // {x,y,w,h,label,fn,enabled}
+
+function layoutButtons() {
+  buttons.length = 0;
+  const y = view.h - HUD_BOTTOM + 14;
+  const h = 52, gap = 10, pad = 12;
+  const w = (view.w - pad * 2 - gap) / 2;
+
+  buttons.push({
+    x: pad, y, w, h,
+    label: () => `소환  ${summonCost()}G`,
+    enabled: () => state.gold >= summonCost(),
+    fn: summon,
+  });
+
+  buttons.push({
+    x: pad + w + gap, y, w, h,
+    label: () => state.phase === 'build'
+      ? `빨리 보내기  +${Math.ceil(state.timer) * CFG.RUSH_GOLD}G`
+      : '진행 중',
+    enabled: () => state.phase === 'build',
+    fn: rushWave,
+  });
+}
+
+function hitButton(px, py) {
+  return buttons.find(b => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h);
+}
+
+canvas.addEventListener('pointerdown', e => {
+  const px = e.clientX, py = e.clientY;
+
+  const b = hitButton(px, py);
+  if (b) { if (b.enabled()) b.fn(); return; }
+
+  const c = pxToCell(px, py);
+  if (!c) { state.selected = null; return; }
+  const occ = occupancy();
+  const id = occ.get(c.gx + ',' + c.gy);
+  state.selected = (id !== undefined && id !== state.selected) ? id : null;
+});
+
+// ═════════════════════════════════════════════════════════════
+// 진행
+// ═════════════════════════════════════════════════════════════
+function rushWave() {
+  if (state.phase !== 'build') return;
+  state.gold += Math.ceil(state.timer) * CFG.RUSH_GOLD;
+  state.timer = 0;
+  startWave();
+}
+
+function startWave() {
+  state.wave++;
+  state.phase = 'wave';
+  state.summonedThisWave = Math.floor(state.summonedThisWave * 0.7);
+  // 적 스폰은 패스 2에서.
+  endWave();
+}
+
+function endWave() {
+  state.phase = 'build';
+  state.timer = CFG.WAVE_GAP;
+  if (state.wave >= CFG.WAVE_MAX) state.phase = 'clear';
+}
+
+function update(dt) {
+  if (state.toast) {
+    state.toast.t -= dt;
+    if (state.toast.t <= 0) state.toast = null;
+  }
+  for (const t of state.towers) if (t.flash > 0) t.flash -= dt;
+
+  if (state.phase === 'build') {
+    state.timer -= dt;
+    if (state.timer <= 0) startWave();
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
 // 렌더
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 function drawBoard() {
   const { cell, ox, oy } = view;
+  const open = firstOpenRow();
+
   for (let gy = 0; gy < CFG.BOARD_H; gy++) {
-    const locked = gy < CFG.BOARD_H - state.openRows;
     for (let gx = 0; gx < CFG.BOARD_W; gx++) {
-      const x = ox + gx * cell, y = oy + gy * cell;
-      ctx.fillStyle = locked ? '#12161d' : ((gx + gy) % 2 ? '#1a212c' : '#1e2732');
+      const { x, y } = cellToPx(gx, gy);
+      if (isPath(gx, gy)) ctx.fillStyle = '#2d333b';
+      else if (gy < open) ctx.fillStyle = '#12161d';
+      else ctx.fillStyle = (gx + gy) % 2 ? '#1a212c' : '#1e2732';
       ctx.fillRect(x, y, cell - 1, cell - 1);
     }
   }
-  ctx.strokeStyle = '#2a3441';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(ox + 0.5, oy + 0.5, cell * CFG.BOARD_W - 1, cell * CFG.BOARD_H - 1);
+
+  // 잠긴 구역 경계
+  if (open > 0) {
+    ctx.strokeStyle = '#3d444d';
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy + open * cell - 0.5);
+    ctx.lineTo(ox + cell * CFG.BOARD_W, oy + open * cell - 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 관문
+  const exit = PATH[PATH.length - 1];
+  const ep = cellToPx(exit.x, exit.y - 1);
+  ctx.strokeStyle = '#f85149';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(ep.x + 2, ep.y + cell - 5, cell - 5, 3);
+}
+
+function drawTower(t) {
+  const { cell } = view;
+  const size = towerFootprint(t);
+  const { x, y } = cellToPx(t.gx, t.gy);
+  const w = cell * size - 2;
+  const k = KINDS[t.kind];
+  const sel = state.selected === t.id;
+
+  ctx.fillStyle = '#22272e';
+  ctx.strokeStyle = STAR_COLOR[t.star];
+  ctx.lineWidth = sel ? 3 : 2;
+  roundRect(x + 2, y + 2, w - 2, w - 2, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = k.color;
+  ctx.font = `700 ${Math.round(cell * 0.42 * size)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(k.tag, x + 2 + (w - 2) / 2, y + 2 + (w - 2) / 2 - cell * 0.06);
+
+  ctx.fillStyle = STAR_COLOR[t.star];
+  ctx.font = `700 ${Math.round(cell * 0.26)}px system-ui, sans-serif`;
+  ctx.fillText('★' + t.star, x + 2 + (w - 2) / 2, y + w - cell * 0.18);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawRange(t) {
+  const { cell } = view;
+  const size = towerFootprint(t);
+  const { x, y } = cellToPx(t.gx, t.gy);
+  const cx = x + cell * size / 2, cy = y + cell * size / 2;
+  ctx.strokeStyle = 'rgba(88,166,255,0.5)';
+  ctx.fillStyle = 'rgba(88,166,255,0.07)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, KINDS[t.kind].range * cell, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
 }
 
 function drawHud() {
-  ctx.fillStyle = '#e6edf3';
-  ctx.font = '600 15px system-ui, sans-serif';
   ctx.textBaseline = 'top';
-  ctx.fillText(`웨이브 ${state.wave} / ${CFG.WAVE_MAX}`, 16, 20);
+
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '700 20px system-ui, sans-serif';
+  ctx.fillText(`웨이브 ${state.wave}`, 16, 18);
+  ctx.fillStyle = '#6e7681';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText(`/ ${CFG.WAVE_MAX}`, 16 + ctx.measureText(`웨이브 ${state.wave}`).width + 44, 25);
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#e3b341';
-  ctx.fillText(`${state.gold} G`, view.w - 16, 20);
+  ctx.font = '700 18px system-ui, sans-serif';
+  ctx.fillText(`${state.gold} G`, view.w - 16, 18);
   ctx.fillStyle = '#7ee787';
-  ctx.fillText(`정수 ${state.essence}`, view.w - 16, 42);
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText(`정수 ${state.essence}   관문 ${state.life}`, view.w - 16, 44);
   ctx.textAlign = 'left';
 
-  ctx.fillStyle = '#6e7681';
-  ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText('스캐폴드 — 게임 로직 미구현', 16, 44);
+  if (state.phase === 'build') {
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.fillText(`다음 웨이브까지 ${state.timer.toFixed(1)}s`, 16, 48);
+    const barW = view.w - 32;
+    ctx.fillStyle = '#21262d';
+    ctx.fillRect(16, 68, barW, 4);
+    ctx.fillStyle = '#58a6ff';
+    ctx.fillRect(16, 68, barW * (1 - state.timer / CFG.WAVE_GAP), 4);
+  }
+
+  for (const b of buttons) {
+    const on = b.enabled();
+    ctx.fillStyle = on ? '#238636' : '#21262d';
+    roundRect(b.x, b.y, b.w, b.h, 10);
+    ctx.fill();
+    ctx.fillStyle = on ? '#fff' : '#6e7681';
+    ctx.font = '600 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.label(), b.x + b.w / 2, b.y + b.h / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+  }
+
+  if (state.toast) {
+    ctx.globalAlpha = Math.min(1, state.toast.t / 0.4);
+    ctx.fillStyle = '#f85149';
+    ctx.font = '600 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(state.toast.text, view.w / 2, view.h - HUD_BOTTOM - 26);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 function render() {
+  layoutButtons();
   ctx.fillStyle = '#0d1117';
   ctx.fillRect(0, 0, view.w, view.h);
   drawBoard();
+  const sel = state.towers.find(t => t.id === state.selected);
+  if (sel) drawRange(sel);
+  for (const t of state.towers) drawTower(t);
   drawHud();
 }
 
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 // 루프
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
 let last = performance.now();
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05); // 탭 전환 후 점프 방지
@@ -151,11 +484,6 @@ function frame(now) {
   render();
   requestAnimationFrame(frame);
 }
-
-function update(dt) {
-  // TODO: 웨이브 진행, 적 이동, 타워 발사, 디버프 스택
-}
-
 requestAnimationFrame(frame);
 </script>
 </body>
