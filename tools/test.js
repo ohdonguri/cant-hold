@@ -590,7 +590,14 @@ function ok(name, cond, detail) {
   });
   safe('소환 피커 1단계', () => { state.picker = { gx: 2, gy: 8, kind: null }; });
   safe('소환 피커 2단계', () => { state.picker.kind = state.deck[0]; });
-  safe('게임 오버', () => { state.picker = null; state.phase = 'over'; });
+  safe('일시정지', () => {
+    state.picker = null;
+    state.paused = true;
+    const w = state.wave;
+    for (let i = 0; i < 300; i++) g.update(1 / 30);
+    ok('  정지 중엔 판이 안 흐른다', state.wave === w, 'w' + w + ' → w' + state.wave);
+  });
+  safe('게임 오버', () => { state.paused = false; state.phase = 'over'; });
   safe('클리어', () => { state.phase = 'clear'; });
   safe('재시작', () => {
     g.restart();

@@ -298,6 +298,7 @@ const state = {
   hasHanpa: false,     // 한파 타워 존재 여부 (프레임마다 갱신)
   selected: null,      // 선택된 타워 id
   picker: null,        // {gx, gy} — 빈 칸에 뭘 소환할지 고르는 중
+  paused: false,       // ESC 일시정지
   choice: null,        // {towerId, tier, options} — 분기 선택 대기
   toast: null,         // {text, t}
 };
@@ -2018,6 +2019,8 @@ function choiceLabel(opt) {
 canvas.addEventListener('pointerdown', e => {
   const px = e.clientX, py = e.clientY;
 
+  if (state.paused) { state.paused = false; return; }
+
   if (state.phase === 'stage') {
     const hit = stageCardRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
     if (hit) pickStage(hit.i);
@@ -2097,8 +2100,19 @@ canvas.addEventListener('pointerup', e => {
 
 canvas.addEventListener('pointercancel', () => { drag = null; });
 
+// ESC 는 열려 있는 창을 먼저 닫는다. 닫을 게 없으면 판을 세운다.
+window.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return;
+  e.preventDefault();
+  if (state.phase === 'stage' || state.phase === 'deck') return;
+  if (state.picker) { state.picker = null; return; }
+  if (state.choice) return;                 // 분기 선택은 되돌릴 수 없으니 안 닫는다
+  state.paused = !state.paused;
+});
+
 function restart() {
   state.phase = 'stage';
+  state.paused = false;
   state.deckPick = [];
   state.wave = 0;
   state.timer = CFG.WAVE_GAP;
@@ -2262,6 +2276,8 @@ function decayEffects(dt) {
 }
 
 function update(dt) {
+  if (state.paused) return;
+
   if (state.toast) {
     state.toast.t -= dt;
     if (state.toast.t <= 0) state.toast = null;
@@ -2853,8 +2869,25 @@ function render() {
   drawHud();
   drawInfo();
   drawPicker();
+  drawPause();
   drawOverlay();
   drawChoice();
+}
+
+function drawPause() {
+  if (!state.paused) return;
+  ctx.fillStyle = 'rgba(13,17,23,0.72)';
+  ctx.fillRect(0, 0, view.w, view.h);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '700 24px system-ui, sans-serif';
+  ctx.fillText('일시정지', view.w / 2, view.h / 2 - 12);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillText('ESC 또는 화면을 눌러 계속', view.w / 2, view.h / 2 + 20);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
 }
 
 function drawOverlay() {
