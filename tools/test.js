@@ -152,6 +152,19 @@ function ok(name, cond, detail) {
   ok('HP/데미지에 NaN 없음', w.every(v => Number.isFinite(v)));
 }
 
+// ── 타워 대등성 ───────────────────────────────────────────────
+// 한 타워가 정답이거나 함정이면 덱과 합성 선택이 의미를 잃는다.
+// 전체 측정은 npm run parity, 여기서는 가벼운 한 분기만 본다.
+{
+  console.log('타워 대등성 (3종 덱, 분기 A/A1)');
+  const { measure, K, NAME } = require('./parity.js');
+  const { contrib, spread } = measure('A', 'A1', 4);
+  ok('기여도 폭 6 미만', spread < 6,
+    spread.toFixed(2) + '  ' + K.map(k => NAME[k] + (contrib[k] >= 0 ? '+' : '') + contrib[k].toFixed(1)).join(' '));
+  const outlier = K.filter(k => Math.abs(contrib[k]) > 3.5).map(k => NAME[k]);
+  ok('혼자 튀는 타워 없음', outlier.length === 0, outlier.join(',') || '없음');
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {

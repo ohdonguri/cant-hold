@@ -49,9 +49,9 @@ const CFG = {
 
   // ── 밸런스 상수. tools/tune.js 로 역산한 값이다. ──
   // 그리디 플레이어(대충 하는 플레이) 20회 기준 사망 웨이브 중앙값 24,
-  // 범위 20~25, 클리어 0회, 5성 도달 100% / 6성 20%.
+  // 범위 23~27, 클리어 0회, 5성 도달 100% / 6성 20%.
   STAR_RATIO: 2.4,     // 성급당 데미지 배수
-  DMG_SCALE: 11,       // 타워 base 에 곱하는 전역 계수
+  DMG_SCALE: 15,       // 타워 base 에 곱하는 전역 계수
   HP_GROWTH: 1.16,     // 웨이브당 적 HP 증가율
   GOLD_BASE: 50,       // 웨이브 클리어 골드
   GOLD_GROWTH: 1.11,   // 웨이브당 클리어 골드 증가율
@@ -121,9 +121,9 @@ function isPath(gx, gy) { return PATH_CELLS.has(gx + ',' + gy); }
 // ═════════════════════════════════════════════════════════════
 const KINDS = {
   shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.7, cd: 0.6, range: 2.2 },
-  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.5, cd: 1.2, range: 2.0 },
+  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7 },
   frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.2 },
-  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.4, cd: 1.6, range: 3.2 },
+  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.1, cd: 1.6, range: 3.2 },
   marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5 },
   arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 1.8, cd: 2.5, range: 4.0 },
   mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0 },
@@ -144,7 +144,7 @@ const ENEMY = {
   regen:   { name: '재생', tag: '재', hp: 1.1,  armor: 8,  mres: 0.1,  speed: 0.9,  r: 0.26, leak: 2, color: '#3fb950', regen: 0.03 },
   immune:  { name: '면역', tag: '면', hp: 1.3,  armor: 12, mres: 0.15, speed: 1.0,  r: 0.28, leak: 2, color: '#f0883e', immune: true },
   swarm:   { name: '군집', tag: '군', hp: 0.18, armor: 0,  mres: 0,    speed: 1.2,  r: 0.15, leak: 1, color: '#58a6ff' },
-  elite:   { name: '정예', hp: 8.0, tag: '정',  armor: 25, mres: 0.25, speed: 0.7,  r: 0.42, leak: 5, color: '#f85149', elite: true },
+  elite:   { name: '정예', hp: 6.0, tag: '정',  armor: 25, mres: 0.25, speed: 0.7,  r: 0.42, leak: 5, color: '#f85149', elite: true },
 };
 
 // 스폰 간격(초). 군집은 촘촘히, 정예는 띄엄띄엄.
@@ -155,35 +155,35 @@ const SPAWN_GAP_DEFAULT = 0.75;
 // 면역몹이 서포트 몰빵을 벌하는 역할이라 중반부터 꾸준히 섞는다.
 const WAVES = [
   [['grunt', 6]],
-  [['grunt', 9]],
-  [['swarm', 14]],
-  [['grunt', 8], ['armored', 2]],
-  [['armored', 5]],
-  [['grunt', 10], ['swift', 3]],
-  [['swift', 8]],
-  [['warded', 5], ['grunt', 6]],
-  [['swarm', 18], ['grunt', 4]],
+  [['grunt', 6]],
+  [['swarm', 38]],
+  [['grunt', 6], ['armored', 2]],
+  [['armored', 13]],
+  [['grunt', 7], ['swift', 2]],
+  [['swift', 18]],
+  [['warded', 5], ['grunt', 5]],
+  [['swarm', 24], ['grunt', 6]],
   [['elite', 1], ['grunt', 8]],
-  [['armored', 6], ['warded', 4]],
-  [['regen', 6]],
-  [['swift', 10], ['swarm', 14]],
-  [['immune', 4], ['grunt', 8]],
-  [['warded', 8], ['regen', 4]],
-  [['armored', 8], ['swift', 6]],
-  [['swarm', 24], ['immune', 3]],
-  [['regen', 8], ['warded', 6]],
-  [['immune', 6], ['armored', 6]],
-  [['elite', 2], ['immune', 4]],
-  [['swift', 14], ['swarm', 20]],
-  [['armored', 10], ['regen', 6]],
-  [['warded', 10], ['immune', 5]],
-  [['swarm', 30], ['elite', 1]],
-  [['immune', 8], ['regen', 8]],
-  [['armored', 12], ['warded', 8]],
-  [['swift', 16], ['immune', 6]],
-  [['elite', 2], ['swarm', 24]],
-  [['immune', 10], ['armored', 10], ['warded', 8]],
-  [['elite', 3], ['immune', 8], ['regen', 6]],
+  [['armored', 10], ['warded', 6]],
+  [['regen', 11]],
+  [['swift', 18], ['swarm', 25]],
+  [['immune', 4], ['grunt', 9]],
+  [['warded', 10], ['regen', 5]],
+  [['armored', 17], ['swift', 12]],
+  [['swarm', 40], ['immune', 7]],
+  [['regen', 10], ['warded', 8]],
+  [['immune', 11], ['armored', 9]],
+  [['elite', 3], ['grunt', 10]],
+  [['swift', 24], ['swarm', 40]],
+  [['armored', 19], ['regen', 11]],
+  [['warded', 17], ['immune', 8]],
+  [['swarm', 40], ['elite', 3]],
+  [['immune', 12], ['regen', 12]],
+  [['armored', 26], ['warded', 17]],
+  [['swift', 24], ['immune', 15]],
+  [['elite', 4], ['swarm', 40]],
+  [['immune', 15], ['armored', 15], ['warded', 12]],
+  [['elite', 4], ['immune', 12], ['regen', 9]],
 ];
 
 // 진행 거리(칸)를 격자 좌표로 환산.
@@ -404,7 +404,7 @@ function toast(text) { state.toast = { text, t: 1.6 }; }
 // ═════════════════════════════════════════════════════════════
 const BRANCH = {
   shredder: {
-    A:  { name: '분쇄파', desc: '주변 3마리에게도 스택 1' },
+    A:  { name: '분쇄파', desc: '주변 4마리에게도 스택 1' },
     B:  { name: '천공', desc: '단일만, 스택당 -4, 상한 2배' },
     A1: { name: '파열', desc: '스택 최대 시 폭발' },
     A2: { name: '전이', desc: '처치 시 스택 이관' },
@@ -412,12 +412,12 @@ const BRANCH = {
     B2: { name: '관통', desc: '본인만 방어력 무시, 딜 +60%' },
   },
   eroder: {
-    A:  { name: '확산', desc: '범위 +60%, 감소치 -30%' },
-    B:  { name: '심층', desc: '범위 -20%, 감소 2배, 마법딜 +15%' },
+    A:  { name: '확산', desc: '범위 +50%, 효과 -30%' },
+    B:  { name: '심층', desc: '범위 -12%, 효과 2배, 마법딜 +15%' },
     A1: { name: '역병', desc: '오라 이탈 후 3초 유지' },
     A2: { name: '쇠약', desc: '오라 내 이속 -15%' },
     B1: { name: '붕괴', desc: '마방 음수 허용 (-30%p)' },
-    B2: { name: '소각', desc: '최대HP 0.4%/초 순수딜' },
+    B2: { name: '소각', desc: '최대HP 1%/초 순수딜' },
   },
   frost: {
     A:  { name: '광역 냉각', desc: '3마리 동시 슬로우' },
@@ -432,7 +432,7 @@ const BRANCH = {
     B:  { name: '중포', desc: '공속 -30%, 딜 180%, 반경 +40%' },
     A1: { name: '탄막', desc: '3발 분산 착탄' },
     A2: { name: '소이', desc: '착탄 지점 장판 3초' },
-    B1: { name: '충격파', desc: '착탄 시 0.8초 기절' },
+    B1: { name: '충격파', desc: '착탄 시 0.5초 기절' },
     B2: { name: '철갑탄', desc: '방어력 50% 무시, 정예 +40%' },
   },
   marksman: {
@@ -453,7 +453,7 @@ const BRANCH = {
   },
   mint: {
     A:  { name: '이자', desc: '보유 골드 3% 추가 (상한 40)' },
-    B:  { name: '징수', desc: '사거리 내 처치 시 +1G' },
+    B:  { name: '징수', desc: '사거리 내 처치 시 +성급 G' },
     A1: { name: '투자', desc: '빨리 보내기 보상 2배' },
     A2: { name: '환급', desc: '판매 100%, 합성 무료' },
     B1: { name: '현상금', desc: '정예 처치 시 +50G' },
@@ -493,7 +493,7 @@ function engraveBonus(t) {
 
 function towerRange(t) {
   let r = KINDS[t.kind].range;
-  if (t.kind === 'eroder') r *= t.b3 === 'A' ? 1.6 : t.b3 === 'B' ? 0.8 : 1;
+  if (t.kind === 'eroder') r *= t.b3 === 'A' ? 1.5 : t.b3 === 'B' ? 0.88 : 1;
   if (t.t7 === 'overclock') r *= 0.75;
   return r;
 }
@@ -554,7 +554,7 @@ function ampAll(e) {
   if (e.slowAmt > 0 && state.hasHanpa) a += 0.12;
   return a;
 }
-function ampMagic(e) { return e.inDeepAura ? 0.15 : 0; }
+function ampMagic(e) { return (e.magicVuln || 0) + (e.inDeepAura ? 0.15 : 0); }
 
 function damage(e, raw, type, src) {
   let d = raw;
@@ -603,7 +603,7 @@ function killEnemy(e, src) {
     if (t.b3 !== 'B') continue;
     if (distTo(t, e) > towerRange(t)) continue;
     if (t.b5 === 'B2' && Math.random() < 0.25) state.essence++;
-    else state.gold += 1;
+    else state.gold += t.star;   // 고정 +1 이면 성급을 올릴 이유가 없다
   }
 }
 
@@ -624,7 +624,7 @@ function applyStacks(e, n, per, src) {
 
   // 파열: 상한 도달 시 스택을 태워 폭발
   if (src.b5 === 'A1' && e.armorStacks >= cap) {
-    const blast = e.armorStacks * 3.0 * STAR_MULT[src.star] * 0.1;
+    const blast = e.armorStacks * 5.0 * STAR_MULT[src.star] * 0.1;
     e.armorStacks = 0;
     damage(e, blast, 'physical', src);
   }
@@ -640,17 +640,22 @@ function fireTower(t, dt) {
 
   // 침식자와 조폐소 이자는 오라/지속형이라 쿨다운 밖에서 처리한다
   if (t.kind === 'eroder') {
-    const cut = (0.06 + 0.02 * t.star) * (t.b3 === 'A' ? 0.7 : t.b3 === 'B' ? 2 : 1);
+    const mult = t.b3 === 'A' ? 0.7 : t.b3 === 'B' ? 2 : 1;
+    const cut = (0.06 + 0.02 * t.star) * mult;
+    // 마방 감소만으로는 마방 0인 적(8종 중 4종)에게 아무 일도 안 일어난다.
+    // 감소는 마갑 카운터로 남기고, 범용 가치는 마법 취약으로 따로 준다.
+    const vuln = (0.03 + 0.02 * t.star) * mult;
     for (const e of enemiesInRange(t)) {
       const s = debuffScale(e, t);
       if (s > 0) {
         e.mresCut = Math.max(e.mresCut, cut * s);
+        e.magicVuln = Math.max(e.magicVuln, vuln * s);
         e.healCut = 0.5;
-        if (t.b5 === 'A1') { e.plagueT = 3; e.plagueCut = cut * s; }
+        if (t.b5 === 'A1') { e.plagueT = 3; e.plagueCut = cut * s; e.plagueVuln = vuln * s; }
         if (t.b5 === 'A2') e.slowNext = Math.max(e.slowNext, 0.15 * s);
       }
       if (t.b3 === 'B') e.inDeepAura = true;
-      if (t.b5 === 'B2') damage(e, e.maxHp * 0.004 * dt, 'pure', t);
+      if (t.b5 === 'B2') damage(e, e.maxHp * 0.010 * dt, 'pure', t);
     }
   }
 
@@ -678,7 +683,7 @@ function fireTower(t, dt) {
         if (e === main || e.dead) continue;
         if (Math.hypot(e.x - main.x, e.y - main.y) > 1.2) continue;
         applyStacks(e, 1, 2, t);
-        if (++n >= 3) break;
+        if (++n >= 4) break;
       }
     }
     return;
@@ -835,7 +840,7 @@ function updateShells(dt) {
       if (e.dead) continue;
       if (Math.hypot(e.x + 0.5 - s.tx, e.y + 0.5 - s.ty) > s.radius) continue;
       damage(e, s.dmg, 'physical', t);
-      if (t.b5 === 'B1' && debuffScale(e, t) > 0) e.stun = Math.max(e.stun, 0.8);
+      if (t.b5 === 'B1' && debuffScale(e, t) > 0) e.stun = Math.max(e.stun, 0.5);
     }
     if (t.b5 === 'A2') state.patches.push({ x: s.tx, y: s.ty, r: s.radius, dps: s.dmg * 0.5, t: 3, tower: t.id });
     state.blasts.push({ x: s.tx, y: s.ty, r: s.radius, t: 0.25 });
@@ -863,6 +868,7 @@ function updateCombat(dt) {
   // 프레임마다 재계산되는 오라 값 초기화
   for (const e of state.enemies) {
     e.mresCut = e.plagueT > 0 ? e.plagueCut : 0;
+    e.magicVuln = e.plagueT > 0 ? e.plagueVuln : 0;
     e.healCut = 0;
     e.inDeepAura = false;
     e.slowNext = 0;
@@ -1128,7 +1134,7 @@ function spawnEnemy(kind) {
     dist: 0, x: PATH[0].x, y: PATH[0].y,
     hitFlash: 0, dead: false,
     armorStacks: 0, armorPer: 2, armorT: 0,
-    mresCut: 0, arcResonance: 0, plagueT: 0, plagueCut: 0,
+    mresCut: 0, magicVuln: 0, arcResonance: 0, plagueT: 0, plagueCut: 0, plagueVuln: 0,
     healCut: 0, inDeepAura: false,
     slowAmt: 0, slowNext: 0, slowT: 0, frostStacks: 0,
     frozen: 0, stun: 0, pendingVuln: false, vulnT: 0, markT: 0,

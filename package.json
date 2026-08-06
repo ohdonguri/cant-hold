@@ -6,6 +6,7 @@
     "test": "node tools/test.js",
     "tune": "node tools/tune.js",
     "sim": "node tools/tune.js one",
-    "shot": "node tools/shot.js"
+    "shot": "node tools/shot.js",
+    "parity": "node tools/parity.js"
   }
 }
