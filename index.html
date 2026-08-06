@@ -1831,7 +1831,7 @@ const FIREBASE_CONFIG = {
 const SAVE_PATH = 'games/canthold/saves';
 const SDK = 'https://www.gstatic.com/firebasejs/11.0.2/';
 
-const cloud = { ready: false, user: null, busy: false, msg: '' };
+const cloud = { ready: false, user: null, busy: false, msg: '', ok: null };
 let fb = null;                       // { auth, db, doc, getDoc, setDoc, ... }
 
 async function cloudInit() {
@@ -1872,20 +1872,33 @@ async function cloudPull() {
     savedRun = merged.run || null;
     saveLocal();
     await cloudSave();
-    cloud.msg = '기록을 불러왔다';
+    if (cloud.ok !== false) cloud.msg = '기록을 불러왔다';
   } catch (e) {
-    cloud.msg = '기록을 못 불러왔다';
+    cloud.ok = false;
+    cloud.msg = String((e && e.code) || e).includes('permission')
+      ? '읽기 거부됨 — 서버 규칙을 확인해야 한다'
+      : '기록을 못 불러왔다';
   } finally {
     cloud.busy = false;
   }
 }
 
+// 실패를 삼키면 안 된다. 규칙이 안 올라가 있으면 로그인은 되는데 저장만 조용히
+// 실패하고, 기기를 바꾼 뒤에야 알게 된다. 결과를 화면에 남긴다.
 async function cloudSave() {
   if (!fb || !cloud.user) return;
   try {
     await fb.setDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid),
       { ...saveBundle(), updatedAt: fb.serverTimestamp() });
-  } catch { /* 못 올려도 로컬에는 남아 있다 */ }
+    cloud.ok = true;
+    cloud.msg = '클라우드에 저장됨';
+  } catch (e) {
+    cloud.ok = false;
+    const code = String((e && e.code) || e);
+    cloud.msg = code.includes('permission')
+      ? '저장 거부됨 — 서버 규칙을 확인해야 한다'
+      : '저장 실패 — 이 기기에만 남는다';
+  }
 }
 
 async function cloudToggle() {
@@ -1897,6 +1910,7 @@ async function cloudToggle() {
     if (cloud.user) {
       await cloudSave();
       await fb.signOut(fb.auth);
+      cloud.ok = null;
       cloud.msg = '로그아웃했다';
     } else {
       await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
@@ -1997,7 +2011,7 @@ function drawStageSelect() {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     if (cloud.msg) {
-      ctx.fillStyle = '#6e7681';
+      ctx.fillStyle = cloud.ok === false ? '#f85149' : cloud.ok ? '#7ee787' : '#6e7681';
       ctx.font = '11px system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(cloud.msg, view.w / 2, r.y + r.h + 6);
