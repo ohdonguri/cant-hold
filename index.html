@@ -299,9 +299,27 @@ const state = {
   selected: null,      // 선택된 타워 id
   picker: null,        // {gx, gy} — 빈 칸에 뭘 소환할지 고르는 중
   paused: false,       // ESC 일시정지
+  speed: 1,            // 시뮬 배속 (1·2·4). 웨이브 사이 정지가 없어진 뒤로
+                       //   느긋한 구간을 건너뛰고 싶어 하는 사람들이 있어 넣었다.
   choice: null,        // {towerId, tier, options} — 분기 선택 대기
   toast: null,         // {text, t}
 };
+
+const SPEEDS = [1, 2, 4];
+function cycleSpeed() {
+  const i = SPEEDS.indexOf(state.speed);
+  state.speed = SPEEDS[(i + 1) % SPEEDS.length];
+}
+
+// 드래그 합성을 한 번이라도 해내면 튜토리얼을 영영 끈다. 기기 로컬 플래그라
+// 세이브 번들·클라우드 동기화와 섞지 않는다 — "이 기기에서 배웠나"만 보면 된다.
+let tuteMerged = false;
+try { tuteMerged = localStorage.getItem('cant-hold-tute') === '1'; } catch { /* 무시 */ }
+function markTuteMerged() {
+  if (tuteMerged) return;
+  tuteMerged = true;
+  try { localStorage.setItem('cant-hold-tute', '1'); } catch { /* 저장 못 해도 됨 */ }
+}
 
 let nextTowerId = 1;
 let nextEnemyId = 1;
@@ -424,6 +442,15 @@ function canMerge(a, b) {
       && a.star === b.star && a.star < CFG.STAR_MAX;
 }
 
+// 지금 합칠 수 있는 타워 한 쌍. 튜토리얼이 어느 둘을 가리킬지 정하는 데 쓴다.
+function mergeablePair() {
+  const ts = state.towers;
+  for (let i = 0; i < ts.length; i++)
+    for (let j = i + 1; j < ts.length; j++)
+      if (canMerge(ts[i], ts[j])) return [ts[i], ts[j]];
+  return null;
+}
+
 // 합성 결과를 놓을 자리를 찾는다. 5성부터 2x2 라서 자리가 없으면 합성 자체가 막힌다.
 // 이게 이 게임의 공간 압박이고, 조용히 우회시키면 안 된다.
 //
@@ -464,6 +491,7 @@ function mergeTowers(a, b) {
     streak: 0, lastTarget: null, arcKills: 0,
   };
   state.towers.push(t);
+  markTuteMerged();   // 드래그 합성을 해냈으니 안내를 끈다
 
   // 3성/5성/7성 진입은 분기 선택을 띄운다
   if (star === 3 || star === 5 || star === 7) openChoice(t, star);
@@ -1626,15 +1654,24 @@ function layoutButtons() {
   const pad = 12, gap = 8;
   const playing = state.phase !== 'over' && state.phase !== 'clear';
 
-  // 맨 아래: 빨리 보내기
+  // 맨 아래: 빨리 보내기 + 배속. 배속은 빨리 보내기와 달리 웨이브 도중에도
+  // 눌리므로 (긴 웨이브를 빠르게 넘기려는 용도라) 항상 켜져 있다.
   const rushH = 44;
   const rushY = view.h - rushH - 12;
+  const speedW = 60;
   buttons.push({
-    x: pad, y: rushY, w: view.w - pad * 2, h: rushH,
+    x: pad, y: rushY, w: view.w - pad * 2 - gap - speedW, h: rushH,
     label: () => state.phase !== 'build' ? '진행 중'
       : state.wave === 0 ? '시작' : '빨리 보내기',
     enabled: () => state.phase === 'build',
     fn: rushWave,
+    quiet: true,
+  });
+  buttons.push({
+    x: view.w - pad - speedW, y: rushY, w: speedW, h: rushH,
+    label: () => 'x' + state.speed,
+    enabled: () => true,
+    fn: cycleSpeed,
     quiet: true,
   });
 
@@ -3084,6 +3121,121 @@ function drawDrag() {
   ctx.globalAlpha = 1;
 }
 
+// 합성 안내. 웨이브 사이 정지를 없앤 뒤로 "드래그하면 합쳐진다"는 걸
+// 배울 틈이 없어서, 같은 타워 두 개가 실제로 보드에 올라온 그 순간
+// — 즉 바로 지금 합칠 수 있을 때만 — 손가락 하나가 A 를 B 위로 끌어다 놓는
+// 동작을 반복해 보여준다. 한 번이라도 성공하면 markTuteMerged 로 영영 꺼진다.
+function towerCenterPx(t) {
+  const s = towerFootprint(t);
+  const p = cellToPx(t.gx, t.gy);
+  return { x: p.x + view.cell * s / 2, y: p.y + view.cell * s / 2 };
+}
+
+function drawTutorial() {
+  if (tuteMerged) return;
+  if (state.paused || state.picker || state.choice) return;
+  if (drag && drag.moved) return;          // 이미 끌고 있으면 안내가 방해된다
+  const pair = mergeablePair();
+  if (!pair) return;
+
+  const a = towerCenterPx(pair[0]);
+  const b = towerCenterPx(pair[1]);
+  const cell = view.cell;
+  const pulse = 0.5 + 0.5 * Math.sin(frameNow / 320);
+
+  // 두 타워를 파란 링으로 짚어 준다
+  ctx.save();
+  ctx.strokeStyle = '#58a6ff';
+  for (const c of [a, b]) {
+    ctx.globalAlpha = 0.5 + 0.4 * pulse;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, cell * (0.5 + 0.06 * pulse), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // A 에서 B 로 반복해서 흐르는 손가락. 앞 72% 동안 이동하고 나머지는 B 에서 눌러 준다.
+  const period = 1900;
+  const tt = (frameNow % period) / period;
+  const travel = 0.72;
+  let fx, fy, atDest;
+  if (tt < travel) {
+    const e = tt / travel;
+    const s = e < 0.5 ? 2 * e * e : 1 - Math.pow(-2 * e + 2, 2) / 2; // easeInOut
+    fx = a.x + (b.x - a.x) * s;
+    fy = a.y + (b.y - a.y) * s;
+    atDest = false;
+  } else {
+    fx = b.x; fy = b.y; atDest = true;
+  }
+
+  // 지나온 자취
+  ctx.strokeStyle = '#58a6ff';
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(fx, fy);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 도착 순간 B 에서 퍼지는 링
+  if (atDest) {
+    const k = (tt - travel) / (1 - travel);
+    ctx.globalAlpha = 0.5 * (1 - k);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, cell * (0.5 + 0.5 * k), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // 손가락 끝
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = 'rgba(88,166,255,0.35)';
+  ctx.beginPath();
+  ctx.arc(fx, fy, 15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#e6edf3';
+  ctx.beginPath();
+  ctx.arc(fx, fy, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#58a6ff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // 안내 배너. 잠긴 위쪽 행에 얹어 타워를 가리지 않는다.
+  const bw = Math.min(view.w - 24, 340);
+  const bx = (view.w - bw) / 2;
+  const bh = 60;
+  const by = view.oy + Math.max(6, cell * 0.4);
+  ctx.globalAlpha = 0.94;
+  ctx.fillStyle = '#161b22';
+  ctx.strokeStyle = '#58a6ff';
+  ctx.lineWidth = 1.5;
+  roundRect(bx, by, bw, bh, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#58a6ff';
+  ctx.font = '700 15px system-ui, sans-serif';
+  ctx.fillText('드래그로 합성', bx + bw / 2, by + 11);
+  ctx.fillStyle = '#c9d1d9';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillText('같은 타워를 다른 타워 위로 끌어 놓으면', bx + bw / 2, by + 31);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillText('성급이 오릅니다 · 웨이브 사이에만', bx + bw / 2, by + 31 + 15);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.restore();
+}
+
 // 덱 5종. 뭐가 나올 수 있는지 모르면 합성 계획을 세울 수 없다.
 function belowBoardY() { return view.oy + view.cell * CFG.BOARD_H + 12; }
 
@@ -3209,6 +3361,7 @@ function render() {
 
   drawDrag();
   drawHud();
+  drawTutorial();
   drawInfo();
   drawPicker();
   drawPause();
@@ -3256,10 +3409,16 @@ function drawOverlay() {
 // 루프
 // ═════════════════════════════════════════════════════════════
 let last = performance.now();
+let frameNow = 0;                 // 그리기용 실시간 시계 (튜토리얼 애니메이션)
 function frame(now) {
+  frameNow = now;
   const dt = Math.min((now - last) / 1000, 0.05); // 탭 전환 후 점프 방지
   last = now;
-  update(dt);
+  // 배속은 dt 를 늘리는 대신 update 를 여러 번 돌린다. dt 를 4배로 키우면
+  // 적이 한 스텝에 타워 사거리를 통째로 건너뛰거나 발사체가 표적을 지나쳐서
+  // 판정이 깨진다. 작은 스텝을 여러 번 밟으면 x1 과 같은 결과가 나온다.
+  const steps = Math.max(1, state.speed | 0);
+  for (let i = 0; i < steps; i++) update(dt);
   render();
   requestAnimationFrame(frame);
 }

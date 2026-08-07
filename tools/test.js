@@ -208,6 +208,66 @@ function ok(name, cond, detail) {
   ok('조폐소 5성은 1칸 유지', mint5 && g.towerFootprint(mint5) === 1);
 }
 
+// ── 배속 ──────────────────────────────────────────────────────
+// 배속은 dt 를 키우지 않고 update 를 여러 번 돌려서 낸다. x2 로 한 프레임에
+// 두 번 밟은 결과가 x1 로 두 프레임 밟은 것과 같아야 판정이 안 깨진다.
+{
+  console.log('배속');
+  const g = load();
+  const { state } = g;
+
+  ok('기본은 x1', state.speed === 1, 'x' + state.speed);
+  g.cycleSpeed(); ok('한 번 누르면 x2', state.speed === 2, 'x' + state.speed);
+  g.cycleSpeed(); ok('두 번 누르면 x4', state.speed === 4, 'x' + state.speed);
+  g.cycleSpeed(); ok('세 번 누르면 x1 로 돈다', state.speed === 1, 'x' + state.speed);
+
+  // 같은 초를 한 번에 밟든 나눠 밟든 적 위치가 같다 (배속으로 판정이 안 흔들린다)
+  const run = (steps) => {
+    const h = load();
+    h.state.phase = 'wave';
+    h.state.enemies.length = 0;
+    h.spawnEnemy('grunt');
+    const e = h.state.enemies[0];
+    const start = e.dist;
+    for (let i = 0; i < steps; i++) h.update(0.5 / steps);
+    return e.dist - start;
+  };
+  const oneStep = run(1), fourStep = run(4);
+  ok('나눠 밟아도 같은 거리', Math.abs(oneStep - fourStep) < 1e-9, oneStep.toFixed(4) + ' vs ' + fourStep.toFixed(4));
+}
+
+// ── 합성 튜토리얼 ─────────────────────────────────────────────
+// 웨이브 사이 정지를 없앤 뒤로 드래그 합성을 배울 틈이 없다. 합칠 수 있는
+// 쌍이 실제로 보드에 올라온 순간에만 안내가 뜨고, 한 번 합치면 영영 꺼진다.
+{
+  console.log('합성 튜토리얼');
+  const g = load();
+  const { state } = g;
+  state.phase = 'build';
+  state.towers.length = 0;
+  state.gold = 99999;
+
+  const put = (kind, star, gx, gy) => {
+    const t = { id: 700 + state.towers.length, gx, gy, kind, star, b3: null, b5: null, t7: null,
+      cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 };
+    state.towers.push(t);
+    return t;
+  };
+
+  ok('타워가 없으면 안내할 쌍 없음', g.mergeablePair() === null);
+  put('marksman', 1, 2, 8);
+  ok('한 개만 있으면 아직 없음', g.mergeablePair() === null);
+  const a = put('marksman', 1, 3, 8), b = put('marksman', 1, 4, 8);
+  ok('같은 종류·성급 두 개면 쌍이 잡힌다', !!g.mergeablePair());
+
+  state.phase = 'wave';
+  ok('웨이브 중엔 안내 안 뜬다', g.mergeablePair() === null);
+  state.phase = 'build';
+
+  g.mergeTowers(a, b);
+  ok('합성하면 render 가 안 터진다', (g.render(), true));
+}
+
 // ── 마력로 ────────────────────────────────────────────────────
 // 대상을 향해 회전하고, 그 직선 위의 적을 전부 꿴다.
 // 각도를 배치 시점에 고정해 봤더니 "겨냥한 놈한테 안 쏜다"로만 읽혔다.
