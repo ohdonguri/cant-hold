@@ -173,14 +173,18 @@ function isPath(gx, gy) { return pathCells.has(gx + ',' + gy); }
 // ═════════════════════════════════════════════════════════════
 // 타워 정의. 분기 효과는 이후 패스에서 붙인다.
 // ═════════════════════════════════════════════════════════════
+// blurb 은 "이게 뭐냐", how 는 "그래서 어디에 놓느냐"다. 둘을 한 줄로 합쳐
+// 봤더니 성격만 읽히고 쓰는 법이 안 읽혔다 — 특히 조폐소는 공격을 안 하니까
+// 성능 문구가 아예 없어서 "왜 뽑는지 모르겠다"가 됐다. 카드에 두 줄로 나눠 적는다.
+// how 는 소환 카드 한 줄에 들어가야 하므로 24자 안쪽으로 유지할 것.
 const KINDS = {
-  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.6, cd: 0.6, range: 2.4, group: 'aura', role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함' },
-  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, group: 'aura', role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제' },
-  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, group: 'aura', role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다' },
-  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.2, cd: 1.6, range: 3.2, group: 'attack', role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함' },
-  marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, group: 'attack', role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역' },
-  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 0.7, cd: 2.5, range: 4.0, group: 'attack', role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능' },
-  mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, group: 'econ', role: '경제', blurb: '공격 안 함. 골드 수입만' },
+  shredder: { name: '파쇄자', tag: '파', color: '#f0883e', dmgType: 'physical', base: 0.6, cd: 0.6, range: 2.4, group: 'aura', role: '물리', blurb: '주변 상시 방깎 오라. 중갑·정예에 강함', how: '통로 옆에 붙여 방어력을 깎는다' },
+  eroder:   { name: '침식자', tag: '침', color: '#a371f7', dmgType: 'magic',    base: 0.8, cd: 1.0, range: 2.7, group: 'aura', role: '마법', blurb: '마방 감소 + 마법 취약 오라. 재생 억제', how: '마법 딜러 옆에. 재생도 눌린다' },
+  frost:    { name: '서리탑', tag: '서', color: '#79c0ff', dmgType: 'magic',    base: 0.6, cd: 0.9, range: 2.4, group: 'aura', role: '마법', blurb: '주변 상시 슬로우 오라. 질주·군집을 붙잡는다', how: '길목에 두면 다른 타워가 더 오래 때린다' },
+  mortar:   { name: '박격포', tag: '박', color: '#d29922', dmgType: 'physical', base: 1.2, cd: 1.6, range: 3.2, group: 'attack', role: '물리', blurb: '범위 폭발. 군집에 강하고 질주에 약함', how: '적이 줄지어 오는 직선을 덮는다' },
+  marksman: { name: '관측소', tag: '관', color: '#3fb950', dmgType: 'physical', base: 2.2, cd: 2.0, range: 4.5, group: 'attack', role: '물리', blurb: '단일 고딜, 최장 사거리. 정예·면역', how: '뒤쪽 안전한 칸에서 정예를 노린다' },
+  arc:      { name: '마력로', tag: '마', color: '#db61a2', dmgType: 'magic',    base: 0.7, cd: 2.5, range: 4.0, group: 'attack', role: '마법', blurb: '직선 관통. 배치 각도가 곧 성능', how: '통로와 나란히 놓아야 한 줄을 꿴다' },
+  mint:     { name: '조폐소', tag: '금', color: '#e3b341', dmgType: 'none',     base: 0,   cd: 0,   range: 2.0, group: 'econ', role: '경제', blurb: '공격 안 함. 웨이브가 끝날 때마다 골드', how: '성급이 곧 수입. 5성이어도 1칸만 쓴다' },
 };
 const KIND_KEYS = Object.keys(KINDS);
 
@@ -189,7 +193,7 @@ const KIND_KEYS = Object.keys(KINDS);
 const GROUPS = [
   { id: 'aura',   name: '오라', color: '#79c0ff', desc: '주변에 상시로 깔린다. 어디에 놓느냐가 성능' },
   { id: 'attack', name: '공격', color: '#f0883e', desc: '사거리 안의 적을 직접 때린다' },
-  { id: 'econ',   name: '경제', color: '#e3b341', desc: '공격하지 않는다. 골드만 번다' },
+  { id: 'econ',   name: '경제', color: '#e3b341', desc: '공격하지 않는다. 웨이브마다 골드가 들어온다' },
 ];
 const GROUP_OF = kind => GROUPS.find(g => g.id === KINDS[kind].group) || GROUPS[1];
 const AURA_KINDS = new Set(KIND_KEYS.filter(k => KINDS[k].group === 'aura'));
@@ -298,7 +302,7 @@ const state = {
   hasHanpa: false,     // 한파 타워 존재 여부 (프레임마다 갱신)
   selected: null,      // 선택된 타워 id
   picker: null,        // {gx, gy} — 빈 칸에 뭘 소환할지 고르는 중
-  paused: false,       // ESC 일시정지
+  paused: false,       // 일시정지 (버튼 또는 ESC)
   speed: 1,            // 시뮬 배속 (1·2·4). 웨이브 사이 정지가 없어진 뒤로
                        //   느긋한 구간을 건너뛰고 싶어 하는 사람들이 있어 넣었다.
   choice: null,        // {towerId, tier, options} — 분기 선택 대기
@@ -309,6 +313,21 @@ const SPEEDS = [1, 2, 4];
 function cycleSpeed() {
   const i = SPEEDS.indexOf(state.speed);
   state.speed = SPEEDS[(i + 1) % SPEEDS.length];
+}
+
+// 일시정지. 웨이브가 자동으로 굴러가는 게임이라 "잠깐 멈추고 싶다"는 요구가
+// 생기는데, 멈춘 채로 배치와 합성을 할 수 있으면 시간 압박이 통째로 사라진다.
+// 그래서 멈추는 동안에는 화면을 도움말로 덮어 판 자체를 못 만지게 한다
+// (입력은 pointerdown 첫 줄에서 통째로 먹고 화면만 되살린다).
+// 겸사겸사 이 화면이 이 게임의 유일한 설명서다 — drawPause 참고.
+function togglePause() {
+  state.paused = !state.paused;
+  if (!state.paused) return;
+  // 멈추는 순간 손에 들고 있던 것들을 놓는다. 키보드 ESC 로 멈추면
+  // 손가락은 아직 타워를 끄는 중일 수 있고, 그대로 두면 재개할 때
+  // 놓은 적도 없는 합성이 성사된다.
+  drag = null;
+  state.picker = null;
 }
 
 // 드래그 합성을 한 번이라도 해내면 튜토리얼을 영영 끈다. 기기 로컬 플래그라
@@ -542,7 +561,7 @@ function toast(text) { state.toast = { text, t: 1.6 }; }
 const BRANCH = {
   shredder: {
     A:  { name: '분쇄파', desc: '오라 범위 +50%' },
-    B:  { name: '천공', desc: '범위 -15%, 스택당 -4, 상한 2배' },
+    B:  { name: '천공', desc: '범위 -15%, 스택당 방깎 2배, 상한 2배' },
     A1: { name: '파열', desc: '스택 최대 시 폭발' },
     A2: { name: '전이', desc: '처치 시 스택 이관' },
     B1: { name: '파쇄', desc: '방어력 음수 허용 (-25)' },
@@ -588,13 +607,15 @@ const BRANCH = {
     B1: { name: '소멸', desc: '처치 수만큼 다음 딜 +15%' },
     B2: { name: '순수 광선', desc: '순수딜로 변경, 딜 65%' },
   },
+  // 조폐소만 문장으로 적는다. 나머지는 이미 굴러가는 걸 눈으로 보고 고르지만
+  // 이쪽은 화면에 아무 일도 안 일어나서, 줄임말로 적으면 뭘 고른 건지 끝까지 모른다.
   mint: {
-    A:  { name: '이자', desc: '보유 골드 3% 추가 (상한 40)' },
-    B:  { name: '징수', desc: '사거리 내 처치 시 +성급 G' },
+    A:  { name: '이자', desc: '웨이브마다 보유 골드의 3% 추가 (성급 x40 상한)' },
+    B:  { name: '징수', desc: '사거리 안에서 적이 죽으면 성급만큼 골드' },
     A1: { name: '투자', desc: '웨이브 클리어 골드 +25%' },
-    A2: { name: '환급', desc: '판매 100%, 합성 무료' },
-    B1: { name: '현상금', desc: '정예 처치 시 +50G' },
-    B2: { name: '약탈', desc: '징수 시 25% 확률 정수' },
+    A2: { name: '환급', desc: '판매하면 전액 환불, 합성 비용 0' },
+    B1: { name: '현상금', desc: '정예를 잡을 때마다 +50G (거리 무관)' },
+    B2: { name: '약탈', desc: '징수할 때 25% 확률로 골드 대신 정수' },
   },
 };
 
@@ -1654,13 +1675,13 @@ function layoutButtons() {
   const pad = 12, gap = 8;
   const playing = state.phase !== 'over' && state.phase !== 'clear';
 
-  // 맨 아래: 빨리 보내기 + 배속. 배속은 빨리 보내기와 달리 웨이브 도중에도
-  // 눌리므로 (긴 웨이브를 빠르게 넘기려는 용도라) 항상 켜져 있다.
+  // 맨 아래: 빨리 보내기 + 배속 + 일시정지. 뒤의 둘은 빨리 보내기와 달리
+  // 웨이브 도중에도 눌린다 (긴 웨이브를 빠르게 넘기거나 멈추려는 용도라).
   const rushH = 44;
   const rushY = view.h - rushH - 12;
-  const speedW = 60;
+  const speedW = 54, pauseW = 48;
   buttons.push({
-    x: pad, y: rushY, w: view.w - pad * 2 - gap - speedW, h: rushH,
+    x: pad, y: rushY, w: view.w - pad * 2 - gap * 2 - speedW - pauseW, h: rushH,
     label: () => state.phase !== 'build' ? '진행 중'
       : state.wave === 0 ? '시작' : '빨리 보내기',
     enabled: () => state.phase === 'build',
@@ -1668,10 +1689,20 @@ function layoutButtons() {
     quiet: true,
   });
   buttons.push({
-    x: view.w - pad - speedW, y: rushY, w: speedW, h: rushH,
+    x: view.w - pad - pauseW - gap - speedW, y: rushY, w: speedW, h: rushH,
     label: () => 'x' + state.speed,
     enabled: () => true,
     fn: cycleSpeed,
+    quiet: true,
+  });
+  buttons.push({
+    x: view.w - pad - pauseW, y: rushY, w: pauseW, h: rushH,
+    // 아이콘은 글리프 대신 도형으로 그린다. ❚❚ 나 ▶ 는 기기에 따라
+    // 두부(□)로 떨어지는데, 이 버튼은 눌러 보기 전엔 뜻을 확인할 방법이 없다.
+    icon: () => state.paused ? 'play' : 'pause',
+    label: () => '',
+    enabled: () => playing,
+    fn: togglePause,
     quiet: true,
   });
 
@@ -2007,9 +2038,9 @@ function drawStageSelect() {
   ctx.font = '700 22px system-ui, sans-serif';
   ctx.fillText('스테이지', 16, 44);
   ctx.fillStyle = '#8b949e';
-  ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText('맵마다 좋은 자리가 다르다. 깨면 다음이 열린다.', 16, 78);
+  fitText('맵마다 좋은 자리가 다르다. 깨면 다음이 열린다.', 16, 78, view.w - 32, 13);
   ctx.fillStyle = '#6e7681';
+  ctx.font = '13px system-ui, sans-serif';
   ctx.fillText(`${unlocked} / ${STAGES.length} 해금`, 16, 100);
 
   for (const r of stageCardRects()) {
@@ -2026,17 +2057,15 @@ function drawStageSelect() {
     ctx.fillText(`${r.i + 1}. ${r.def.name}`, r.x + 16, r.y + 12);
 
     ctx.fillStyle = open ? '#8b949e' : '#3d444d';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.fillText(open ? r.def.desc : '이전 스테이지를 깨야 열린다', r.x + 16, r.y + 36);
+    fitText(open ? r.def.desc : '이전 스테이지를 깨야 열린다', r.x + 16, r.y + 36, r.w - 32, 12);
 
     ctx.fillStyle = open ? '#6e7681' : '#3d444d';
-    ctx.font = '11px system-ui, sans-serif';
     // hpMult 를 그대로 보여주면 오해한다. 레인이 갈리면 배율이 1 미만이어도
     // 타워가 한쪽만 커버해서 더 어렵다. 그래서 순서대로 난이도를 매긴다.
-    ctx.fillText(
+    fitText(
       `${'●'.repeat(r.i + 1)}${'○'.repeat(STAGES.length - r.i - 1)}   웨이브 ${r.def.waves}   ` +
       (r.def.lanes.length > 1 ? `갈래 ${r.def.lanes.length}` : '한 갈래'),
-      r.x + 16, r.y + 58);
+      r.x + 16, r.y + 58, r.w - 32, 11);
   }
   // 이어하기. 웨이브 사이 스냅샷이 있을 때만 뜬다.
   if (savedRun) {
@@ -2124,7 +2153,9 @@ const PICKER_ACT_H = 44;
 function pickerLayout() {
   if (!state.picker) return null;
   const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
-  const w = Math.min(300, view.w - 40), h = 56, gap = 8;
+  // 카드 한 장에 세 줄(이름 / 뭐냐 / 어디에 놓냐)이 들어간다. 고르는 자리에서
+  // 쓰는 법이 안 보이면 이름과 사거리만 보고 찍게 된다.
+  const w = Math.min(300, view.w - 40), h = 66, gap = 8;
   const actH = state.picker.kind ? PICKER_ACT_H + 10 : 0;
   const total = deck.length * h + (deck.length - 1) * gap + actH;
   const x = (view.w - w) / 2;
@@ -2220,17 +2251,19 @@ function drawPicker() {
     }
     ctx.fillStyle = on ? '#e6edf3' : '#6e7681';
     ctx.font = '700 15px system-ui, sans-serif';
-    ctx.fillText(k.name, r.x + 52, r.y + 10);
+    ctx.fillText(k.name, r.x + 52, r.y + 9);
+    // 위 두 줄은 오른쪽 정보 칸을 피해야 하고, 아래 한 줄은 그 아래라 폭이 다 난다
     ctx.fillStyle = '#8b949e';
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(k.blurb, r.x + 52, r.y + 32);
+    fitText(k.blurb, r.x + 52, r.y + 29, r.w - 52 - 66, 11);
+    ctx.fillStyle = on ? '#6e7681' : '#484f58';
+    fitText(k.how, r.x + 52, r.y + 46, r.w - 52 - 14, 10.5);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = k.color;
     ctx.font = '10px system-ui, sans-serif';
-    ctx.fillText(GROUP_OF(r.k).name, r.x + r.w - 14, r.y + 12);
+    ctx.fillText(GROUP_OF(r.k).name, r.x + r.w - 14, r.y + 11);
     ctx.fillStyle = '#6e7681';
-    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 30);
+    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 29);
     ctx.globalAlpha = 1;
     ctx.textAlign = 'center';
   }
@@ -2249,6 +2282,15 @@ function drawPicker() {
     ctx.textBaseline = 'middle';
     ctx.fillText(place ? `배치  ${cost}G` : '취소', a.x + a.w / 2, a.y + a.h / 2);
     ctx.textBaseline = 'top';
+  }
+
+  // 소환값이 오른 이유를 그 값 옆에서 말해 준다. 안 적어 두면 "왜 갑자기
+  // 비싸졌지" 로만 읽히고, 웨이브를 넘기면 내려간다는 것도 영영 모른다.
+  if (cost > 10) {
+    const last = (L.actions.length ? L.actions : L.cards).slice(-1)[0];
+    ctx.fillStyle = '#6e7681';
+    fitText('부를수록 +2G · 웨이브를 넘기면 내려간다',
+      view.w / 2, last.y + last.h + 10, view.w - 24, 11);
   }
   ctx.textAlign = 'left';
 }
@@ -2296,10 +2338,9 @@ function drawDeckSelect() {
   ctx.font = '700 22px system-ui, sans-serif';
   ctx.fillText('덱 선택', 16, 44);
   ctx.fillStyle = '#8b949e';
-  ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(`${CFG.DECK_SIZE}종만 고른다. 고른 종류만 소환된다.`, 16, 76);
+  fitText(`${CFG.DECK_SIZE}종만 고른다. 고른 종류만 소환된다.`, 16, 76, view.w - 32, 13);
   ctx.fillStyle = '#6e7681';
-  ctx.fillText('빠진 종류가 어느 웨이브에서 아플지가 이 판의 첫 결정이다.', 16, 96);
+  fitText('빠진 종류가 어느 웨이브에서 아플지가 이 판의 첫 결정이다.', 16, 96, view.w - 32, 13);
 
   for (const it of deckLayout()) {
     if (it.type === 'header') {
@@ -2328,19 +2369,23 @@ function drawDeckSelect() {
       ctx.fillText(k.tag, r.x + 14, r.y + r.h / 2 - 13);
     }
 
+    const roomy = r.h >= 58;   // 짧은 화면에서는 카드가 얇아져 두 줄까지만 들어간다
     ctx.fillStyle = '#e6edf3';
     ctx.font = '700 14px system-ui, sans-serif';
-    ctx.fillText(k.name, r.x + 48, r.y + 10);
+    ctx.fillText(k.name, r.x + 48, roomy ? r.y + 8 : r.y + 10);
     ctx.fillStyle = '#8b949e';
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(k.blurb, r.x + 48, r.y + 30);
+    fitText(k.blurb, r.x + 48, roomy ? r.y + 27 : r.y + 30, r.w - 48 - 72, 11);
+    if (roomy) {
+      ctx.fillStyle = '#6e7681';
+      fitText(k.how, r.x + 48, r.y + 44, r.w - 48 - 14, 10.5);
+    }
 
     ctx.textAlign = 'right';
     ctx.fillStyle = k.dmgType === 'physical' ? '#d29922' : k.dmgType === 'magic' ? '#a371f7' : '#6e7681';
     ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(k.role, r.x + r.w - 14, r.y + 11);
+    ctx.fillText(k.role, r.x + r.w - 14, roomy ? r.y + 9 : r.y + 11);
     ctx.fillStyle = '#484f58';
-    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, r.y + 29);
+    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, roomy ? r.y + 27 : r.y + 29);
     ctx.textAlign = 'left';
   }
 
@@ -2476,7 +2521,7 @@ window.addEventListener('keydown', e => {
   if (state.phase === 'stage' || state.phase === 'deck') return;
   if (state.picker) { state.picker = null; return; }
   if (state.choice) return;                 // 분기 선택은 되돌릴 수 없으니 안 닫는다
-  state.paused = !state.paused;
+  togglePause();
 });
 
 function restart() {
@@ -3061,6 +3106,8 @@ function drawHud() {
       ctx.fillStyle = on ? '#8b949e' : '#484f58';
       ctx.font = '11px system-ui, sans-serif';
       ctx.fillText(b.sub(), b.x + b.w / 2, b.y + b.h - 15);
+    } else if (b.icon) {
+      drawBtnIcon(b.icon(), b.x + b.w / 2, b.y + b.h / 2, on ? '#c9d1d9' : '#6e7681');
     } else {
       ctx.fillStyle = on ? '#c9d1d9' : '#6e7681';
       ctx.font = '600 14px system-ui, sans-serif';
@@ -3071,6 +3118,22 @@ function drawHud() {
   }
 
   drawToast();
+}
+
+// 일시정지/재개 아이콘. 폰트 글리프를 안 쓰고 도형으로 찍는다.
+function drawBtnIcon(name, cx, cy, color) {
+  ctx.fillStyle = color;
+  if (name === 'play') {
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy - 8);
+    ctx.lineTo(cx + 8, cy);
+    ctx.lineTo(cx - 5, cy + 8);
+    ctx.closePath();
+    ctx.fill();
+    return;
+  }
+  ctx.fillRect(cx - 6, cy - 8, 4, 16);
+  ctx.fillRect(cx + 2, cy - 8, 4, 16);
 }
 
 function drawToast() {
@@ -3285,6 +3348,12 @@ function drawInfo() {
       ? `수입 ${Math.round(CFG.MINT_BASE * STAR_MULT[t.star])}G/웨이브`
       : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}`,
     pad, y + 19);
+
+  // 세 번째 줄은 "그래서 이게 뭘 하는가". 분기 이름만 늘어놓으면 ('이자 · 투자')
+  // 고른 본인도 그게 무슨 효과였는지 나중에 다시 읽을 데가 없다.
+  const last = t.t7 ? TRAITS[t.t7] : t.b5 ? BRANCH[t.kind][t.b5] : t.b3 ? BRANCH[t.kind][t.b3] : null;
+  ctx.fillStyle = '#565f6a';
+  fitText(last ? `${last.name} — ${last.desc}` : k.how, pad, y + 35, view.w - pad * 2, 11);
 }
 
 function drawChoice() {
@@ -3320,11 +3389,30 @@ function drawChoice() {
     ctx.font = '700 16px system-ui, sans-serif';
     ctx.fillText(info.name, r.x + 18, r.y + 18);
     ctx.fillStyle = '#8b949e';
+    // 두 줄까지 접는다. 줄임말을 풀어 쓰면 한 줄로는 안 들어가는데,
+    // 안 접으면 카드 밖으로 흘러 나가서 뒷부분이 통째로 안 읽힌다.
     ctx.font = '13px system-ui, sans-serif';
-    ctx.fillText(info.desc, r.x + 18, r.y + 45);
+    wrapLines(info.desc, r.w - 36).slice(0, 2)
+      .forEach((ln, i) => ctx.fillText(ln, r.x + 18, r.y + 45 + i * 17));
     ctx.textAlign = 'center';
   }
   ctx.textAlign = 'left';
+}
+
+// 카드 한 줄에 문장을 넣는다. 접을 자리가 없는 칸이라 넘치면 글씨를 줄이고,
+// 그래도 안 되면 끝을 잘라 말줄임한다 — 흘러 나가면 뒷부분이 통째로 안 읽힌다.
+function fitText(text, x, y, maxW, size, min = 9) {
+  const full = String(text);
+  let f = size;
+  ctx.font = `${f}px system-ui, sans-serif`;
+  while (f > min && ctx.measureText(full).width > maxW) {
+    f -= 0.5;
+    ctx.font = `${f}px system-ui, sans-serif`;
+  }
+  if (ctx.measureText(full).width <= maxW) { ctx.fillText(full, x, y); return; }
+  let s = full;
+  while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+  ctx.fillText(s + '…', x, y);
 }
 
 function roundRect(x, y, w, h, r) {
@@ -3369,19 +3457,153 @@ function render() {
   drawChoice();
 }
 
+// ── 일시정지 = 설명서 ────────────────────────────────────────
+// 이 게임에는 따로 도움말 화면이 없었다. 규칙은 전부 판 위에서만 드러나는데
+// 웨이브가 자동으로 굴러가니 읽을 틈이 없고, 특히 공격을 안 하는 조폐소는
+// "왜 뽑는지 모르겠다"로 끝났다. 어차피 정지 화면은 판을 통째로 덮어야 하므로
+// (덮지 않으면 멈춘 채로 배치·합성이 되어 시간 압박이 사라진다) 그 자리를
+// 설명서로 쓴다. 덮개와 설명서가 같은 화면이면 둘 다 공짜다.
+
+// 한국어는 공백이 드물어서 낱말 단위로만 접으면 한 줄이 통째로 넘친다.
+// 공백에서 먼저 접고, 그래도 안 되면 글자 단위로 끊는다.
+function wrapLines(text, maxW) {
+  const out = [];
+  let line = '';
+  for (const word of String(text).split(' ')) {
+    const cand = line ? line + ' ' + word : word;
+    if (ctx.measureText(cand).width <= maxW) { line = cand; continue; }
+    if (line) { out.push(line); line = ''; }
+    if (ctx.measureText(word).width <= maxW) { line = word; continue; }
+    let part = '';
+    for (const ch of word) {
+      if (part && ctx.measureText(part + ch).width > maxW) { out.push(part); part = ''; }
+      part += ch;
+    }
+    line = part;
+  }
+  if (line) out.push(line);
+  return out.length ? out : [''];
+}
+
+function pauseHelp() {
+  const next = nextUnlockWave();
+  const income = state.towers
+    .filter(t => t.kind === 'mint')
+    .reduce((s, t) => s + Math.round(CFG.MINT_BASE * STAR_MULT[t.star]), 0);
+  const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
+
+  return [
+    { head: '조작', rows: [
+      { label: '빈 칸', text: '탭하면 뭘 세울지 고르고, 사거리를 본 뒤 배치한다' },
+      { label: '합성', text: '타워를 같은 종류·같은 성급 타워 위로 끌어 놓는다. 웨이브 사이에만 된다' },
+      { label: '타워', text: '탭하면 사거리와 정보. 판매와 분기 재선택도 거기서 한다' },
+      { label: '보내기', text: '기다리지 않고 다음 웨이브를 지금 부른다. 보상은 없다' },
+      { label: '배속', text: 'x1 · x2 · x4. 빨리 돌려도 맞고 안 맞고는 달라지지 않는다' },
+      { label: '정지', text: '지금 이 화면. 적도 타워도 멈추고, 판은 만질 수 없다' },
+    ] },
+    { head: '내 덱', rows: deck.map(k => ({
+      label: KINDS[k].name,
+      color: KINDS[k].color,
+      text: k === 'mint' && income > 0
+        ? `${KINDS[k].how} · 지금 수입 +${income}G/웨이브`
+        : KINDS[k].how,
+    })) },
+    { head: '알아두면 좋은 것', rows: [
+      { label: '골드', text: '한 웨이브 안에서 소환할수록 값이 2G씩 오른다. 웨이브가 넘어가면 다시 내려간다' },
+      { label: '정수', text: '7웨이브마다 1개. 이미 고른 분기를 다시 고를 때 쓴다' },
+      { label: '자리', text: '5성부터 타워가 2x2를 먹는다. '
+        + (next === null ? '보드는 더 열리지 않는다' : `잠긴 행은 웨이브 ${next} 클리어 때 두 행 열린다`) },
+      { label: '오라', text: '실선 원은 상시 효과 범위, 점선은 사격 사거리다' },
+      { label: '예고', text: '위쪽에 다음 3웨이브 편성이 보인다. 지금 최적인 빌드가 곧 무력화된다' },
+    ] },
+  ];
+}
+
+// 배치를 미리 재 본다. 화면 높이가 제각각이라 그려 보기 전에는 넘치는지 알 수 없다.
+function pausePlan(sections, panelW, s) {
+  const labelW = Math.round(54 * s);
+  const lineH = Math.round(15 * s);
+  const items = [];
+  let h = 0;
+
+  items.push({ t: 'title', y: h, f: 22 * s }); h += Math.round(29 * s);
+  items.push({ t: 'sub', y: h, f: 12 * s }); h += Math.round(25 * s);
+
+  for (let i = 0; i < sections.length; i++) {
+    if (i) h += Math.round(13 * s);
+    items.push({ t: 'head', y: h, f: 12 * s, text: sections[i].head });
+    h += Math.round(21 * s);
+    const rows = sections[i].rows;
+    for (let j = 0; j < rows.length; j++) {
+      if (j) h += Math.round(7 * s);
+      ctx.font = `${11.5 * s}px system-ui, sans-serif`;
+      const lines = wrapLines(rows[j].text, panelW - labelW);
+      items.push({ t: 'row', y: h, r: rows[j], lines, f: 11.5 * s, labelW, lineH });
+      h += lines.length * lineH;
+    }
+  }
+
+  h += Math.round(24 * s);
+  items.push({ t: 'foot', y: h, f: 12 * s });
+  h += Math.round(14 * s);
+  return { items, h, s };
+}
+
 function drawPause() {
   if (!state.paused) return;
-  ctx.fillStyle = 'rgba(13,17,23,0.72)';
+
+  // 거의 불투명하게 덮는다. 반투명으로 두면 뒤의 판이 읽혀서 "멈춘 김에
+  // 어디에 놓을지 계산하는" 화면이 된다 — 그게 정지를 공짜 이득으로 만든다.
+  ctx.fillStyle = 'rgba(13,17,23,0.95)';
   ctx.fillRect(0, 0, view.w, view.h);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#e6edf3';
-  ctx.font = '700 24px system-ui, sans-serif';
-  ctx.fillText('일시정지', view.w / 2, view.h / 2 - 12);
-  ctx.fillStyle = '#8b949e';
-  ctx.font = '14px system-ui, sans-serif';
-  ctx.fillText('ESC 또는 화면을 눌러 계속', view.w / 2, view.h / 2 + 20);
+
+  const pad = 18;
+  const panelW = view.w - pad * 2;
+  const top = 26, avail = view.h - top - 26;
+
+  // 다 넣고 줄여 보다가, 그래도 안 되면 뒤쪽 절을 버린다. 앞쪽(조작·내 덱)이
+  // 실제로 사람이 막히는 지점이라 버리는 건 항상 뒤에서부터다.
+  const sections = pauseHelp();
+  let plan = null;
+  for (let n = sections.length; n >= 1 && !plan; n--) {
+    for (const s of [1, 0.92, 0.85, 0.78]) {
+      const p = pausePlan(sections.slice(0, n), panelW, s);
+      if (p.h <= avail) { plan = p; break; }
+    }
+  }
+  if (!plan) plan = pausePlan(sections.slice(0, 1), panelW, 0.78);
+
+  const y0 = top + Math.max(0, (avail - plan.h) / 2);
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+
+  for (const it of plan.items) {
+    const y = y0 + it.y;
+    if (it.t === 'title') {
+      ctx.fillStyle = '#e6edf3';
+      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+      ctx.fillText('일시정지', pad, y);
+    } else if (it.t === 'sub') {
+      ctx.fillStyle = '#6e7681';
+      ctx.font = `${it.f}px system-ui, sans-serif`;
+      ctx.fillText('멈춰 있는 동안에는 배치도 합성도 되지 않습니다', pad, y);
+    } else if (it.t === 'head') {
+      ctx.fillStyle = '#58a6ff';
+      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+      ctx.fillText(it.text, pad, y);
+    } else if (it.t === 'row') {
+      ctx.fillStyle = it.r.color || '#c9d1d9';
+      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+      ctx.fillText(it.r.label, pad, y);
+      ctx.fillStyle = '#8b949e';
+      ctx.font = `${it.f}px system-ui, sans-serif`;
+      it.lines.forEach((ln, i) => ctx.fillText(ln, pad + it.labelW, y + i * it.lineH));
+    } else {
+      ctx.fillStyle = '#484f58';
+      ctx.font = `${it.f}px system-ui, sans-serif`;
+      ctx.fillText('아무 곳이나 눌러 계속   ·   ESC', pad, y);
+    }
+  }
   ctx.textBaseline = 'top';
 }
 
@@ -3400,7 +3622,7 @@ function drawOverlay() {
   ctx.fillText(`웨이브 ${state.wave} / ${CFG.WAVE_MAX}`, view.w / 2, view.h / 2 + 18);
   ctx.fillStyle = '#6e7681';
   ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText('화면을 누르면 다시 시작', view.w / 2, view.h / 2 + 52);
+  ctx.fillText('화면을 누르면 스테이지 선택으로', view.w / 2, view.h / 2 + 52);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
 }

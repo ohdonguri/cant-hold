@@ -30,7 +30,8 @@ function patch(src, overrides) {
 const EXPOSE = [
   'CFG', 'state', 'update', 'KINDS', 'KIND_KEYS', 'ENEMY', 'WAVES', 'STAR_MULT',
   'waveHp', 'summon', 'summonCost', 'canPlace', 'occupancy', 'firstOpenRow', 'nextUnlockWave',
-  'canMerge', 'mergeAllowed', 'mergeTowers', 'mergeablePair', 'cycleSpeed', 'applyChoice', 'rushWave', 'towerDmg', 'towerCd',
+  'canMerge', 'mergeAllowed', 'mergeTowers', 'mergeablePair', 'cycleSpeed', 'togglePause', 'pauseHelp', 'wrapLines',
+  'applyChoice', 'rushWave', 'endWave', 'towerDmg', 'towerCd',
   'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',

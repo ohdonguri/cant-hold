@@ -236,6 +236,119 @@ function ok(name, cond, detail) {
   ok('나눠 밟아도 같은 거리', Math.abs(oneStep - fourStep) < 1e-9, oneStep.toFixed(4) + ' vs ' + fourStep.toFixed(4));
 }
 
+// ── 일시정지 ──────────────────────────────────────────────────
+// 웨이브가 자동으로 굴러가는 게임이라 멈출 수 있어야 하는데, 멈춘 채로
+// 배치·합성이 되면 시간 압박이 통째로 사라진다. 그래서 멈추면 화면을 덮고
+// 판을 못 만지게 한다. 그 덮개가 곧 이 게임의 설명서다.
+{
+  console.log('일시정지');
+  const g = load();
+  const { state, CFG } = g;
+  g.pickStage(0);
+  g.toggleDeckPick('shredder'); g.toggleDeckPick('marksman'); g.toggleDeckPick('mint');
+  g.startRun();
+
+  ok('시작은 정지 아님', state.paused === false);
+  g.togglePause(); ok('누르면 멈춘다', state.paused === true);
+  g.togglePause(); ok('다시 누르면 풀린다', state.paused === false);
+
+  // 소환 창을 열어 둔 채 멈추면 그 창으로 배치가 된다. 멈출 때 손에 든 걸 놓는다.
+  state.picker = { gx: 2, gy: 8, kind: 'marksman' };
+  g.togglePause();
+  ok('멈추면 열린 소환 창이 닫힌다', state.picker === null);
+
+  // 멈춘 동안에는 시간이 안 흐른다 (웨이브 타이머도, 적도)
+  state.phase = 'wave';
+  state.wave = 5;
+  state.spawnQueue = g.buildSpawnQueue(5);
+  const beforeQ = state.spawnQueue.length;
+  for (let i = 0; i < 200; i++) g.update(1 / 30);
+  ok('멈춘 동안 적이 안 나온다', state.spawnQueue.length === beforeQ && state.enemies.length === 0,
+    beforeQ + ' → ' + state.spawnQueue.length);
+  state.paused = false;
+
+  // 하단 버튼 줄: 빨리 보내기 / 배속 / 정지. 셋이 겹치거나 화면 밖으로 나가면
+  // 세로 화면에서 오조작이 된다.
+  state.phase = 'build';
+  g.render();
+  const row = g.buttons.filter(b => b.h === 44).sort((a, b) => a.x - b.x);
+  ok('하단에 버튼이 셋', row.length === 3, String(row.length));
+  ok('정지 버튼이 배속 옆에 있다', !!row[2] && !!row[2].icon && row[2].fn === g.togglePause);
+  ok('버튼이 안 겹친다', row.every((b, i) => i === 0 || b.x >= row[i - 1].x + row[i - 1].w));
+  ok('버튼이 화면 안에 있다', row.every(b => b.x >= 0 && b.x + b.w <= 390) && row[0].w > 80,
+    row.map(b => Math.round(b.x) + '+' + Math.round(b.w)).join(' '));
+
+  // 아이콘은 멈춤/재개를 반영한다 (눌러 보기 전엔 뜻을 확인할 방법이 없는 버튼이라)
+  ok('평소엔 멈춤 아이콘', row[2].icon() === 'pause', row[2].icon());
+  state.paused = true;
+  ok('멈추면 재개 아이콘', row[2].icon() === 'play', row[2].icon());
+  ok('정지 중에도 render 가 안 터진다', (g.render(), true));
+  state.paused = false;
+
+  // 정지 화면이 유일한 설명서다. 내 덱 3종은 반드시 설명이 붙어야 한다.
+  const help = g.pauseHelp();
+  const deckSec = help.find(s => s.head === '내 덱');
+  ok('도움말이 내 덱을 전부 설명한다',
+    !!deckSec && deckSec.rows.length === CFG.DECK_SIZE && deckSec.rows.every(r => r.text.length > 4),
+    deckSec ? deckSec.rows.map(r => r.label).join(',') : '없음');
+  ok('모든 절이 비어 있지 않다', help.every(s => s.head && s.rows.length > 0));
+
+  // 조폐소는 화면에 아무 일도 안 일어나서 숫자로 보여 주지 않으면 뭘 하는지 모른다
+  state.towers.push({ id: 900, gx: 1, gy: 9, kind: 'mint', star: 3, b3: null, b5: null, t7: null,
+    cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+  const mintRow = g.pauseHelp().find(s => s.head === '내 덱').rows.find(r => r.label === '조폐소');
+  const want = Math.round(CFG.MINT_BASE * g.STAR_MULT[3]);
+  ok('조폐소는 지금 수입을 숫자로 보여 준다', !!mintRow && mintRow.text.includes(`+${want}G`),
+    mintRow ? mintRow.text : '없음');
+}
+
+// ── 설명이 실제와 맞는가 ──────────────────────────────────────
+// 분기 설명은 화면에 뜨는 유일한 근거다. 코드가 바뀌고 문구가 안 바뀌면
+// 플레이어는 없는 규칙을 믿고 고르게 된다.
+{
+  console.log('설명');
+  const g = load();
+  const { state, CFG, BRANCH, TRAITS } = g;
+
+  const empty = [];
+  for (const [kind, opts] of Object.entries(BRANCH))
+    for (const [opt, info] of Object.entries(opts))
+      if (!info.name || !info.desc) empty.push(kind + '.' + opt);
+  for (const [key, info] of Object.entries(TRAITS))
+    if (!info.name || !info.desc) empty.push(key);
+  ok('분기·특성에 설명이 다 있다', empty.length === 0, empty.join(',') || '없음');
+
+  const noHow = Object.entries(g.KINDS).filter(([, k]) => !k.blurb || !k.how).map(([k]) => k);
+  ok('타워마다 blurb 과 how 가 있다', noHow.length === 0, noHow.join(',') || '없음');
+  // how 는 소환 카드 한 줄에 들어가야 한다
+  const longHow = Object.entries(g.KINDS).filter(([, k]) => k.how.length > 24).map(([k]) => k);
+  ok('how 는 24자 안쪽', longHow.length === 0, longHow.join(',') || '없음');
+
+  // 조폐소 이자 상한은 성급 배수다. "상한 40" 이라고 적어 뒀던 걸 바로잡았으니
+  // 실제로 성급을 타는지 코드로 못박아 둔다.
+  const mint = (star) => {
+    const h = load();
+    h.state.phase = 'wave';
+    h.state.wave = 1;
+    h.state.gold = 100000;                     // 3% 가 상한을 넘도록 크게 잡는다
+    h.state.towers.length = 0;
+    h.state.towers.push({ id: 1, gx: 1, gy: 9, kind: 'mint', star, b3: 'A', b5: null, t7: null,
+      cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    const before = h.state.gold;
+    h.endWave();
+    // 웨이브 클리어 골드와 기본 수입을 뺀 나머지가 이자다
+    const base = Math.round(CFG.GOLD_BASE * Math.pow(CFG.GOLD_GROWTH, 1))
+      + Math.round(CFG.MINT_BASE * g.STAR_MULT[star]);
+    return h.state.gold - before - base;
+  };
+  ok('이자 상한이 성급을 탄다', mint(1) === 40 && mint(3) === 120,
+    `1성 ${mint(1)}  3성 ${mint(3)}`);
+
+  // 긴 설명을 그리는 곳은 전부 줄바꿈을 거친다. 줄바꿈이 빈 배열을 내면 글이 사라진다.
+  ok('줄바꿈이 항상 한 줄 이상', g.wrapLines('아주 긴 한국어 설명 문장이다', 50).length >= 1);
+  ok('빈 문자열도 안전', g.wrapLines('', 50).length === 1);
+}
+
 // ── 합성 튜토리얼 ─────────────────────────────────────────────
 // 웨이브 사이 정지를 없앤 뒤로 드래그 합성을 배울 틈이 없다. 합칠 수 있는
 // 쌍이 실제로 보드에 올라온 순간에만 안내가 뜨고, 한 번 합치면 영영 꺼진다.
