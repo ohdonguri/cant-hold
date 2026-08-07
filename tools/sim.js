@@ -32,7 +32,8 @@ const EXPOSE = [
   'waveHp', 'summon', 'summonCost', 'canPlace', 'occupancy', 'firstOpenRow', 'nextUnlockWave',
   'canMerge', 'mergeAllowed', 'mergeTowers', 'mergeablePair', 'mergeResultSize', 'mergeSpot', 'drawMergePreview',
   'cycleSpeed', 'togglePause', 'pauseHelp', 'wrapLines',
-  'applyChoice', 'rushWave', 'endWave', 'towerDmg', 'towerCd',
+  'applyChoice', 'branchChain', 'choiceLabel', 'clearChoices', 'mergeCost', 'mergeIsFree',
+  'rushWave', 'endWave', 'towerDmg', 'towerCd',
   'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
@@ -94,7 +95,10 @@ function greedy(g, opts = {}) {
     while (state.choice) {
       const c = state.choice;
       let pick;
-      if (c.tier === 3) pick = branch3;
+      // 물려받기는 첫 부모를 고른다 — 조용히 a 를 취했던 옛 동작과 같은 결과라
+      // 밸런스 시뮬 숫자가 이 변경으로 흔들리지 않는다.
+      if (c.mode === 'inherit') pick = 0;
+      else if (c.tier === 3) pick = branch3;
       else if (c.tier === 5) pick = c.options.includes(branch5) ? branch5 : c.options[0];
       else pick = c.options[0];
       g.applyChoice(pick);

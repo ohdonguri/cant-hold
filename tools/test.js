@@ -236,6 +236,107 @@ function ok(name, cond, detail) {
   ok('나눠 밟아도 같은 거리', Math.abs(oneStep - fourStep) < 1e-9, oneStep.toFixed(4) + ' vs ' + fourStep.toFixed(4));
 }
 
+// ── 물려받을 분기를 묻는다 ────────────────────────────────────
+// 분기가 서로 다른 둘을 합치면 예전에는 끌어당긴 쪽이 조용히 이겼다. 어느 빌드가
+// 살아남았는지 알 방법이 없었다. 이제 묻는다. 그리고 b3·b5 는 한 줄기라서
+// 통째로 물려받아야 한다 — 슬롯을 따로 고르면 A 줄기에 B2 가 붙는다.
+{
+  console.log('분기 물려받기');
+  const g = load();
+  const { state, CFG } = g;
+  g.pickStage(0);
+  g.toggleDeckPick('marksman'); g.toggleDeckPick('frost'); g.toggleDeckPick('mint');
+  g.startRun();
+  state.gold = 999999;
+
+  const put = (star, o = {}) => {
+    const spot = [[1, 8], [2, 8], [4, 8], [5, 8], [1, 7], [2, 7]][state.towers.length % 6];
+    const t = { id: 900 + state.towers.length, gx: spot[0], gy: spot[1], kind: 'marksman', star,
+      b3: null, b5: null, t7: null, cd: 0, angle: 0, flash: 0,
+      streak: 0, lastTarget: null, arcKills: 0, ...o };
+    state.towers.push(t);
+    return t;
+  };
+
+  // 같은 분기면 묻지 않는다
+  state.towers.length = 0; g.applyChoice; state.choice = null;
+  let a = put(3, { b3: 'A' }), b = put(3, { b3: 'A' });
+  let m = g.mergeTowers(a, b);
+  ok('같은 분기는 안 묻는다', state.choice === null, state.choice ? state.choice.mode : 'null');
+  ok('그대로 물려받는다', m && m.b3 === 'A', m ? String(m.b3) : '실패');
+
+  // 다르면 묻는다
+  state.towers.length = 0; state.choice = null;
+  a = put(3, { b3: 'A' }); b = put(3, { b3: 'B' });
+  m = g.mergeTowers(a, b);
+  ok('분기가 다르면 묻는다', !!state.choice && state.choice.mode === 'inherit',
+    state.choice ? state.choice.mode : 'null');
+  ok('후보가 둘', !!state.choice && state.choice.options.length === 2);
+  ok('후보가 두 부모의 분기', !!state.choice
+    && state.choice.chains[0].b3 === 'A' && state.choice.chains[1].b3 === 'B');
+  // 끌어당긴 쪽(a=A)이 아니라 내가 고른 쪽(B)이 남는다
+  g.applyChoice(1);
+  ok('고른 쪽이 남는다', m.b3 === 'B', String(m.b3));
+  ok('고르면 모달이 닫힌다', state.choice === null);
+
+  // b3·b5 를 통째로 물려받는다 — 줄기가 섞이면 안 된다
+  state.towers.length = 0; state.choice = null;
+  a = put(5, { b3: 'A', b5: 'A1' }); b = put(5, { b3: 'B', b5: 'B2' });
+  m = g.mergeTowers(a, b);
+  ok('5성끼리도 묻는다', !!state.choice && state.choice.mode === 'inherit');
+  g.applyChoice(1);
+  ok('b3 와 b5 가 같은 줄기', m.b3 === 'B' && m.b5 === 'B2', `${m.b3}/${m.b5}`);
+  ok('줄기를 섞지 않는다', m.b5.startsWith(m.b3), `${m.b3}/${m.b5}`);
+
+  // 물려받기가 먼저, 새 성급 분기가 그 다음. 5성 후보는 확정된 b3 에서 나온다
+  state.towers.length = 0; state.choice = null;
+  a = put(4, { b3: 'A' }); b = put(4, { b3: 'B' });
+  m = g.mergeTowers(a, b);
+  ok('5성 진입 때 물려받기를 먼저 묻는다',
+    !!state.choice && state.choice.mode === 'inherit', state.choice ? state.choice.mode : 'null');
+  g.applyChoice(1);                                  // B 줄기를 남긴다
+  ok('그 다음 5성 분기를 묻는다',
+    !!state.choice && state.choice.tier === 5 && !state.choice.mode,
+    state.choice ? `tier ${state.choice.tier}` : 'null');
+  ok('5성 후보가 고른 b3 에서 나온다',
+    !!state.choice && state.choice.options.join(',') === 'B1,B2',
+    state.choice ? state.choice.options.join(',') : 'null');
+  g.applyChoice('B2');
+  ok('두 선택이 다 끝나면 닫힌다', state.choice === null);
+  ok('결과가 앞뒤로 맞는다', m.b3 === 'B' && m.b5 === 'B2', `${m.b3}/${m.b5}`);
+
+  // 모달 카드에 두 줄기가 사람 말로 나와야 한다
+  state.towers.length = 0; state.choice = null;
+  a = put(5, { b3: 'A', b5: 'A1' }); b = put(5, { b3: 'B', b5: 'B2' });
+  g.mergeTowers(a, b);
+  const L0 = g.choiceLabel(0), L1 = g.choiceLabel(1);
+  const B = g.BRANCH.marksman;
+  ok('카드에 분기 이름이 둘 다 나온다',
+    L0.name.includes(B.A.name) && L0.name.includes(B.A1.name), L0.name);
+  ok('카드 설명도 둘 다 나온다',
+    L0.desc.includes(B.A.desc) && L0.desc.includes(B.A1.desc), L0.desc.replace(/\n/g, ' | '));
+  ok('두 카드가 서로 다르다', L0.name !== L1.name, `${L0.name} vs ${L1.name}`);
+  ok('물려받기 모달이 안 터진다', (g.render(), true));
+  g.applyChoice(0);
+
+  // 판을 새로 세우면 대기 중인 선택이 안 남는다
+  state.towers.length = 0;
+  a = put(3, { b3: 'A' }); b = put(3, { b3: 'B' });
+  g.mergeTowers(a, b);
+  ok('선택이 대기 중', !!state.choice);
+  g.restart();
+  ok('재시작하면 선택이 비워진다', state.choice === null);
+
+  // 합성값은 성급을 탄다. 환급(A2) 이면 공짜다
+  ok('합성값 = 성급 x8', g.mergeCost(3) === 24 && g.mergeCost(6) === 48,
+    `${g.mergeCost(3)} / ${g.mergeCost(6)}`);
+  ok('평소엔 공짜가 아니다', g.mergeIsFree() === false);
+  state.towers.length = 0;
+  put(5, { kind: 'mint', b3: 'A', b5: 'A2' });
+  ok('환급 분기가 있으면 공짜', g.mergeIsFree() === true);
+  state.towers.length = 0;
+}
+
 // ── 2x2 미리보기 ──────────────────────────────────────────────
 // 5성부터 타워가 2x2 를 먹는데, 합성해 보고 나서야 알면 늦다. 놓기 전에 결과가
 // 어느 네 칸을 차지하는지 보여준다. 미리보기와 실제 합성이 갈라지면 안 된다 —
@@ -870,14 +971,19 @@ function ok(name, cond, detail) {
     state.spawnQueue = g.buildSpawnQueue(14);
     for (let i = 0; i < 200; i++) g.update(1 / 30);
   });
+  // 선택은 큐에 쌓인다 (합성 한 번이 물려받기 + 새 성급 분기를 함께 만든다).
+  // 그래서 화면만 보려고 띄우는 경우에는 앞의 걸 비워 줘야 한다 — 실제 판에서는
+  // 모달이 입력을 막고 있어서 답하기 전에 다음 선택이 생기지 않는다.
   safe('3성 분기 모달', () => {
     state.phase = 'build';
+    g.clearChoices();
     g.openChoice(state.towers[0], 3);
     ok('  모달 선택지 2개', g.choiceRects().length === 2);
   });
-  safe('7성 특성 모달', () => { g.openChoice(state.towers[0], 7); });
+  safe('7성 특성 모달', () => { g.clearChoices(); g.openChoice(state.towers[0], 7); });
   safe('모달 선택 반영', () => {
     const t = state.towers[0];
+    g.clearChoices();
     g.openChoice(t, 3);
     g.applyChoice('B');
     ok('  분기가 저장됨', t.b3 === 'B', String(t.b3));

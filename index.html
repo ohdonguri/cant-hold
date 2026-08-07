@@ -521,25 +521,80 @@ function mergeTowers(a, b) {
   state.towers.push(t);
   markTuteMerged();   // 드래그 합성을 해냈으니 안내를 끈다
 
-  // 3성/5성/7성 진입은 분기 선택을 띄운다
-  if (star === 3 || star === 5 || star === 7) openChoice(t, star);
+  // 물려받을 분기가 서로 다르면 묻는다. 예전에는 끌어당긴 쪽이 조용히 이겼는데,
+  // 그러면 어느 빌드가 살아남았는지 플레이어가 알 방법이 없었다 — 3성 둘을 합친
+  // 뒤에 왜 딴 분기가 붙어 있는지 설명해 줄 화면이 어디에도 없었다.
+  //
+  // b3 와 b5 는 한 줄기다 (5성 후보가 b3 에서 파생된다). 슬롯을 따로 물으면
+  // A 줄기에 B2 가 붙은, 규칙상 있을 수 없는 빌드가 만들어진다. 그래서 부모
+  // 한쪽의 줄기를 통째로 물려받는다.
+  if (branchChain(a) !== branchChain(b)) {
+    pushChoice({ towerId: t.id, mode: 'inherit', tier: star,
+      chains: [{ b3: a.b3, b5: a.b5 }, { b3: b.b3, b5: b.b5 }] });
+  }
+
+  // 3성/5성/7성 진입은 새 분기 선택을 띄운다. 물려받기 뒤에 와야 한다 —
+  // 5성 후보는 그때 확정된 b3 에서 나온다.
+  if (star === 3 || star === 5 || star === 7) pushChoice({ towerId: t.id, tier: star });
   return t;
 }
 
-// 분기 선택. UI 는 다음 패스에서 붙이고, 여기서는 후보만 만들어 둔다.
-function openChoice(t, tier) {
-  if (tier === 7) {
+// 분기 줄기를 한 문자열로. 두 부모가 같은 빌드인지 비교하는 데만 쓴다.
+function branchChain(t) { return (t.b3 || '-') + '/' + (t.b5 || '-'); }
+
+// ── 선택 대기열 ──────────────────────────────────────────────
+// 합성 한 번이 선택을 둘 만들 수 있다 (물려받기 → 새 성급 분기). 그리고 뒤의
+// 후보가 앞의 답에 달려 있어서, 큐에는 "무엇을 물을지"만 넣고 후보는 실제로
+// 화면에 뜨는 순간에 계산한다.
+const choiceQueue = [];
+
+function pushChoice(c) {
+  choiceQueue.push(c);
+  if (!state.choice) pumpChoices();
+}
+
+// 큐에서 물어볼 게 나올 때까지 꺼낸다. 물을 필요가 없어진 항목은 조용히 처리한다.
+function pumpChoices() {
+  state.choice = null;
+  while (choiceQueue.length) {
+    if (activateChoice(choiceQueue.shift())) return;
+  }
+}
+
+function activateChoice(c) {
+  const t = state.towers.find(v => v.id === c.towerId);
+  if (!t) return false;                    // 그 사이 팔렸거나 다시 합쳐졌다
+
+  if (c.mode === 'inherit') {
+    // 후보가 같아졌으면 물을 게 없다
+    const [x, y] = c.chains;
+    if (x.b3 === y.b3 && x.b5 === y.b5) return false;
+    state.choice = { towerId: t.id, tier: c.tier, mode: 'inherit',
+      chains: c.chains, options: [0, 1] };
+    return true;
+  }
+
+  if (c.tier === 7) {
     const pool = TRAIT_KEYS.slice();
     const picks = [];
     for (let i = 0; i < 3 && pool.length; i++)
       picks.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
-    state.choice = { towerId: t.id, tier, options: picks };
-  } else if (tier === 3) {
-    state.choice = { towerId: t.id, tier, options: ['A', 'B'] };
+    state.choice = { towerId: t.id, tier: 7, options: picks };
+  } else if (c.tier === 3) {
+    state.choice = { towerId: t.id, tier: 3, options: ['A', 'B'] };
   } else {
     const b = t.b3 || 'A';
-    state.choice = { towerId: t.id, tier, options: [b + '1', b + '2'] };
+    state.choice = { towerId: t.id, tier: c.tier, options: [b + '1', b + '2'] };
   }
+  return true;
+}
+
+function openChoice(t, tier) { pushChoice({ towerId: t.id, tier }); }
+
+// 판을 새로 세울 때. 큐에 남은 걸 안 비우면 다음 판 첫 합성에 옛 선택이 튀어나온다.
+function clearChoices() {
+  choiceQueue.length = 0;
+  state.choice = null;
 }
 
 function applyChoice(opt) {
@@ -547,11 +602,16 @@ function applyChoice(opt) {
   if (!c) return;
   const t = state.towers.find(v => v.id === c.towerId);
   if (t) {
-    if (c.tier === 3) t.b3 = opt;
+    if (c.mode === 'inherit') {
+      const chain = c.chains[opt] || c.chains[0];
+      t.b3 = chain.b3;
+      t.b5 = chain.b5;
+    }
+    else if (c.tier === 3) t.b3 = opt;
     else if (c.tier === 5) t.b5 = opt;
     else t.t7 = opt;
   }
-  state.choice = null;
+  pumpChoices();   // 남은 선택이 있으면 이어서 띄운다
 }
 
 function sellSelected() {
@@ -1826,7 +1886,7 @@ function restoreRun(r) {
   state.patches.length = 0;
   state.blasts.length = 0;
   state.selected = null;
-  state.choice = null;
+  clearChoices();
   state.picker = null;
   return true;
 }
@@ -2416,7 +2476,9 @@ function drawDeckSelect() {
 function choiceRects() {
   if (!state.choice) return [];
   const n = state.choice.options.length;
-  const w = Math.min(320, view.w - 48), h = 84, gap = 12;
+  // 물려받기 카드는 줄기 둘(3성 분기 + 5성 분기)을 한 장에 담아야 해서 더 높다
+  const w = Math.min(320, view.w - 48), gap = 12;
+  const h = state.choice.mode === 'inherit' ? 100 : 84;
   const total = n * h + (n - 1) * gap;
   const x = (view.w - w) / 2;
   let y = (view.h - total) / 2 + 20;
@@ -2430,6 +2492,15 @@ function choiceRects() {
 function choiceLabel(opt) {
   const c = state.choice;
   const t = state.towers.find(v => v.id === c.towerId);
+  if (c.mode === 'inherit') {
+    const chain = c.chains[opt] || {};
+    const B = BRANCH[t ? t.kind : 'shredder'] || {};
+    const parts = [chain.b3, chain.b5].filter(Boolean).map(k => B[k]).filter(Boolean);
+    return {
+      name: parts.map(p => p.name).join('  ·  ') || '분기 없음',
+      desc: parts.map(p => p.desc).join('\n'),
+    };
+  }
   if (c.tier === 7) return TRAITS[opt];
   return (BRANCH[t ? t.kind : 'shredder'] || {})[opt] || { name: opt, desc: '' };
 }
@@ -2552,7 +2623,7 @@ function restart() {
   state.patches.length = 0;
   state.blasts.length = 0;
   state.selected = null;
-  state.choice = null;
+  clearChoices();
   state.picker = null;
   state.deck = [];
 }
@@ -3201,17 +3272,22 @@ function drawDrag() {
   ctx.globalAlpha = 1;
 }
 
-// 5성부터 타워가 2x2 를 먹는다. 이걸 합성해 본 뒤에야 알면 늦다 — 키우려고
-// 합쳤더니 옆 칸까지 삼켰거나, 자리가 없어서 아예 막히거나 둘 중 하나로만 배운다.
-// 그래서 손을 떼기 전에 결과가 어느 네 칸을 차지하는지 그 자리에 그려 준다.
-// 1x1 로 끝나는 합성은 안 그린다 — 초록 테두리로 이미 충분하고, 같은 크기 사각형을
-// 하나 더 겹쳐 그리면 뭐가 달라지는지 오히려 안 읽힌다.
+// 놓기 전에 "합치면 어떻게 되는지" 를 그 자리에서 말해 준다. 예전에는 셋 다
+// 놓아 본 뒤에야 알 수 있었다 — 값이 얼마인지, 5성부터 2x2 가 되는지, 자리가
+// 없어 막히는지. 전부 결정을 내린 뒤라서 늦다.
+//
+// 2x2 는 네 칸을 점선으로 그린다. 1x1 은 안 그린다 — 초록 테두리로 이미 충분하고,
+// 같은 크기 사각형을 하나 더 겹치면 뭐가 달라지는지 오히려 안 읽힌다.
 function drawMergePreview(from, to) {
-  const size = mergeResultSize(from);
-  if (size < 2) return;
   const { cell } = view;
+  const size = mergeResultSize(from);
   const star = from.star + 1;
+  const cost = mergeIsFree() ? 0 : mergeCost(from.star);
+  const poor = state.gold < cost;
   const spot = mergeSpot(from, to, size);
+
+  const price = cost === 0 ? '무료' : `${cost}G`;
+  const tag = size > 1 ? `★${star} · 2x2 · ${price}` : `★${star} · ${price}`;
 
   if (!spot) {
     // 자리가 없으면 합성 자체가 막힌다. 놓아 보고 토스트로 알기 전에 보여준다.
@@ -3221,30 +3297,37 @@ function drawMergePreview(from, to) {
     ctx.lineWidth = 3;
     roundRect(p.x + 1, p.y + 1, cell * s - 3, cell * s - 3, 7);
     ctx.stroke();
-    previewLabel(`${star}성 2x2 자리 없음`, p.x + cell * s / 2, p.y - 6, '#f85149');
+    previewLabel(size > 1 ? `${star}성 2x2 자리 없음` : '자리 없음',
+      p.x + cell * s / 2, p.y - 6, '#f85149');
     return;
   }
 
   const p = cellToPx(spot.gx, spot.gy);
   const w = cell * size;
-  ctx.save();
-  ctx.fillStyle = 'rgba(126,231,135,0.16)';
-  ctx.fillRect(p.x, p.y, w, w);
-  ctx.strokeStyle = '#7ee787';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([6, 4]);
-  roundRect(p.x + 1, p.y + 1, w - 2, w - 2, 8);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  // 안쪽 십자선. 한 칸이 아니라 네 칸이라는 게 이걸로 읽힌다
-  ctx.strokeStyle = 'rgba(126,231,135,0.45)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(p.x + w / 2, p.y + 5); ctx.lineTo(p.x + w / 2, p.y + w - 5);
-  ctx.moveTo(p.x + 5, p.y + w / 2); ctx.lineTo(p.x + w - 5, p.y + w / 2);
-  ctx.stroke();
-  ctx.restore();
-  previewLabel(`★${star} · 2x2`, p.x + w / 2, p.y - 6, '#7ee787');
+
+  if (size > 1) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(126,231,135,0.16)';
+    ctx.fillRect(p.x, p.y, w, w);
+    ctx.strokeStyle = '#7ee787';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    roundRect(p.x + 1, p.y + 1, w - 2, w - 2, 8);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 안쪽 십자선. 한 칸이 아니라 네 칸이라는 게 이걸로 읽힌다
+    ctx.strokeStyle = 'rgba(126,231,135,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(p.x + w / 2, p.y + 5); ctx.lineTo(p.x + w / 2, p.y + w - 5);
+    ctx.moveTo(p.x + 5, p.y + w / 2); ctx.lineTo(p.x + w - 5, p.y + w / 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 골드가 모자라면 값을 붉게. 놓아 봐야 '합성 비용 부족' 을 듣는 건 늦다
+  previewLabel(poor ? `${price} 부족` : tag, p.x + w / 2, p.y - 6,
+    poor ? '#f85149' : '#7ee787');
 }
 
 // 미리보기 딱지. 화면 밖으로 나가지 않게 좌우로만 밀어 넣는다.
@@ -3425,15 +3508,24 @@ function drawInfo() {
   ctx.fillText(parts.join(' · ') || '분기 없음', pad + 96, y + 2);
 
   const dps = t.kind === 'mint' ? 0 : towerDmg(t) / towerCd(t);
-  // 한 번만 더 합치면 2x2 가 되는 타워는 그 사실을 미리 말해 준다. 집어들기 전에
-  // 알아야 자리를 비워 둘 수 있고, 이 게임의 공간 압박이 그 계획에서 나온다.
-  const grows = mergeResultSize(t) > towerFootprint(t) ? '   합성하면 2x2' : '';
   ctx.fillStyle = '#6e7681';
   fitText(
     t.kind === 'mint'
       ? `수입 ${Math.round(CFG.MINT_BASE * STAR_MULT[t.star])}G/웨이브`
-      : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}${grows}`,
+      : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}`,
     pad, y + 19, view.w - pad * 2, 11);
+
+  // 합성 값과 2x2 는 집어들기 전에 알아야 한다. 값을 모르면 합성이 도박이 되고,
+  // 커지는 걸 모르면 자리를 비워 둘 수가 없다 — 이 게임의 공간 압박이 그 계획에서 나온다.
+  if (t.star < CFG.STAR_MAX) {
+    const cost = mergeIsFree() ? 0 : mergeCost(t.star);
+    const bits = [`합성 ${cost === 0 ? '무료' : cost + 'G'}`];
+    if (mergeResultSize(t) > towerFootprint(t)) bits.push('합치면 2x2');
+    ctx.fillStyle = state.gold < cost ? '#a14a45' : '#6e7681';
+    ctx.textAlign = 'right';
+    fitText(bits.join(' · '), view.w - pad, y + 19, view.w * 0.5, 11);
+    ctx.textAlign = 'left';
+  }
 
   // 세 번째 줄은 "그래서 이게 뭘 하는가". 분기 이름만 늘어놓으면 ('이자 · 투자')
   // 고른 본인도 그게 무슨 효과였는지 나중에 다시 읽을 데가 없다.
@@ -3449,17 +3541,23 @@ function drawChoice() {
   ctx.fillStyle = 'rgba(13,17,23,0.88)';
   ctx.fillRect(0, 0, view.w, view.h);
 
-  const t = state.towers.find(v => v.id === state.choice.towerId);
+  const c = state.choice;
+  const inherit = c.mode === 'inherit';
+  const t = state.towers.find(v => v.id === c.towerId);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillStyle = '#e6edf3';
   ctx.font = '700 17px system-ui, sans-serif';
-  ctx.fillText(
-    `${t ? KINDS[t.kind].name : ''} ★${state.choice.tier}  분기 선택`,
-    view.w / 2, rects[0].y - 46);
+  fitText(
+    inherit
+      ? `${t ? KINDS[t.kind].name : ''} ★${c.tier}  어느 쪽을 물려받을까`
+      : `${t ? KINDS[t.kind].name : ''} ★${c.tier}  분기 선택`,
+    view.w / 2, rects[0].y - 46, view.w - 24, 17);
   ctx.fillStyle = '#6e7681';
-  ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('정수를 쓰면 나중에 다시 고를 수 있다', view.w / 2, rects[0].y - 24);
+  fitText(
+    inherit ? '합친 두 타워의 분기가 달랐다. 남길 쪽을 고른다'
+            : '정수를 쓰면 나중에 다시 고를 수 있다',
+    view.w / 2, rects[0].y - 24, view.w - 24, 12);
 
   for (const r of rects) {
     const info = choiceLabel(r.opt);
@@ -3473,12 +3571,15 @@ function drawChoice() {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#e6edf3';
     ctx.font = '700 16px system-ui, sans-serif';
-    ctx.fillText(info.name, r.x + 18, r.y + 18);
+    fitText(info.name, r.x + 18, r.y + 18, r.w - 36, 16);
     ctx.fillStyle = '#8b949e';
-    // 두 줄까지 접는다. 줄임말을 풀어 쓰면 한 줄로는 안 들어가는데,
-    // 안 접으면 카드 밖으로 흘러 나가서 뒷부분이 통째로 안 읽힌다.
+    // 줄임말을 풀어 쓰면 한 줄로는 안 들어간다. 안 접으면 카드 밖으로 흘러 나가서
+    // 뒷부분이 통째로 안 읽힌다. 물려받기 카드는 줄기마다 한 줄씩 필요해서 더 준다.
     ctx.font = '13px system-ui, sans-serif';
-    wrapLines(info.desc, r.w - 36).slice(0, 2)
+    const lines = [];
+    for (const seg of String(info.desc).split('\n'))
+      lines.push(...wrapLines(seg, r.w - 36));
+    lines.slice(0, inherit ? 3 : 2)
       .forEach((ln, i) => ctx.fillText(ln, r.x + 18, r.y + 45 + i * 17));
     ctx.textAlign = 'center';
   }
@@ -3582,6 +3683,8 @@ function pauseHelp() {
     { head: '조작', rows: [
       { label: '빈 칸', text: '탭하면 뭘 세울지 고르고, 사거리를 본 뒤 배치한다' },
       { label: '합성', text: '타워를 같은 종류·같은 성급 타워 위로 끌어 놓는다. 웨이브 사이에만 된다' },
+      { label: '합성값', text: '성급 x8 골드. 끌어서 올리면 값과 결과 자리가 먼저 보인다' },
+      { label: '분기', text: '3·5·7성에서 고른다. 분기가 다른 둘을 합치면 어느 쪽을 남길지 묻는다' },
       { label: '타워', text: '탭하면 사거리와 정보. 판매와 분기 재선택도 거기서 한다' },
       { label: '보내기', text: '기다리지 않고 다음 웨이브를 지금 부른다. 보상은 없다' },
       { label: '배속', text: 'x1 · x2 · x4. 빨리 돌려도 맞고 안 맞고는 달라지지 않는다' },
