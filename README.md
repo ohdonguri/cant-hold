@@ -42,10 +42,23 @@ npm run verify:build     원본과 압축본을 헤드리스로 렌더해 비교
 npm run deploy           빌드 + Cloudflare 배포
 ```
 
-**배포는 반드시 `npm run deploy` 로 한다.** 빌드와 배포가 한 줄로 묶여 있어서
-빌드를 빼먹고 옛 페이지가 나가는 사고를 막는다. 웹에 나가는 건 항상 압축본이다 —
-원본 주석에 밸런스를 왜 그 값으로 잡았는지가 길게 들어 있어서 그대로 내보내면
-개발자도구에서 다 읽히고 전송량도 매번 나간다.
+**`main` 에 푸시하면 Cloudflare 가 알아서 빌드하고 배포한다.** 평소에는 이게 배포다.
+연동은 Cloudflare 대시보드에 걸려 있고 저장소에는 흔적이 없다 — `.github/workflows` 를
+찾아봐도 없으니, 이 문단이 그 사실을 아는 유일한 곳이다.
+
+`npm run deploy` 는 CI 를 안 기다리고 직접 밀 때 쓴다. 빌드와 배포가 한 줄로 묶여
+있어서 빌드를 빼먹고 옛 페이지가 나갈 수가 없다.
+
+어느 쪽으로 나가도 웹에 올라가는 건 항상 압축본이다 — 원본 주석에 밸런스를 왜 그 값으로
+잡았는지가 길게 들어 있어서 그대로 내보내면 개발자도구에서 다 읽히고 전송량도 매번 나간다.
+
+**배포 직후 몇 분은 옛 화면이 보일 수 있다.** Cloudflare 엣지가 이전 사본을 캐시에서
+내주기 때문이고, 실패가 아니다. 브라우저 강력 새로고침(Ctrl+Shift+R)으로 대개 풀린다.
+오리진에 새 것이 올라갔는지만 확인하려면 캐시를 우회해서 본다.
+
+```
+curl -s "https://eastbirdstudio.com/games/canthold/?cb=$RANDOM" | grep -c togglePause
+```
 
 작품은 대문과 같은 오리진의 경로(`/games/canthold/`)로 서빙한다. 서브도메인을
 따로 두면 Firebase Auth 세션이 갈린다 (`eastbird-studio/docs/sso-migration.md`).
