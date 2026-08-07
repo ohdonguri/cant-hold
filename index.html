@@ -470,6 +470,14 @@ function mergeablePair() {
   return null;
 }
 
+// 합성 결과가 몇 칸을 먹는지. 5성부터 2x2 가 되는데, 이걸 합성해 보고 나서야
+// 알게 되면 늦다 — 그래서 드래그 중 미리보기(drawMergePreview)도 같은 답을 봐야 한다.
+// 두 곳이 갈라지면 "미리보기는 2x2 라더니 한 칸으로 됐다"가 난다.
+function mergeResultSize(a) {
+  const star = a.star + 1;
+  return (star >= CFG.BIG_FROM_STAR && a.kind !== 'mint') ? 2 : 1;
+}
+
 // 합성 결과를 놓을 자리를 찾는다. 5성부터 2x2 라서 자리가 없으면 합성 자체가 막힌다.
 // 이게 이 게임의 공간 압박이고, 조용히 우회시키면 안 된다.
 //
@@ -496,9 +504,10 @@ function mergeTowers(a, b) {
   if (state.gold < cost) { toast('합성 비용 부족'); return null; }
 
   const star = a.star + 1;
-  const size = (star >= CFG.BIG_FROM_STAR && a.kind !== 'mint') ? 2 : 1;
+  const size = mergeResultSize(a);
   const spot = mergeSpot(a, b, size);
-  if (!spot) { toast(size > 1 ? '2x2 자리 없음' : '자리 없음'); return null; }
+  // 성급만 말하면 왜 막혔는지 안 읽힌다. 몇 칸이 필요한지까지 붙인다.
+  if (!spot) { toast(size > 1 ? `${star}성은 2x2 — 빈 자리가 없다` : '자리 없음'); return null; }
 
   state.gold -= cost;
   state.towers = state.towers.filter(t => t.id !== a.id && t.id !== b.id);
@@ -3165,6 +3174,14 @@ function drawDrag() {
     ctx.stroke();
   }
 
+  // 지금 손가락이 올라가 있는 상대. 여기서 놓으면 어떻게 되는지 놓기 전에 보여준다.
+  const c = pxToCell(drag.px, drag.py);
+  const overId = c ? occupancy().get(c.gx + ',' + c.gy) : undefined;
+  if (overId !== undefined && overId !== from.id) {
+    const to = state.towers.find(v => v.id === overId);
+    if (canMerge(from, to)) drawMergePreview(from, to);
+  }
+
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = '#22272e';
   ctx.strokeStyle = STAR_COLOR[from.star];
@@ -3182,6 +3199,72 @@ function drawDrag() {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 1;
+}
+
+// 5성부터 타워가 2x2 를 먹는다. 이걸 합성해 본 뒤에야 알면 늦다 — 키우려고
+// 합쳤더니 옆 칸까지 삼켰거나, 자리가 없어서 아예 막히거나 둘 중 하나로만 배운다.
+// 그래서 손을 떼기 전에 결과가 어느 네 칸을 차지하는지 그 자리에 그려 준다.
+// 1x1 로 끝나는 합성은 안 그린다 — 초록 테두리로 이미 충분하고, 같은 크기 사각형을
+// 하나 더 겹쳐 그리면 뭐가 달라지는지 오히려 안 읽힌다.
+function drawMergePreview(from, to) {
+  const size = mergeResultSize(from);
+  if (size < 2) return;
+  const { cell } = view;
+  const star = from.star + 1;
+  const spot = mergeSpot(from, to, size);
+
+  if (!spot) {
+    // 자리가 없으면 합성 자체가 막힌다. 놓아 보고 토스트로 알기 전에 보여준다.
+    const s = towerFootprint(to);
+    const p = cellToPx(to.gx, to.gy);
+    ctx.strokeStyle = '#f85149';
+    ctx.lineWidth = 3;
+    roundRect(p.x + 1, p.y + 1, cell * s - 3, cell * s - 3, 7);
+    ctx.stroke();
+    previewLabel(`${star}성 2x2 자리 없음`, p.x + cell * s / 2, p.y - 6, '#f85149');
+    return;
+  }
+
+  const p = cellToPx(spot.gx, spot.gy);
+  const w = cell * size;
+  ctx.save();
+  ctx.fillStyle = 'rgba(126,231,135,0.16)';
+  ctx.fillRect(p.x, p.y, w, w);
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  roundRect(p.x + 1, p.y + 1, w - 2, w - 2, 8);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // 안쪽 십자선. 한 칸이 아니라 네 칸이라는 게 이걸로 읽힌다
+  ctx.strokeStyle = 'rgba(126,231,135,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(p.x + w / 2, p.y + 5); ctx.lineTo(p.x + w / 2, p.y + w - 5);
+  ctx.moveTo(p.x + 5, p.y + w / 2); ctx.lineTo(p.x + w - 5, p.y + w / 2);
+  ctx.stroke();
+  ctx.restore();
+  previewLabel(`★${star} · 2x2`, p.x + w / 2, p.y - 6, '#7ee787');
+}
+
+// 미리보기 딱지. 화면 밖으로 나가지 않게 좌우로만 밀어 넣는다.
+function previewLabel(text, cx, bottomY, color) {
+  ctx.font = '700 11px system-ui, sans-serif';
+  const w = ctx.measureText(text).width + 16, h = 19;
+  const x = Math.max(4, Math.min(view.w - w - 4, cx - w / 2));
+  const y = Math.max(4, bottomY - h);
+  ctx.fillStyle = 'rgba(13,17,23,0.92)';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  roundRect(x, y, w, h, 9);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + w / 2, y + h / 2);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
 }
 
 // 합성 안내. 웨이브 사이 정지를 없앤 뒤로 "드래그하면 합쳐진다"는 걸
@@ -3342,12 +3425,15 @@ function drawInfo() {
   ctx.fillText(parts.join(' · ') || '분기 없음', pad + 96, y + 2);
 
   const dps = t.kind === 'mint' ? 0 : towerDmg(t) / towerCd(t);
+  // 한 번만 더 합치면 2x2 가 되는 타워는 그 사실을 미리 말해 준다. 집어들기 전에
+  // 알아야 자리를 비워 둘 수 있고, 이 게임의 공간 압박이 그 계획에서 나온다.
+  const grows = mergeResultSize(t) > towerFootprint(t) ? '   합성하면 2x2' : '';
   ctx.fillStyle = '#6e7681';
-  ctx.fillText(
+  fitText(
     t.kind === 'mint'
       ? `수입 ${Math.round(CFG.MINT_BASE * STAR_MULT[t.star])}G/웨이브`
-      : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}`,
-    pad, y + 19);
+      : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}${grows}`,
+    pad, y + 19, view.w - pad * 2, 11);
 
   // 세 번째 줄은 "그래서 이게 뭘 하는가". 분기 이름만 늘어놓으면 ('이자 · 투자')
   // 고른 본인도 그게 무슨 효과였는지 나중에 다시 읽을 데가 없다.

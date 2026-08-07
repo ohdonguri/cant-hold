@@ -236,6 +236,68 @@ function ok(name, cond, detail) {
   ok('나눠 밟아도 같은 거리', Math.abs(oneStep - fourStep) < 1e-9, oneStep.toFixed(4) + ' vs ' + fourStep.toFixed(4));
 }
 
+// ── 2x2 미리보기 ──────────────────────────────────────────────
+// 5성부터 타워가 2x2 를 먹는데, 합성해 보고 나서야 알면 늦다. 놓기 전에 결과가
+// 어느 네 칸을 차지하는지 보여준다. 미리보기와 실제 합성이 갈라지면 안 된다 —
+// "2x2 라더니 한 칸으로 됐다" 가 제일 나쁜 결과다.
+{
+  console.log('2x2 미리보기');
+  const g = load();
+  const { state, CFG } = g;
+  g.pickStage(0);
+  g.toggleDeckPick('marksman'); g.toggleDeckPick('frost'); g.toggleDeckPick('mint');
+  g.startRun();
+  state.gold = 999999;
+
+  const put = (kind, star, gx, gy) => {
+    const t = { id: 800 + state.towers.length, gx, gy, kind, star, b3: null, b5: null, t7: null,
+      cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 };
+    state.towers.push(t);
+    return t;
+  };
+
+  // 결과 크기가 성급·종류를 정확히 따라간다
+  ok('3성 합성 결과는 1칸', g.mergeResultSize({ kind: 'marksman', star: 2 }) === 1);
+  ok('4성 합성 결과는 1칸', g.mergeResultSize({ kind: 'marksman', star: 3 }) === 1);
+  ok('4성→5성이 2x2 가 되는 지점',
+    g.mergeResultSize({ kind: 'marksman', star: CFG.BIG_FROM_STAR - 1 }) === 2);
+  ok('5성→6성도 2x2', g.mergeResultSize({ kind: 'marksman', star: 5 }) === 2);
+  ok('조폐소는 5성이어도 1칸', g.mergeResultSize({ kind: 'mint', star: 4 }) === 1);
+
+  // 미리보기가 실제 합성 결과와 같은 자리·같은 크기를 가리켜야 한다
+  state.towers.length = 0;
+  const a = put('marksman', 4, 1, 8), b = put('marksman', 4, 2, 8);
+  const size = g.mergeResultSize(a);
+  const spot = g.mergeSpot(a, b, size);
+  ok('4성 쌍에 2x2 자리가 잡힌다', !!spot && size === 2, spot ? `${spot.gx},${spot.gy}` : '없음');
+  ok('미리보기 그리기가 안 터진다', (g.drawMergePreview(a, b), true));
+
+  const merged = g.mergeTowers(a, b);
+  ok('실제 합성이 미리보기와 같은 자리',
+    !!merged && merged.gx === spot.gx && merged.gy === spot.gy,
+    merged ? `${merged.gx},${merged.gy} vs ${spot.gx},${spot.gy}` : '합성 실패');
+  ok('실제 합성이 미리보기와 같은 크기', !!merged && g.towerFootprint(merged) === size);
+
+  // 자리가 없으면 미리보기도 "없음" 을 말해야 한다 (그리고 합성이 실제로 막힌다)
+  state.towers.length = 0;
+  state.choice = null;
+  const occ = g.occupancy();
+  const free = [];
+  for (let y = 0; y < CFG.BOARD_H; y++)
+    for (let x = 0; x < CFG.BOARD_W; x++)
+      if (g.canPlace(x, y, 1, occ)) free.push([x, y]);
+  // 빈 칸을 1성으로 메우고 마지막 두 칸만 4성 쌍으로 둔다 → 2x2 자리가 남지 않는다
+  const pair = free.slice(0, 2), fill = free.slice(2);
+  const p1 = put('marksman', 4, pair[0][0], pair[0][1]);
+  const p2 = put('marksman', 4, pair[1][0], pair[1][1]);
+  for (const [x, y] of fill) put('frost', 1, x, y);
+  ok('꽉 찬 보드에는 2x2 자리가 없다', g.mergeSpot(p1, p2, 2) === null);
+  ok('자리 없을 때도 미리보기가 안 터진다', (g.drawMergePreview(p1, p2), true));
+  const before = state.towers.length;
+  g.mergeTowers(p1, p2);
+  ok('자리 없으면 합성이 실제로 막힌다', state.towers.length === before, String(state.towers.length));
+}
+
 // ── 일시정지 ──────────────────────────────────────────────────
 // 웨이브가 자동으로 굴러가는 게임이라 멈출 수 있어야 하는데, 멈춘 채로
 // 배치·합성이 되면 시간 압박이 통째로 사라진다. 그래서 멈추면 화면을 덮고
