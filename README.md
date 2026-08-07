@@ -72,16 +72,26 @@ npm run deploy           빌드 + Cloudflare 배포
 오리진이라 한 번 로그인하면 어디서나 같은 사람이다 (`eastbird-studio/docs/sso-migration.md`).
 `index.html` 의 config 값은 공개돼도 되는 식별자다 — 접근 통제는 아래 규칙이 한다.
 
-**규칙은 사람이 Firebase 콘솔에 넣어야 한다** (이 환경에는 콘솔 권한이 없다).
-기존 규칙 뒤에 이 블록을 더한다.
+규칙은 게임마다 따로 두지 않는다. 스튜디오 공용 파일 하나가 다섯 게임을 다 받는다 —
+`eastbird-studio/firestore.rules` 의 `match /games/{gameId}/saves/{uid}` 다. 새 게임을
+붙일 때 **두 곳**을 같이 고쳐야 한다.
+
+- `knownGame()` 의 화이트리스트에 게임 id (`canthold`) 를 넣는다
+- `validSave()` 에 그 게임의 세이브 모양 분기를 (`chSave()`) 더한다
+
+둘 중 하나만 하면 절반만 열린다. 화이트리스트에 없으면 **읽기부터** `permission-denied`
+로 떨어지는데, 로그인 자체는 멀쩡히 되므로 증상이 로그인 문제로 안 보인다.
+
+**고친 규칙을 실제로 올리는 건 사람이 Firebase 콘솔에서 해야 한다** (이 환경에는 콘솔
+권한도 firebase CLI 도 없다). 올리기 전에는 화면 아래에 `읽기 거부됨 — 서버 규칙을
+확인해야 한다` 가 뜨고, 진행도는 `localStorage` 에만 남는다. 게임은 그대로 끝까지 돌아간다.
+
+규칙을 고쳤으면 올리기 전에 에뮬레이터로 확인할 수 있다 (Java 필요).
 
 ```
-match /games/canthold/saves/{uid} {
-  allow read, write: if request.auth != null && request.auth.uid == uid;
-}
+cd ../eastbird-studio
+npx firebase-tools emulators:exec --only firestore --project eastbirdstudio-abfb5 "<테스트>"
 ```
-
-넣기 전에는 로그인은 되지만 저장이 조용히 실패한다 — 로컬에는 남으므로 게임은 계속된다.
 
 ## 개발
 
