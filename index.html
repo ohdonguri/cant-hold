@@ -323,12 +323,18 @@ function cycleSpeed() {
 // 겸사겸사 이 화면이 이 게임의 유일한 설명서다 — drawPause 참고.
 function togglePause() {
   state.paused = !state.paused;
+  // 토글 자리는 drawPause 가 매 프레임 다시 세운다. 여기서 비워 두지 않으면
+  // 지난번 정지 화면의 자리가 아직 안 그려진 첫 프레임에 그대로 먹힌다.
+  shakeToggleRect = null;
   if (!state.paused) return;
   // 멈추는 순간 손에 들고 있던 것들을 놓는다. 키보드 ESC 로 멈추면
   // 손가락은 아직 타워를 끄는 중일 수 있고, 그대로 두면 재개할 때
   // 놓은 적도 없는 합성이 성사된다.
   drag = null;
   state.picker = null;
+  // 카메라도 원위치로 돌린다. 흔들리는 도중에 멈추면 그 진폭이 그대로 얼어붙고,
+  // 재개하는 순간 남은 만큼 튀어 오른다.
+  resetImpact();
 }
 
 // 드래그 합성을 한 번이라도 해내면 튜토리얼을 영영 끈다. 기기 로컬 플래그라
@@ -1425,6 +1431,10 @@ function killEnemy(e, src, type) {
   // 연출만 남고 정산이 빠진 상태가 된다. e.dead 가드보다 뒤인 것도 중요하다 —
   // 파열(A1)이 applyStacks 안에서 damage 를 다시 부르므로 앞에 두면 두 번 터진다.
   spawnKillFx(e, type);
+  // 충격 등급: 정예 처치만 화면을 흔들고 시간을 멈춘다. 일반 처치는 아무것도
+  // 안 낸다 — 처치가 연쇄하는 구간에서 매번 멎으면 배속이 무의미해진다.
+  // 자리는 spawnKillFx 와 같은 맨 끝이다. 위 주석의 이유가 그대로 적용된다.
+  if (ENEMY[e.kind].elite) { bumpShake(KILL_SHAKE_AMP, KILL_SHAKE_DUR); bumpHitstop(); }
 }
 
 function applyStacks(e, n, per, src) {
@@ -1702,6 +1712,11 @@ function updateShells(dt) {
     }
     if (t.b5 === 'A2') state.patches.push({ x: s.tx, y: s.ty, r: s.radius, dps: s.dmg * 0.5, t: 3, tower: t.id });
     state.blasts.push({ x: s.tx, y: s.ty, r: s.radius, t: 0.25 });
+    // 광역 중 화면을 흔드는 건 박격포 착탄뿐이다. 파쇄자 파열(A1)·마력로 연쇄(A1)·
+    // 서리 장판·소이 장판은 제외한다 — 전부 발생 빈도가 훨씬 높아서 흔들면 상시가 된다.
+    // 쿨다운을 여기서 재는 이유: 탄막(A1)은 한 프레임에 3발이 착탄하고, 연발(A) 7성은
+    // cd 0.8초짜리가 여러 대다. 게이트가 없으면 착탄 흔들림이 끊기지 않는다.
+    if (shakeCd <= 0) { bumpShake(BLAST_SHAKE_AMP, BLAST_SHAKE_DUR); shakeCd = BLAST_SHAKE_CD; }
   }
   state.shells = alive;
 }
@@ -1910,6 +1925,7 @@ function restoreRun(r) {
   // 성공 경로에만 두면 실패 반환 두 갈래에서만 규칙이 깨진다.
   // (감쇠가 돌고 있으면 0.3초 뒤 어차피 사라지지만, 그건 이 함수의 보장이 아니다.)
   resetParticles();
+  resetImpact();
   if (!r || !STAGES[r.stage]) return false;
   const deck = (r.deck || []).filter(k => KINDS[k]);
   if (deck.length !== CFG.DECK_SIZE) return false;
@@ -2567,7 +2583,14 @@ canvas.addEventListener('pointerdown', e => {
   const px = e.clientX, py = e.clientY;
   cloudPreload();   // 첫 터치에 미리 받아 둔다
 
-  if (state.paused) { state.paused = false; return; }
+  // 정지 화면은 탭을 통째로 먹는다. 유일한 예외가 흔들림 토글이다 — 여기서
+  // 같이 재개해 버리면 켜졌는지 꺼졌는지 확인할 화면이 그 순간 사라진다.
+  if (state.paused) {
+    const r = shakeToggleRect;
+    if (r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) { toggleShake(); return; }
+    state.paused = false;
+    return;
+  }
 
   if (state.phase === 'stage') {
     const inside = r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
@@ -2680,6 +2703,7 @@ function restart() {
   state.patches.length = 0;
   state.blasts.length = 0;
   resetParticles();
+  resetImpact();
   state.selected = null;
   clearChoices();
   state.picker = null;
@@ -2811,6 +2835,9 @@ function updateEnemies(dt) {
     e.dist += enemySpeed(e) * dt;
     if (e.dist >= laneLen(e.lane)) {
       state.life -= d.leak;
+      // 누수는 화면 층 경고만 낸다. 흔들림도 히트스톱도 파편도 없다(2.6·2.8).
+      // += 가 아니라 = 다 — 누수가 몰리는 구간에서 알파가 누적되면 판이 안 보인다.
+      leakWarnT = LEAK_WARN_DUR;
       continue;
     }
     const p = posAt(e.dist, e.lane);
@@ -3027,6 +3054,149 @@ function decayEffects(dt) {
   for (const b of state.blasts) b.t -= dt;
   state.blasts = state.blasts.filter(b => b.t > 0);
   updateParticles(dt);
+}
+
+// ═════════════════════════════════════════════════════════════
+// 충격 등급
+// ═════════════════════════════════════════════════════════════
+// 2.6 이 "죽었다"를, 2.7 이 "타워가 일하고 있다"를 읽히게 만들고 나니 이번에는
+// 화면 위의 모든 사건이 **같은 무게**로 보이는 게 남았다. 잡몹 한 마리와 정예
+// 한 마리가 똑같이 사라지고, 박격포 한 발과 빔 한 줄이 똑같이 지나간다.
+// 그래서 사건마다 등급을 매기고, 그 등급표를 코드로 잠근다.
+//
+//   일반 타격 · 오라/지속딜 · **일반 처치** : 아무것도 없음
+//   박격포 착탄                             : 약한 흔들림 (쿨다운으로 듀티 제한)
+//   정예 처치                               : 강한 흔들림 + 히트스톱
+//   누수                                    : 화면 층 붉은 비네트만
+//
+// 2.7 과 마찬가지로 이 절의 핵심은 넣는 자리가 아니라 **안 넣는 자리**다.
+// 일반 처치에 히트스톱을 넣으면 웨이브 20 처럼 처치가 연쇄하는 구간에서 화면이
+// 초당 수십 번 얼어붙어 배속이 무의미해진다. 정예는 판 전체에 15마리뿐이라
+// (w10:1 · w20:3 · w24:3 · w28:4 · w30:4) 그 15번만 시간이 멎는다.
+// 누수에 흔들림이나 파편을 붙이는 것은 2.6 이 금지한 "새는 걸 처치처럼 보이게
+// 하는 거짓말"이 결만 바꿔 되살아나는 것이라 하지 않는다 — 누수는 보드 층이
+// 아니라 화면 층에서, 처치와 정반대 결(붉은 비네트)로만 말한다.
+//
+// 상태를 state 가 아니라 모듈 레벨에 두는 이유: state 에 넣으면 snapshotRun 의
+// 감시 대상이 되어 SAVE_VERSION 논의가 딸려 온다. 이건 판의 진행이 아니라
+// 카메라 이야기라 세이브에 실릴 값이 아니다.
+
+// 흔들림 진폭은 **셀 단위**다. 픽셀로 저장하면 화면 회전·리사이즈로 view.cell 이
+// 바뀌는 순간 진폭만 옛 화면 크기에 남는다.
+const BLAST_SHAKE_AMP = 0.05;   // cell 50px 기준 2.5px. 타워 표시가 셀의 82%(2.5)라 그 1/16 —
+                                // "칸이 어긋나 보이는" 문턱 바로 아래다
+const BLAST_SHAKE_DUR = 0.08;   // 쿨다운(0.25)과 합쳐 듀티 상한 32%
+const BLAST_SHAKE_CD  = 0.25;   // 박격포 A(연발) 7성 cd 0.8초짜리가 여럿 + 탄막(A1) 3발이면
+                                // 한 프레임에 착탄이 겹친다. 초당 최대 4회로 자른다
+const KILL_SHAKE_AMP  = 0.14;   // 착탄의 2.8배(약 7px). 두 등급이 눈으로 갈리는 최소 배수다.
+                                // 2배면 "좀 센 착탄"으로 읽히고 4배면 UI 가 흔들린 걸로 오해된다
+const KILL_SHAKE_DUR  = 0.22;   // 처치 파편 수명 0.3초(2.6) 안에서 끝난다. 파편이 사라진 뒤에도
+                                // 흔들림만 남으면 무엇 때문에 흔들렸는지가 안 읽힌다
+const HITSTOP         = 0.05;   // 60Hz 3프레임 / 30Hz 2프레임. 2.7 과 같은 이유로 프레임 수가
+                                // 아니라 초로 적는다 — 프레임 수로 적으면 30fps 기기에서 두 배 멎는다
+const LEAK_WARN_DUR   = 0.35;
+const LEAK_WARN_A     = 0.22;   // 비네트 최대 알파. 누수가 몰리는 구간(w21)에서는 사실상 상시라
+                                // 이 값을 넘겨 겹치면 판이 안 보인다. 그래서 누적하지 않고 덮어쓴다
+const SHAKE_FX = 62;            // 흔들림 x축 각속도(rad/s)
+const SHAKE_FY = 71;            // y축. 62 와 서로소에 가까워 두 축의 주기가 겹치지 않는다 —
+                                // 같은 값이면 대각선으로만 왕복해서 "밀렸다"로 읽힌다
+
+let shake = { t: 0, dur: 0, amp: 0 };
+let shakeCd = 0;                // 착탄 흔들림 듀티 제한
+let hitstopT = 0;
+let leakWarnT = 0;
+let shakeToggleRect = null;     // 정지 화면의 흔들림 토글. drawPause 가 세우고 pointerdown 이 읽는다
+
+// 기기 로컬 플래그다. 세이브 번들·클라우드 동기화에 안 넣는다 — "이 기기·이 사람이
+// 흔들림을 견디나"는 판의 진행이 아니라서 다른 기기로 따라갈 이유가 없다.
+// (cant-hold-tute 와 같은 형태. SAVE_VERSION 도 안 올린다.)
+// 저장값이 없으면 OS 의 "동작 줄이기" 설정을 기본값으로 삼는다.
+let shakeEnabled = true;
+try {
+  const v = localStorage.getItem('cant-hold-shake');
+  shakeEnabled = v === null
+    ? !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+    : v === '1';
+} catch { /* 무시 */ }
+
+function setShakeEnabled(v) {
+  shakeEnabled = !!v;
+  if (!shakeEnabled) shake.t = 0;   // 끄는 순간 진행 중이던 흔들림도 죽는다. 안 그러면
+                                    // 껐는데 0.2초 더 흔들려서 스위치가 안 먹은 것처럼 보인다
+  try { localStorage.setItem('cant-hold-shake', shakeEnabled ? '1' : '0'); } catch { /* 저장 못 해도 됨 */ }
+}
+function toggleShake() { setShakeEnabled(!shakeEnabled); }
+
+// 합치기는 **최댓값**이다. 합산이 위험한 건 착탄끼리가 아니다 — 같은 프레임에 3발이
+// 떨어져도 위의 shakeCd 게이트가 bumpShake 를 한 번만 통과시킨다. 진짜 뒤집히는 경로는
+// **같은 프레임에 착탄 + 정예 처치**다(박격포 한 발이 정예를 죽이는 흔한 경우).
+// 합산이면 0.05 + 0.14 = 0.19 라 정예 처치 단독보다 센 흔들림이 나와서, 그 프레임만
+// 등급표의 맨 윗칸을 넘어선다. 남은 진폭(amp x 남은 비율)보다 약한 흔들림은
+// 진행 중인 것을 덮지도 않는다.
+function bumpShake(amp, dur) {
+  if (amp <= shake.amp * (shake.t / shake.dur)) return;
+  shake.amp = amp;
+  shake.dur = dur;
+  shake.t = dur;
+}
+
+// 정예 4마리가 한 프레임에 죽어도 멎는 시간은 1회분이다. 합산하면 후반 웨이브에서
+// 0.2초씩 멎어 "렉 걸렸다"로 읽힌다.
+function bumpHitstop() { hitstopT = Math.max(hitstopT, HITSTOP); }
+
+// 흔들림 오프셋은 shake 상태의 **순수 함수**다. 난수를 쓰지 않는다 —
+// fxRand() 조차 안 쓴다. 매 렌더마다 fxSeed 를 밀면 verify:build 의 두 페이지가
+// 프레임 수 차이 한 번에 갈리고(2.6 "연출은 전역 난수를 쓰지 않는다"의 같은 함정),
+// 테스트가 오프셋 값을 단언할 방법도 없어진다.
+function shakeOffset() {
+  if (shake.t <= 0 || !shakeEnabled) return { x: 0, y: 0 };
+  const k = shake.t / shake.dur;          // 선형 감쇠. 남은 시간이 곧 세기다
+  const a = shake.amp * view.cell * k;
+  return { x: a * Math.sin(shake.t * SHAKE_FX), y: a * Math.sin(shake.t * SHAKE_FY + 1.7) };
+}
+
+// 감쇠는 update 가 아니라 frame 이 돈다. update 에 넣으면 배속 x4 에서 흔들림이
+// 4배 빨리 사라져서 "빠르게 돌리면 연출이 없어지는" 게임이 된다.
+function decayShake(dt) {
+  shakeCd -= dt;
+  shake.t -= dt;
+}
+
+// 판을 갈아끼우거나 멈출 때 카메라를 원위치로 돌린다. 안 그러면 재개하는 순간
+// 멈추기 직전의 흔들림이 남은 만큼 튀어 오른다.
+function resetImpact() {
+  shake.t = 0; shake.dur = 0; shake.amp = 0;
+  shakeCd = 0;
+  hitstopT = 0;
+  leakWarnT = 0;
+}
+
+// 테스트에서만 쓰는 창(tools/sim.js EXPOSE). 게임 코드는 bumpHitstop 만 쓴다.
+function hitstopState() { return hitstopT; }
+function leakWarnState() { return leakWarnT; }
+function setHitstop(v) { hitstopT = v; }
+
+// 누수 경고. **화면 층**이라 보드 클립 밖·흔들림 변환 밖에서 그린다.
+// 셀 좌표를 안 쓰고 파티클도 안 쓴다 — 그 둘이 2.6 이 누수에 금지한 것이다.
+// 알파는 누적하지 않는다. leakWarnT 는 += 가 아니라 = 로 되살아나므로 누수가
+// 몰려도 진하기가 이 값을 안 넘는다.
+function drawLeakWarn() {
+  if (leakWarnT <= 0) return;
+  const k = Math.min(1, leakWarnT / LEAK_WARN_DUR);
+  // createRadialGradient 는 안 쓴다. 이 파일은 그라디언트를 한 번도 안 쓰고,
+  // 헤드리스 캔버스 스텁이 그리기 호출만 기록하므로 그라디언트 객체를 못 만든다.
+  // 겹치지 않는 띠를 안쪽으로 옅어지게 깔면 같은 그림이 나온다(겹침이 없으니 누적도 없다).
+  const depth = Math.min(view.w, view.h) * 0.20;
+  const N = 10, s = depth / N;
+  for (let i = 0; i < N; i++) {
+    const o = i * s;
+    const a = LEAK_WARN_A * k * Math.pow(1 - i / N, 1.6);
+    ctx.fillStyle = `rgba(248,81,73,${a.toFixed(4)})`;
+    ctx.fillRect(o, o, view.w - o * 2, s);                       // 위
+    ctx.fillRect(o, view.h - o - s, view.w - o * 2, s);          // 아래
+    ctx.fillRect(o, o + s, s, view.h - o * 2 - s * 2);           // 왼쪽
+    ctx.fillRect(view.w - o - s, o + s, s, view.h - o * 2 - s * 2); // 오른쪽
+  }
 }
 
 function update(dt) {
@@ -3980,6 +4150,11 @@ function render() {
   // 경로 선과 보드 밖에서 들어오는 적이 보드 밖으로 새지 않게 잘라낸다.
   // 드래그 중인 타워는 손가락을 따라 보드 밖으로 나가야 하므로 클립 밖에서 그린다.
   ctx.save();
+  // 흔들림은 **클립보다 앞**이다. 클립 뒤에 두면 고정된 창 안에서 내용만 밀려서
+  // 한쪽 가장자리에 #0d1117 틈이 생긴다. 창째로 흔들려야 보드가 흔들린 걸로 읽힌다.
+  // view · cellToPx · pxToCell 은 한 글자도 안 건드린다 — 그 셋이 안 움직이는 것이
+  // 흔들리는 동안에도 터치 히트박스가 제자리인 유일한 근거다.
+  const sh = shakeOffset(); if (sh.x || sh.y) ctx.translate(sh.x, sh.y);
   ctx.beginPath();
   ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
   ctx.clip();
@@ -3994,6 +4169,7 @@ function render() {
   ctx.restore();
 
   drawDrag();
+  drawLeakWarn();   // 클립 밖·변환 밖이라 안 잘리고 안 흔들린다. HUD 텍스트 아래에 깔린다
   drawHud();
   drawTutorial();
   drawInfo();
@@ -4076,6 +4252,10 @@ function pausePlan(sections, panelW, s) {
 
   items.push({ t: 'title', y: h, f: 22 * s }); h += Math.round(29 * s);
   items.push({ t: 'sub', y: h, f: 12 * s }); h += Math.round(25 * s);
+  // 흔들림 토글은 절(section) 밖이다. 절 안에 넣으면 아래의 "안 들어가면 뒤에서부터
+  // 버린다" 로직에 걸려서 하필 작은 화면 — 흔들림이 제일 거슬리는 기기 — 에서 사라진다.
+  // 높이 예산에도 반드시 들어가야 한다. 안 넣으면 마지막 절이 화면 밖으로 밀린다.
+  items.push({ t: 'shake', y: h, f: 12 * s }); h += Math.round(27 * s);
 
   for (let i = 0; i < sections.length; i++) {
     if (i) h += Math.round(13 * s);
@@ -4135,6 +4315,27 @@ function drawPause() {
       ctx.fillStyle = '#6e7681';
       ctx.font = `${it.f}px system-ui, sans-serif`;
       ctx.fillText('멈춰 있는 동안에는 배치도 합성도 되지 않습니다', pad, y);
+    } else if (it.t === 'shake') {
+      // 이 화면의 유일한 조작이다. 다른 곳은 전부 읽기 전용이라, 눌리는 줄이라는 게
+      // 보이도록 배경을 깔고 값을 강조색으로 낸다.
+      const rh = Math.round(23 * plan.s);
+      shakeToggleRect = { x: pad - 8, y: y - Math.round(5 * plan.s), w: panelW + 16, h: rh };
+      ctx.fillStyle = '#161b22';
+      ctx.fillRect(shakeToggleRect.x, shakeToggleRect.y, shakeToggleRect.w, shakeToggleRect.h);
+      // 이 줄만 라벨이 길어서(다른 줄은 두세 글자다) 절의 labelW 를 못 쓴다.
+      // 재서 붙이지 않으면 축소 배율에서 값이 라벨에 겹쳐 "화면 흔들림켜짐"이 된다.
+      const gap = Math.round(12 * plan.s);
+      ctx.fillStyle = '#c9d1d9';
+      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+      ctx.fillText('화면 흔들림', pad, y);
+      const vx = pad + ctx.measureText('화면 흔들림').width + gap;
+      const val = shakeEnabled ? '켜짐' : '꺼짐';
+      ctx.fillStyle = shakeEnabled ? '#58a6ff' : '#6e7681';
+      ctx.fillText(val, vx, y);
+      const hx = vx + ctx.measureText(val).width + gap;
+      ctx.fillStyle = '#484f58';
+      ctx.font = `${it.f}px system-ui, sans-serif`;
+      ctx.fillText('여기를 누르면 바뀝니다', hx, y);
     } else if (it.t === 'head') {
       ctx.fillStyle = '#58a6ff';
       ctx.font = `700 ${it.f}px system-ui, sans-serif`;
@@ -4184,11 +4385,23 @@ function frame(now) {
   frameNow = now;
   const dt = Math.min((now - last) / 1000, 0.05); // 탭 전환 후 점프 방지
   last = now;
-  // 배속은 dt 를 늘리는 대신 update 를 여러 번 돌린다. dt 를 4배로 키우면
-  // 적이 한 스텝에 타워 사거리를 통째로 건너뛰거나 발사체가 표적을 지나쳐서
-  // 판정이 깨진다. 작은 스텝을 여러 번 밟으면 x1 과 같은 결과가 나온다.
-  const steps = Math.max(1, state.speed | 0);
-  for (let i = 0; i < steps; i++) update(dt);
+  // 히트스톱은 시간을 늦추는 게 아니라 update 호출을 **통째로 건너뛴다.**
+  // dt 를 곱하거나 나누면 update 가 보는 스텝 폭이 달라져서 판정이 연출에 끌려간다 —
+  // 아래 배속 규칙과 같은 이유다. update 가 받는 dt 는 이 기능 전후로 동일하다.
+  // 흔들림 감쇠도 같이 멈춘다. 안 그러면 "얼어붙은 채로 흔들리는" 프레임이 나온다.
+  if (hitstopT > 0) {
+    hitstopT -= dt;
+  } else {
+    decayShake(dt);
+    leakWarnT -= dt;
+    // 배속은 dt 를 늘리는 대신 update 를 여러 번 돌린다. dt 를 4배로 키우면
+    // 적이 한 스텝에 타워 사거리를 통째로 건너뛰거나 발사체가 표적을 지나쳐서
+    // 판정이 깨진다. 작은 스텝을 여러 번 밟으면 x1 과 같은 결과가 나온다.
+    const steps = Math.max(1, state.speed | 0);
+    for (let i = 0; i < steps; i++) update(dt);
+  }
+  // 히트스톱 프레임에도 반드시 그린다. 여기서 early-return 하면 render 호출 수로
+  // 프레임을 세는 verify-build 가 두 페이지에서 다른 지점을 찍게 되어 검사가 무의미해진다.
   render();
   requestAnimationFrame(frame);
 }

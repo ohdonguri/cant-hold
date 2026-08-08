@@ -150,6 +150,32 @@ const SEED_SCRIPT = `(() => {
 
   await fireShot('6-fire');
 
+  // ── 화면 흔들림 고정 프레임 ──────────────────────────────────
+  // 흔들림은 0.22초짜리다. shot.js 는 window.update 만 덮고 frame() 은 계속 돌리는데,
+  // 감쇠(decayShake)는 update 가 아니라 frame 이 도므로 다른 컷에서는 반드시
+  // 0 이 된 프레임이 찍힌다. 그래서 update 를 "매 프레임 최대 진폭으로 흔들림을
+  // 되살리는" 스텁으로 덮는다 — 이게 없으면 흔들림을 눈으로 확인할 방법이 없다.
+  //
+  // 이 컷에서 볼 것은 하나다: **보드만 밀리고 상단 HUD·하단 버튼은 제자리인가.**
+  // 흔들림 변환은 보드 클립보다 앞에 들어가므로 창째로 움직인다. 보드는 원래
+  // 화면 중앙에 정렬되므로(resize), 좌우 여백이 비대칭이면 그게 곧 밀린 증거다.
+  await page.evaluate(() => {
+    window.update = window.__update;
+    restart();
+    pickStage(0);
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    state.gold = 99999;
+    for (let i = 0; i < 12; i++) summon(state.deck[i % 3]);
+    state.selected = null;
+    setShakeEnabled(true);
+    // 정예 처치 등급(가장 센 값)으로 되살린다. 감쇠가 프레임 앞에서 돌기 때문에
+    // 여기서 t 를 dur 로 되돌리면 render 는 항상 최대 진폭 지점을 본다.
+    window.update = () => { shake.amp = KILL_SHAKE_AMP; shake.dur = KILL_SHAKE_DUR; shake.t = KILL_SHAKE_DUR; };
+  });
+  await page.waitForTimeout(120);
+  await shot('7-shake');
+
   await browser.close();
   console.log(errors.length ? '페이지 에러:\n' + errors.join('\n') : '페이지 에러 없음 — ' + OUT);
 })();
