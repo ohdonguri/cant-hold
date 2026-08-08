@@ -5,11 +5,16 @@ const path = require('path');
 
 const HTML = path.join(__dirname, '..', 'index.html');
 
-function stubCtx() {
+// 그리기 호출을 기록할 수 있는 캔버스 스텁.
+// log 를 넘기면 호출한 메서드 이름이 순서대로 쌓인다. "무엇이 화면에 나왔나"를
+// 헤드리스에서 볼 수 있는 유일한 창이다 — 상태만 검사하면 drawXxx() 호출을
+// 통째로 지워도 테스트가 전부 통과한다(실제로 그랬다).
+function stubCtx(log) {
   return new Proxy({}, {
     get(_, p) {
       if (p === 'measureText') return () => ({ width: 10 });
       if (p === 'canvas') return {};
+      if (log) return () => { log.push(p); };
       return () => {};
     },
     set() { return true; },
@@ -37,7 +42,8 @@ const EXPOSE = [
   'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
-  'applyArmor', 'spawnEnemy', 'rollDeck', 'damage',
+  'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
+  'spawnKillFx', 'aliveParticles', 'resetParticles', 'drawParticles', 'PARTICLE_CAP', 'fireTower',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
@@ -46,7 +52,10 @@ const EXPOSE = [
 function load(overrides) {
   const html = fs.readFileSync(HTML, 'utf8');
   const js = patch(html.split('<script>')[1].split('</' + 'script>')[0], overrides);
-  const canvas = { getContext: () => stubCtx(), addEventListener: () => {}, width: 0, height: 0, style: {} };
+  // 본 화면만 기록한다. 스프라이트를 굽는 오프스크린 캔버스까지 세면
+  // 처음 그릴 때 굽는 도트 수백 줄이 섞여서 못 쓴다.
+  const drawLog = [];
+  const canvas = { getContext: () => stubCtx(drawLog), addEventListener: () => {}, width: 0, height: 0, style: {} };
 
   const store = new Map();
   const localStorageStub = {
@@ -56,7 +65,7 @@ function load(overrides) {
 
   const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame', 'localStorage',
     js + '\nreturn {' + EXPOSE.join(',') + '};');
-  return fn(
+  const api = fn(
     {
       getElementById: () => canvas,
       // 스프라이트를 오프스크린 캔버스에 굽는다
@@ -67,6 +76,15 @@ function load(overrides) {
     () => {},
     localStorageStub,
   );
+
+  // 마지막 render 가 본 화면에 무엇을 그렸는지 세는 창.
+  //   g.draws.reset(); g.render(); g.draws.count('fill')
+  api.draws = {
+    log: drawLog,
+    reset() { drawLog.length = 0; },
+    count(...names) { return drawLog.filter(n => names.includes(n)).length; },
+  };
+  return api;
 }
 
 // ── 그리디 플레이어 ──────────────────────────────────────────

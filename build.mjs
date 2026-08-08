@@ -132,6 +132,8 @@ function verify({ html, out, minJs }) {
     // 로그인이 통째로 죽는데 화면에는 아무 표시도 안 난다.
     'https://www.gstatic.com/firebasejs/', 'eastbirdstudio-abfb5', 'games/canthold/saves',
     'snapshotRun', 'restoreRun', 'mergeBundle',
+    // 처치 연출은 없어져도 게임이 돌아가서 배포 뒤에나 눈치챈다
+    'spawnKillFx', 'drawParticles',
   ];
   const missing = must.filter(k => !out.includes(k));
   if (missing.length) throw new Error('압축본에서 사라진 것: ' + missing.join(', '));

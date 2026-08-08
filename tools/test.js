@@ -949,6 +949,187 @@ function ok(name, cond, detail) {
   ok('실루엣이 겹치지 않는다', dupes.length === 0, dupes.join(',') || '없음');
 }
 
+// ── 처치 연출 ────────────────────────────────────────────────
+// 적이 사라지는 순간이 안 읽히는 문제라, 확인할 건 "죽였을 때만 난다"와
+// "무엇으로 죽였는지가 그림으로 갈린다" 둘이다.
+{
+  console.log('처치 연출');
+  const g = load();
+  const { state } = g;
+
+  const newRun = () => {
+    g.restart();
+    g.pickStage(0);
+    ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5;
+  };
+  // 보드 한복판에 적 하나만 세운다
+  const put = (kind, opts) => {
+    state.enemies.length = 0;
+    g.spawnEnemy(kind);
+    const e = state.enemies[0];
+    e.x = 3; e.y = 4;
+    Object.assign(e, opts || {});
+    return e;
+  };
+  const shapes = () => [...new Set(state.particles.filter(p => p.alive).map(p => p.shape))].sort().join('+');
+
+  newRun();
+
+  // ① 생성
+  g.resetParticles();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const born = g.aliveParticles();
+  ok('처치하면 파편이 생긴다', born > 0, born + '개');
+
+  // 몸집 비례. 한 종류만 재면 구현식을 그대로 베낀 동어반복이 되고,
+  // 개수를 상수로 박아도 통과한다. 세 종류의 대소를 본다.
+  const countFor = kind => {
+    g.resetParticles();
+    g.killEnemy(put(kind), null, 'physical');
+    return g.aliveParticles();
+  };
+  const nSwarm = countFor('swarm'), nGrunt = countFor('grunt'), nElite = countFor('elite');
+  ok('몸집이 클수록 파편이 많다', nElite > nGrunt && nGrunt > nSwarm,
+    `군집 ${nSwarm} < 보병 ${nGrunt} < 정예 ${nElite}`);
+
+  // 장판(서리·소이·동상)은 tick 딜이라 피격 플래시를 안 낸다. 하지만 처치 연출은 나야 한다.
+  g.resetParticles();
+  const tickDead = put('grunt');
+  g.damage(tickDead, 1e9, 'magic', null, true);
+  ok('지속딜 처치도 연출이 난다', tickDead.dead && g.aliveParticles() > 0, g.aliveParticles() + '개');
+  ok('  그래도 피격 플래시는 안 낸다', tickDead.hitFlash === 0, String(tickDead.hitFlash));
+
+  // 파열(A1)이 applyStacks 안에서 damage 를 다시 부른다. e.dead 가드 뒤에 있어야 한 번만 터진다.
+  g.resetParticles();
+  const twice = put('grunt');
+  g.killEnemy(twice, null, 'physical');
+  const once = g.aliveParticles();
+  g.killEnemy(twice, null, 'physical');
+  ok('이미 죽은 적은 두 번 안 터진다', g.aliveParticles() === once, once + ' → ' + g.aliveParticles());
+
+  // ② 실제로 그려지는가. 위 단언들은 전부 aliveParticles()(= 상태)만 보므로
+  // render() 의 drawParticles() 호출을 통째로 지워도 하나도 안 깨진다.
+  // 파편 하나는 fill 이든 stroke 든 도형을 정확히 하나 그린다.
+  g.resetParticles();
+  state.enemies.length = 0;
+  g.render();                                  // 스프라이트 굽기 워밍업
+  g.draws.reset(); g.render();
+  const drawnBare = g.draws.count('fill', 'stroke');
+  g.killEnemy(put('grunt'), null, 'physical');
+  state.enemies.length = 0;                    // 시체를 치워 나머지 그림을 똑같이 맞춘다
+  const shown = g.aliveParticles();
+  g.draws.reset(); g.render();
+  ok('render 가 파편을 실제로 그린다', g.draws.count('fill', 'stroke') - drawnBare === shown,
+    `파편 ${shown}개에 도형 ${g.draws.count('fill', 'stroke') - drawnBare}개`);
+
+  // ③ 수명. PARTICLE_LIFE 가 있는 유일한 이유인데, decayEffects 의
+  // updateParticles(dt) 호출을 지워도(= 파편이 보드에 영구히 박혀도)
+  // 상한·초기화 단언은 전부 그대로 통과한다.
+  g.resetParticles();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const spawned = g.aliveParticles();
+  for (let i = 0; i < 3; i++) g.update(1 / 30);     // 0.1초 — 수명의 3분의 1
+  const midway = g.aliveParticles();
+  for (let i = 0; i < 9; i++) g.update(1 / 30);     // 누적 0.4초 > 수명 0.3초
+  ok('수명이 지나면 사라진다',
+    spawned > 0 && midway === spawned && g.aliveParticles() === 0,
+    `${spawned} → ${midway} → ${g.aliveParticles()}`);
+
+  // ② 상한. 장판이 한 프레임에 여러 마리를 죽이면 여기에 먼저 닿는다.
+  g.resetParticles();
+  state.enemies.length = 0;
+  for (let i = 0; i < 60; i++) g.spawnEnemy('elite');
+  const mob = state.enemies.slice();
+  mob.forEach((e, i) => { e.x = i % 6; e.y = i % 3; });
+  const last = mob[mob.length - 1];
+  last.x = 5; last.y = 7;                       // 다른 적과 안 겹치는 자리
+  for (const e of mob) g.killEnemy(e, null, 'physical');
+  ok('상한을 안 넘는다', g.aliveParticles() <= g.PARTICLE_CAP,
+    g.aliveParticles() + '/' + g.PARTICLE_CAP);
+  // 넘칠 때 생성을 막으면 하필 방금 죽은 적의 연출이 통째로 빠진다.
+  // 그래서 오래된 것부터 덮어쓴다 — 마지막 적의 파편은 반드시 남아야 한다.
+  const survived = state.particles.some(p => p.alive && p.x === 5.5 && p.y === 7.5);
+  ok('마지막에 죽은 적의 파편이 남는다', survived);
+  try { g.render(); ok('상한 상태에서 render 가 안 터진다', true); }
+  catch (err) { ok('상한 상태에서 render 가 안 터진다', false, err.message); }
+
+  // ③ 초기화
+  g.restart();
+  ok('restart 하면 파편이 0', g.aliveParticles() === 0, String(g.aliveParticles()));
+
+  newRun();
+  const snap = g.snapshotRun();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const restored = g.restoreRun(snap);
+  ok('restoreRun 하면 파편이 0', restored && g.aliveParticles() === 0,
+    restored + ' / ' + g.aliveParticles());
+
+  // 비우기를 성공 경로에만 두면, 못 이어받고 튕긴 뒤 옛 판의 파편이 그대로 남는다.
+  newRun();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const rejected = g.restoreRun({ stage: 99, deck: [], towers: [] });
+  ok('restoreRun 이 실패해도 파편이 0', rejected === false && g.aliveParticles() === 0,
+    rejected + ' / ' + g.aliveParticles());
+
+  // ④ 타입별 구분
+  newRun();
+  const shapesOf = (type, opts) => {
+    g.resetParticles();
+    g.killEnemy(put('grunt', opts), null, type);
+    return shapes();
+  };
+  const phys = shapesOf('physical');
+  const mag = shapesOf('magic');
+  const ice = shapesOf('magic', { frozen: 1 });
+  ok('물리·마법·빙결이 서로 다른 도형', new Set([phys, mag, ice]).size === 3,
+    [phys, mag, ice].join(' / '));
+  ok('빙결이 딜 타입보다 우선', ice === 'ice', ice);
+  ok('마법은 확장 링이 붙는다', mag.includes('ring'), mag);
+  // 순수(마력로 B2·서리탑 A2)와 미전달은 물리로 떨어져야 한다.
+  // fallback 이 없으면 면역몹 상대 빌드에서만 연출이 사라진다.
+  ok('순수는 물리와 같다', shapesOf('pure') === phys, shapesOf('pure'));
+  ok('타입 미전달도 물리와 같다', shapesOf(undefined) === phys, shapesOf(undefined));
+
+  // 즉사 2경로는 damage() 를 안 거친다. type 을 안 넘기면 이 빌드에서만 연출이 사라진다.
+  const executeCase = (setup, label) => {
+    newRun();
+    state.gold = 99999;
+    g.summon('marksman');
+    const t = state.towers[0];
+    t.star = 5; t.b3 = 'B'; t.b5 = null; t.t7 = null; t.cd = 0;
+    setup(t);
+    g.resetParticles();
+    const e = put('grunt');
+    e.x = t.gx; e.y = t.gy;
+    e.hp = e.maxHp * 0.1;
+    g.fireTower(t, 1 / 30);
+    ok(label, e.dead && g.aliveParticles() > 0, e.dead + ' / ' + g.aliveParticles() + '개');
+  };
+  executeCase(t => { t.b5 = 'B1'; }, '관측소 처형(B1) 즉사도 연출이 난다');
+  executeCase(t => { t.t7 = 'execute'; }, '7성 처형 프로토콜 즉사도 연출이 난다');
+
+  // ⑤ 누수 음성 검사. 관문 도달은 killEnemy 를 안 부르고 continue 한다.
+  // 새는 걸 처치처럼 보이게 하는 게 이 티켓에서 제일 나쁜 실패다.
+  newRun();
+  state.towers.length = 0;              // 타워가 대신 죽여버리면 검사가 무의미하다
+  state.spawnQueue.length = 0;
+  state.phase = 'wave';
+  g.resetParticles();
+  const leaker = put('grunt');
+  leaker.dist = g.laneLen(leaker.lane);
+  const lifeBefore = state.life;
+  g.update(1 / 30);
+  ok('관문 도달은 연출이 안 난다', state.life < lifeBefore && g.aliveParticles() === 0,
+    '생명 ' + lifeBefore + '→' + state.life + ', 파편 ' + g.aliveParticles());
+
+  // 파편은 스냅샷에 안 들어간다. 들어가면 SAVE_VERSION 을 올려야 한다.
+  newRun();
+  g.killEnemy(put('grunt'), null, 'physical');
+  ok('스냅샷에 파편이 안 실린다', !('particles' in (g.snapshotRun() || {})));
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {
