@@ -45,6 +45,10 @@ const EXPOSE = [
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
   'spawnKillFx', 'aliveParticles', 'resetParticles', 'drawParticles', 'PARTICLE_CAP', 'fireTower',
   'PARTICLE_LIFE', 'MUZZLE_LIFE', 'SPARK_LIFE',
+  // 처치 잔상. sprCache 까지 내보내는 건 "색을 매 프레임 새로 만들면 캐시가 무한히
+  // 커진다"를 테스트가 실측으로 잠그기 위해서다 — 상태만 봐서는 못 잡는 회귀다.
+  'aliveCorpses', 'resetCorpses', 'corpseScale', 'drawCorpses',
+  'CORPSE_LIFE', 'CORPSE_CAP', 'sprCache',
   // 충격 등급. 상수까지 내보내는 건 PARTICLE_LIFE 와 같은 이유다 — 테스트가 숫자를
   // 손으로 베끼면 값을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
   // hitstopT / leakWarnT 는 모듈 레벨 원시값이라 객체처럼 못 넘긴다. 읽기용 게터를 둔다.
