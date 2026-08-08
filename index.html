@@ -299,6 +299,7 @@ const state = {
   shells: [],          // 박격포 포탄 (착탄 지연)
   patches: [],         // 소이 장판
   blasts: [],          // 폭발 시각 효과
+  particles: [],       // 처치 파편. 셀 좌표계이고 링 버퍼라 죽은 것도 슬롯이 남는다
   hasHanpa: false,     // 한파 타워 존재 여부 (프레임마다 갱신)
   selected: null,      // 선택된 타워 id
   picker: null,        // {gx, gy} — 빈 칸에 뭘 소환할지 고르는 중
@@ -1381,11 +1382,13 @@ function damage(e, raw, type, src, tick) {
   d *= 1 + ampAll(e);
   e.hp -= d;
   if (!tick) e.hitFlash = 0.08;
-  if (e.hp <= 0) killEnemy(e, src);
+  if (e.hp <= 0) killEnemy(e, src, type);
   return d;
 }
 
-function killEnemy(e, src) {
+// type 은 처치 연출을 고르는 데만 쓴다. 즉사 경로(관측소 B1 처형, 7성 처형
+// 프로토콜)는 damage() 를 안 거치므로 호출부에서 직접 넘겨야 한다.
+function killEnemy(e, src, type) {
   if (e.dead) return;
   e.dead = true;
 
@@ -1417,6 +1420,11 @@ function killEnemy(e, src) {
     if (t.b5 === 'B2' && Math.random() < 0.25) state.essence++;
     else state.gold += t.star;   // 고정 +1 이면 성급을 올릴 이유가 없다
   }
+
+  // 연출은 맨 끝이다. 전이·징수·정산보다 앞에 두면 그중 하나가 터졌을 때
+  // 연출만 남고 정산이 빠진 상태가 된다. e.dead 가드보다 뒤인 것도 중요하다 —
+  // 파열(A1)이 applyStacks 안에서 damage 를 다시 부르므로 앞에 두면 두 번 터진다.
+  spawnKillFx(e, type);
 }
 
 function applyStacks(e, n, per, src) {
@@ -1553,8 +1561,8 @@ function fireTower(t, dt) {
 
     const hits = t.b5 === 'B2' ? targets.slice(0, 4) : [main];
     for (const e of hits) {
-      if (t.b5 === 'B1' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.18) { killEnemy(e, t); continue; }
-      if (t.t7 === 'execute' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.12) { killEnemy(e, t); continue; }
+      if (t.b5 === 'B1' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.18) { killEnemy(e, t, type); continue; }
+      if (t.t7 === 'execute' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.12) { killEnemy(e, t, type); continue; }
       damage(e, d, type, t);
       beam(t, e);
     }
@@ -1853,6 +1861,11 @@ function snapshotRun() {
 // 스냅샷을 되살린다. 스테이지나 덱이 지금 규칙과 안 맞으면 통째로 버린다 —
 // 어중간하게 복원하면 못 깨는 판이 만들어진다.
 function restoreRun(r) {
+  // 파편은 맨 먼저 비운다. 판을 갈아끼우는 함수가 어느 경로로 빠져나가든
+  // 옛 판의 잔여물을 안 남기는 게 규칙이다 — 아래 배열들과 같은 취급인데
+  // 성공 경로에만 두면 실패 반환 두 갈래에서만 규칙이 깨진다.
+  // (감쇠가 돌고 있으면 0.3초 뒤 어차피 사라지지만, 그건 이 함수의 보장이 아니다.)
+  resetParticles();
   if (!r || !STAGES[r.stage]) return false;
   const deck = (r.deck || []).filter(k => KINDS[k]);
   if (deck.length !== CFG.DECK_SIZE) return false;
@@ -2622,6 +2635,7 @@ function restart() {
   state.shells.length = 0;
   state.patches.length = 0;
   state.blasts.length = 0;
+  resetParticles();
   state.selected = null;
   clearChoices();
   state.picker = null;
@@ -2770,6 +2784,140 @@ function updateEnemies(dt) {
   }
 }
 
+// ═════════════════════════════════════════════════════════════
+// 처치 파편
+// ═════════════════════════════════════════════════════════════
+// 적이 사라지는 순간이 화면에서 안 읽힌다 — HP 바가 없어지는 게 전부라
+// 죽인 건지 관문으로 샌 건지가 구분이 안 된다. 그래서 처치에만 파편을 뿌린다.
+// 관문 도달은 처치가 아니므로 여기 붙이지 않는다(누수를 처치처럼 보이게 하면 최악).
+//
+// 좌표는 beams/blasts 와 같은 셀 좌표계다. 픽셀로 저장하면 화면 크기가 바뀌는
+// 순간(회전·키보드) 이미 떠 있는 파편만 엉뚱한 자리에 남는다.
+
+const PARTICLE_CAP = 360;       // 동시 파편 상한
+const PARTICLE_GRAVITY = 5.0;   // 칸/초^2
+const PARTICLE_LIFE = 0.3;      // 초
+
+// 연출 전용 난수. 전역 Math.random 은 절대 쓰지 않는다 —
+// 관측소 치명(25%), 조폐소 약탈(25%), 소환 자리, 덱·특성 롤이 전부 같은
+// 스트림이라 처치할 때마다 난수를 한 번 뽑으면 그 뒤의 모든 판정이 밀린다.
+// 밸런스를 한 줄도 안 고쳤는데 시뮬 결과가 바뀐다. tools/seedcheck.js 가 이걸 감시한다.
+let fxSeed = 0x9e3779b9;
+function fxRand() {
+  fxSeed = (fxSeed * 1664525 + 1013904223) >>> 0;
+  return fxSeed / 4294967296;
+}
+
+// 링 버퍼. 배열 길이를 줄이지 않고 alive 플래그로 재사용한다 —
+// 장판(서리·소이·동상)은 한 프레임에 여러 마리를 동시에 죽이므로
+// filter 로 매 프레임 새 배열을 만들면 그 순간마다 쓰레기가 쏟아진다.
+let particleFree = [];          // 비어 있는 슬롯 인덱스
+let particleCursor = 0;         // 상한에 닿았을 때 덮어쓸 자리
+
+function resetParticles() {
+  state.particles.length = 0;
+  particleFree.length = 0;
+  particleCursor = 0;
+}
+
+function allocParticle() {
+  const arr = state.particles;
+  while (particleFree.length) {
+    const i = particleFree.pop();
+    if (i < arr.length && !arr[i].alive) return arr[i];
+  }
+  if (arr.length < PARTICLE_CAP) {
+    const p = {
+      alive: false, x: 0, y: 0, vx: 0, vy: 0,
+      t: 0, life: PARTICLE_LIFE, color: '#fff', shape: 'shard',
+      size: 0.07, rot: 0, spin: 0, grav: 1,
+    };
+    arr.push(p);
+    return p;
+  }
+  // 상한을 넘으면 생성을 막지 말고 슬롯 순서대로 덮어쓴다. 막으면 방금 죽은 적의
+  // 연출만 통째로 빠져서, 하필 제일 봐야 할 것이 안 보인다.
+  // 덮어쓰는 순서는 나이 순이 아니라 인덱스 순이다 — 프리 리스트로 슬롯을 한 번이라도
+  // 재활용하면 인덱스 순서와 나이 순서가 어긋난다. 상한에 닿는 건 장판이 수십 마리를
+  // 한꺼번에 죽인 프레임뿐이고 그때는 전부 같은 프레임에 태어나서 나이가 같으므로,
+  // 정확한 나이 순서를 지키려고 힙을 얹을 값이 없다.
+  const p = arr[particleCursor];
+  particleCursor = (particleCursor + 1) % arr.length;
+  return p;
+}
+
+function aliveParticles() {
+  let n = 0;
+  for (const p of state.particles) if (p.alive) n++;
+  return n;
+}
+
+// 처치 연출. type 은 마지막 타격의 딜 타입이다.
+// 우선순위는 빙결 > 물리 > 마법 > 그 외(순수·미전달)이고, 순수와 미전달은
+// 물리와 같은 그림으로 떨어진다. fallback 이 없으면 마력로 순수광선이나
+// 서리탑 동상으로 죽였을 때, 즉 면역몹 상대 빌드에서만 연출이 사라진다.
+function spawnKillFx(e, type) {
+  const d = ENEMY[e.kind];
+  const frozen = e.frozen > 0;
+
+  // 보드 바닥이 #1a212e/#1d2533 이라 적 색을 그대로 뿌리면 어두운 파편이 묻힌다.
+  // 스프라이트는 외곽선으로 푸는데(DESIGN.md 2.5) 파편은 너무 작아서 그 수단을
+  // 못 쓴다. 대신 흰색 쪽으로 한 번 밀어 최소 대비를 만든다.
+  const color = frozen ? '#79c0ff' : mixHex(d.color, '#ffffff', 0.35);
+
+  // 몸집만큼 파편이 나온다. 군집(r 0.15) 8개, 보병(0.26) 9개, 정예(0.42) 10개.
+  const n = 6 + Math.round(d.r * 10);
+  const magic = !frozen && type === 'magic';
+
+  // 빙결은 얼음이 떨어져 나가는 그림이라 중력이 세다.
+  const grav = frozen ? 1.8 : 1;
+  const speed = 1.8 + d.r * 2.4;
+  const base = fxRand() * Math.PI * 2;   // 시작 각도만 흔든다. 등각은 유지
+
+  for (let i = 0; i < n; i++) {
+    const p = allocParticle();
+    p.alive = true;
+    p.x = e.x + 0.5;
+    p.y = e.y + 0.5;
+    p.t = p.life = PARTICLE_LIFE;
+    p.color = color;
+    p.grav = grav;
+
+    // 마법은 확장하는 링 하나 + 원형 잔광. 링은 제자리에서 커진다.
+    if (magic && i === 0) {
+      p.shape = 'ring';
+      p.vx = p.vy = 0;
+      p.grav = 0;
+      p.size = d.r * 1.1;
+      p.rot = p.spin = 0;
+      continue;
+    }
+
+    const a = base + i * Math.PI * 2 / n + (fxRand() - 0.5) * 0.6;
+    const sp = speed * (0.65 + fxRand() * 0.7);
+    p.vx = Math.cos(a) * sp;
+    p.vy = Math.sin(a) * sp - 0.6;   // 살짝 위로 튄다
+    p.shape = frozen ? 'ice' : magic ? 'glow' : 'shard';
+    p.size = (magic ? 0.055 : 0.05) + d.r * 0.12;
+    p.rot = fxRand() * Math.PI * 2;
+    p.spin = magic ? 0 : (fxRand() - 0.5) * 22;
+  }
+}
+
+function updateParticles(dt) {
+  const arr = state.particles;
+  for (let i = 0; i < arr.length; i++) {
+    const p = arr[i];
+    if (!p.alive) continue;
+    p.t -= dt;
+    if (p.t <= 0) { p.alive = false; particleFree.push(i); continue; }
+    p.vy += PARTICLE_GRAVITY * p.grav * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.rot += p.spin * dt;
+  }
+}
+
 // 타격 효과는 웨이브가 끝나도 사라져야 한다. 감쇠를 전투 루프 안에 두면
 // 마지막 한 방의 빔이 화면에 그대로 남는다.
 function decayEffects(dt) {
@@ -2777,6 +2925,7 @@ function decayEffects(dt) {
   state.beams = state.beams.filter(b => b.t > 0);
   for (const b of state.blasts) b.t -= dt;
   state.blasts = state.blasts.filter(b => b.t > 0);
+  updateParticles(dt);
 }
 
 function update(dt) {
@@ -3087,6 +3236,62 @@ function drawEnemies() {
       ctx.fillRect(cx - bw / 2, by, bw * (e.hp / e.maxHp), bh);
     }
   }
+}
+
+// 처치 파편. drawEffects 안에 넣으면 살아있는 적 밑에 깔려서 안 읽힌다 —
+// 죽는 순간의 그림이라 적 위에 있어야 한다. 보드 클립 안에서 부른다.
+function drawParticles() {
+  const arr = state.particles;
+  if (!arr.length) return;
+  const { cell, ox, oy } = view;
+
+  for (const p of arr) {
+    if (!p.alive) continue;
+    const k = p.t / p.life;                  // 1 → 0
+    const x = ox + p.x * cell, y = oy + p.y * cell;
+    ctx.globalAlpha = Math.min(1, k * 1.6);  // 끝에서만 흐려진다
+
+    if (p.shape === 'ring') {
+      // 확장하는 링. 마법 처치라는 걸 한 장으로 알리는 부분이다.
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, p.size * cell * (0.4 + (1 - k) * 2.6), 0, Math.PI * 2);
+      ctx.stroke();
+      continue;
+    }
+
+    if (p.shape === 'glow') {
+      // 마법 잔광은 원형이고 오므라들며 사라진다
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(x, y, p.size * cell * (0.4 + k * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
+    // shard(물리·순수) / ice(빙결). 각지고 돌아야 파편으로 읽힌다.
+    const s = p.size * cell;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(p.rot);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    if (p.shape === 'ice') {
+      ctx.moveTo(0, -s * 1.2);
+      ctx.lineTo(s * 0.9, s * 0.8);
+      ctx.lineTo(-s * 0.9, s * 0.8);
+    } else {
+      ctx.moveTo(-s, -s * 0.7);
+      ctx.lineTo(s, -s);
+      ctx.lineTo(s * 0.8, s);
+      ctx.lineTo(-s * 0.9, s * 0.8);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
 }
 
 // 3웨이브 앞까지 예고. 지금 최적인 빌드가 곧 무력화된다는 걸
@@ -3632,6 +3837,7 @@ function render() {
   for (const t of state.towers) drawTower(t);
   drawEffects();
   drawEnemies();
+  drawParticles();
   ctx.restore();
 
   drawDrag();

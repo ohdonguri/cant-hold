@@ -109,13 +109,24 @@ npx firebase-tools emulators:exec --only firestore --project eastbirdstudio-abfb
 ## 개발
 
 ```
-npm test     규칙 + 밸런스 회귀 테스트 (헤드리스)
+npm test     규칙 테스트 + 시드 고정 회귀 (헤드리스). 아래 둘을 이어서 돌린다
+  tools/test.js       규칙·경계·렌더 호출 검사
+  tools/seedcheck.js  시드 고정 밸런스 회귀 (결과 + Math.random 호출 횟수)
+npm run seedcheck 시드 회귀만 따로
 npm run tune 밸런스 상수 그리드 서치
 npm run sim  그리디 플레이 1회 결과
 npm run shot 레이아웃 스크린샷 (playwright 필요)
+npm run verify:build 압축본이 원본과 같은 화면인지 (playwright 필요)
 node tools/paths.js       경로 후보 비교
 node tools/stagetune.js N 스테이지 N 의 HP 배율 역산
 npm run sprites          도트 미리보기 (emit 으로 SPR 테이블 출력)
 ```
 
 밸런스 수치를 만지면 `npm test` 를 반드시 다시 돌릴 것. 근거는 [DESIGN.md](DESIGN.md) 참고.
+
+**`tools/test.js` 혼자서는 밸런스 회귀를 못 잡는다.** 전역 `Math.random` 을 그대로 두고
+돌려서 실행할 때마다 결과가 다르기 때문이다. 시드를 고정하고 결과 문자열과
+**난수 호출 횟수까지** 비교하는 건 `tools/seedcheck.js` 뿐이라 `npm test` 가 둘을 같이 돌린다.
+호출 횟수를 세는 이유는, 난수를 한 번 더 뽑으면 그 뒤의 모든 판정(관측소 치명,
+조폐소 약탈, 소환 자리, 덱 롤)이 한 칸씩 밀려서 **밸런스를 한 줄도 안 고쳤는데
+결과가 바뀌기** 때문이다. 그래서 연출처럼 규칙과 무관한 코드는 전역 난수를 쓰면 안 된다.

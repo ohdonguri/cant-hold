@@ -3,7 +3,8 @@
   "private": true,
   "description": "이번 웨이브는 못 막습니다 — 성급 합성 타워디펜스",
   "scripts": {
-    "test": "node tools/test.js",
+    "test": "node tools/test.js && node tools/seedcheck.js",
+    "seedcheck": "node tools/seedcheck.js",
     "tune": "node tools/tune.js",
     "sim": "node tools/tune.js one",
     "shot": "node tools/shot.js",
