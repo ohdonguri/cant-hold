@@ -154,10 +154,14 @@ const SEED_SCRIPT = `(() => {
     state.spawnQueue = [{ kind: 'grunt', at: 9999 }];
   });
 
-  const killShot = async (name, kind, type, frozen) => {
-    await page.evaluate(({ kind, type, frozen }) => {
+  // steps 는 처치 후 몇 프레임 지난 그림을 찍을지다. 기본 4(수명 0.3 의 40% 지점)는
+  // 파편이 흩어진 자리인데, 잔상은 수명이 0.18 이라 그 지점에서 이미 알파 0.26 이라
+  // 눈으로 못 본다. 잔상 컷만 1프레임(알파 0.81)으로 따로 찍는다.
+  const killShot = async (name, kind, type, frozen, steps = 4) => {
+    await page.evaluate(({ kind, type, frozen, steps }) => {
       window.update = window.__update;
       resetParticles();
+      resetCorpses();
       state.enemies.length = 0;
       state.beams.length = 0;
       spawnEnemy(kind);
@@ -165,10 +169,10 @@ const SEED_SCRIPT = `(() => {
       e.x = 3; e.y = 6;               // 보드 한복판의 통로. 타워에 안 가린다
       if (frozen) e.frozen = 1;       // 빙결이 딜 타입보다 우선한다
       killEnemy(e, state.towers[0], type);
-      // 수명(0.3초) 40% 지점. 파편이 흩어졌고 아직 안 사라진 자리다.
-      for (let i = 0; i < 4; i++) update(1 / 30);
+      // 파편은 수명(0.3초) 40% 지점이 흩어졌고 아직 안 사라진 자리다.
+      for (let i = 0; i < steps; i++) update(1 / 30);
       __freeze();                     // 여기서 그림이 영구 정지한다
-    }, { kind, type, frozen });
+    }, { kind, type, frozen, steps });
     await page.waitForTimeout(120);   // rAF 가 정지된 그림을 한 번 그릴 시간
     await shot(name, () => {
       if (state.phase !== 'wave') return '웨이브가 끝나 버렸다: ' + state.phase;
@@ -191,6 +195,10 @@ const SEED_SCRIPT = `(() => {
     await page.evaluate(() => {
       window.update = window.__update;
       resetParticles();
+      // 잔상도 같이 비운다. 앞 컷(kill-squash)의 잔상은 수명이 아직 남아 있어서,
+      // 안 비우면 착탄 지점 옆에 죽은 적 실루엣이 같이 찍힌다 — 파편을 비우는 것과
+      // 정확히 같은 이유다(무엇이 여파인지 못 가른다).
+      resetCorpses();
       state.enemies.length = 0;
       state.beams.length = 0;
       // 이 프레임에는 딱 한 발만 나가게 한다. 여러 타워가 같이 쏘면 빔이 겹쳐서
@@ -226,6 +234,24 @@ const SEED_SCRIPT = `(() => {
   };
 
   await fireShot('6-fire');
+
+  // 처치 잔상(squash) 전용 컷. **자리가 6-fire 뒤인 것이 중요하다** — 처치는 연출용
+  // 난수(fxRand)를 한 번 더 밀어서, 앞에 두면 6-fire 의 스파크 분사각이 통째로
+  // 달라진다. 앞 세 컷(kill-*)은 파편이 흩어진 지점이라 잔상이 이미 거의 투명하므로
+  // 1프레임(알파 0.81) 지점을 따로 찍는다.
+  // 여기서 볼 것은 하나다 — **적 실루엣이 가로로 퍼지고 세로로 눌린 채 남아 있는가.**
+  await killShot('kill-squash', 'elite', 'physical', false, 1);
+  // 상태로도 확인한다. 잔상이 이미 걷힌 뒤라면 이 컷은 파편만 찍힌 컷과 구별이 안 된다.
+  {
+    const why = await page.evaluate(() => {
+      if (aliveCorpses() !== 1) return '잔상이 ' + aliveCorpses() + '개다';
+      const s = corpseScale(state.corpses.find(c => c.alive));
+      if (!(s.sx > 1 && s.sy < 1)) return `squash 가 안 걸렸다: sx ${s.sx} sy ${s.sy}`;
+      if (s.alpha < 0.5) return '알파가 ' + s.alpha.toFixed(2) + ' 라 눈으로 못 본다';
+      return null;
+    });
+    if (why) bad.push('kill-squash: ' + why);
+  }
 
   // ── 화면 흔들림 고정 프레임 ──────────────────────────────────
   // 흔들림은 0.22초짜리다. shot.js 는 window.update 만 덮고 frame() 은 계속 돌리는데,

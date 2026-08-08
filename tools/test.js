@@ -1152,6 +1152,185 @@ function ok(name, cond, detail) {
   ok('스냅샷에 파편이 안 실린다', !('particles' in (g.snapshotRun() || {})));
 }
 
+// ── 처치 잔상 (squash) ───────────────────────────────────────
+// 파편은 "뭔가 터졌다"까지만 말한다. 잔상은 **터진 게 그 적이었다**를 말한다.
+// 여기서 볼 것은 셋이다:
+//   ① 잔상이 실제로 화면에 나오는가 (상태만 재면 drawCorpses 를 통째로 지워도 통과한다)
+//   ② sprCache 가 처치할 때마다 커지지 않는가 (색을 알파 섞은 값으로 넘기면 무한히 큰다)
+//   ③ 상한·초기화·누수 규칙이 파편과 같은가
+{
+  console.log('처치 잔상');
+  const g = load();
+  const { state } = g;
+
+  const newRun = () => {
+    g.restart();
+    g.pickStage(0);
+    ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5;
+  };
+  const put = (kind, opts) => {
+    state.enemies.length = 0;
+    g.spawnEnemy(kind);
+    const e = state.enemies[0];
+    e.x = 3; e.y = 4;
+    Object.assign(e, opts || {});
+    return e;
+  };
+
+  newRun();
+
+  // ① 개수 — 처치 1회당 정확히 1개다. 파편처럼 몸집에 비례하면 실루엣이 겹쳐 뭉갠다.
+  g.resetCorpses();
+  g.killEnemy(put('grunt'), null, 'physical');
+  ok('처치하면 잔상이 1개 생긴다', g.aliveCorpses() === 1, g.aliveCorpses() + '개');
+
+  const elite = (() => { g.resetCorpses(); g.killEnemy(put('elite'), null, 'physical'); return g.aliveCorpses(); })();
+  ok('몸집과 무관하게 1개', elite === 1, elite + '개');
+
+  // 파열(A1)이 damage 를 다시 부른다. e.dead 가드 뒤라 한 번만 나야 한다.
+  g.resetCorpses();
+  const twice = put('grunt');
+  g.killEnemy(twice, null, 'physical');
+  g.killEnemy(twice, null, 'physical');
+  ok('이미 죽은 적은 잔상이 두 번 안 남는다', g.aliveCorpses() === 1, g.aliveCorpses() + '개');
+
+  // ② 수명. 파편(0.3)보다 짧아야 마지막에 남는 그림이 파편이 된다 —
+  // 반대면 파편이 걷힌 자리에 적 실루엣만 남아 "아직 안 죽었나"로 읽힌다.
+  ok('잔상 수명이 파편보다 짧다', g.CORPSE_LIFE < g.PARTICLE_LIFE,
+    g.CORPSE_LIFE + ' < ' + g.PARTICLE_LIFE);
+  ok('잔상 수명이 0.15~0.2초', g.CORPSE_LIFE >= 0.15 && g.CORPSE_LIFE <= 0.2, String(g.CORPSE_LIFE));
+
+  g.resetCorpses();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const bornC = g.aliveCorpses();
+  for (let i = 0; i < 2; i++) g.update(1 / 30);        // 0.067초 — 수명의 37%
+  const midC = g.aliveCorpses();
+  for (let i = 0; i < 6; i++) g.update(1 / 30);        // 누적 0.267초 > 0.18
+  ok('수명이 지나면 사라진다',
+    bornC === 1 && midC === 1 && g.aliveCorpses() === 0,
+    `${bornC} → ${midC} → ${g.aliveCorpses()}`);
+
+  // ③ 크기 비율. 가로는 늘고 세로는 줄고 알파는 빠진다. 셋 중 하나라도 방향이
+  // 뒤집히면 squash 가 아니라 그냥 축소나 확대가 된다.
+  g.resetCorpses();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const live = () => state.corpses.find(c => c.alive);
+  const s0 = g.corpseScale(live());
+  g.update(1 / 30); g.update(1 / 30);
+  const s1 = g.corpseScale(live());
+  ok('시작은 원래 크기·불투명', Math.abs(s0.sx - 1) < 1e-6 && Math.abs(s0.sy - 1) < 1e-6 && Math.abs(s0.alpha - 1) < 1e-6,
+    `sx ${s0.sx} sy ${s0.sy} a ${s0.alpha}`);
+  ok('가로는 늘고 세로는 줄고 알파는 빠진다',
+    s1.sx > s0.sx && s1.sy < s0.sy && s1.alpha < s0.alpha,
+    `sx ${s0.sx.toFixed(3)}→${s1.sx.toFixed(3)} sy ${s0.sy.toFixed(3)}→${s1.sy.toFixed(3)} a ${s0.alpha.toFixed(3)}→${s1.alpha.toFixed(3)}`);
+  // 세로가 가로보다 많이 움직여야 "눌린" 것으로 읽힌다. 같으면 면적이 유지돼
+  // 그냥 옆으로 늘어난 적이 된다.
+  ok('세로 변화가 가로보다 크다', (1 - s1.sy) > (s1.sx - 1),
+    `세로 -${(1 - s1.sy).toFixed(3)} vs 가로 +${(s1.sx - 1).toFixed(3)}`);
+
+  // ④ 실제로 그려지는가. 위 단언은 전부 상태만 보므로 render() 의 drawCorpses()
+  // 호출을 통째로 지워도 하나도 안 깨진다. 잔상 1개 = drawImage 정확히 1회다.
+  g.resetCorpses(); g.resetParticles();
+  state.enemies.length = 0;
+  g.render();                                   // 스프라이트 굽기 워밍업
+  g.draws.reset(); g.render();
+  const imgBare = g.draws.count('drawImage');
+  g.killEnemy(put('grunt'), null, 'physical');
+  state.enemies.length = 0;                     // 산 적을 치워 나머지 그림을 똑같이 맞춘다
+  g.draws.reset(); g.render();
+  const imgWith = g.draws.count('drawImage');
+  ok('render 가 잔상을 실제로 그린다', imgWith - imgBare === 1,
+    `drawImage ${imgBare} → ${imgWith}`);
+  // 잔상은 스프라이트라 fill/stroke 를 안 쓴다. 파티클 풀에 섞였다면 여기서 걸린다
+  // (drawParticles 의 "파편 1개당 도형 1회" 집계가 오염된다).
+  ok('잔상은 파편 집계를 오염시키지 않는다',
+    !state.particles.some(p => p.alive && 'kind' in p) && g.aliveCorpses() === 1);
+
+  // ⑤ **sprCache 가 처치할 때마다 안 커진다.** 색을 알파 섞은 값이나 진행도로
+  // 보간한 값으로 넘기면 처치마다 — 심하면 프레임마다 — 새 캔버스가 구워진다.
+  // 그래서 잔상이 살아 있는 동안 render 를 여러 번 돌리는 것까지 포함해서 잰다.
+  const burn = (kind, opts) => {
+    g.resetCorpses();
+    g.killEnemy(put(kind, opts), null, 'physical');
+    state.enemies.length = 0;
+    for (let i = 0; i < 5; i++) { g.render(); g.update(1 / 30); }
+  };
+  burn('grunt'); burn('elite'); burn('grunt', { frozen: 1 });   // 워밍업: 쓰는 색을 다 굽는다
+  const cacheBefore = g.sprCache.size;
+  for (let i = 0; i < 30; i++) { burn('grunt'); burn('elite'); burn('grunt', { frozen: 1 }); }
+  const cacheAfter = g.sprCache.size;
+  ok('처치 90회에도 sprCache 가 안 커진다', cacheAfter === cacheBefore,
+    `${cacheBefore} → ${cacheAfter}`);
+
+  // ⑥ 상한. 파편과 같은 규칙이다 — 넘치면 생성을 막지 말고 덮어쓴다.
+  newRun();
+  g.resetCorpses();
+  state.enemies.length = 0;
+  for (let i = 0; i < g.CORPSE_CAP + 40; i++) g.spawnEnemy('grunt');
+  const mob = state.enemies.slice();
+  mob.forEach((e, i) => { e.x = i % 6; e.y = i % 3; });
+  const lastC = mob[mob.length - 1];
+  lastC.x = 5; lastC.y = 7;
+  for (const e of mob) g.killEnemy(e, null, 'physical');
+  ok('잔상이 상한을 안 넘는다', g.aliveCorpses() <= g.CORPSE_CAP,
+    g.aliveCorpses() + '/' + g.CORPSE_CAP);
+  ok('마지막에 죽은 적의 잔상이 남는다',
+    state.corpses.some(c => c.alive && c.x === 5.5 && c.y === 7.5));
+  try { g.render(); ok('상한 상태에서 render 가 안 터진다', true); }
+  catch (err) { ok('상한 상태에서 render 가 안 터진다', false, err.message); }
+
+  // ⑦ 초기화. 판을 갈아끼우는 함수는 어느 경로로 빠져나가든 옛 판의 잔여물을 안 남긴다.
+  g.restart();
+  ok('restart 하면 잔상이 0', g.aliveCorpses() === 0, String(g.aliveCorpses()));
+
+  newRun();
+  const snapC = g.snapshotRun();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const restoredC = g.restoreRun(snapC);
+  ok('restoreRun 하면 잔상이 0', restoredC && g.aliveCorpses() === 0,
+    restoredC + ' / ' + g.aliveCorpses());
+
+  newRun();
+  g.killEnemy(put('grunt'), null, 'physical');
+  const rejectedC = g.restoreRun({ stage: 99, deck: [], towers: [] });
+  ok('restoreRun 이 실패해도 잔상이 0', rejectedC === false && g.aliveCorpses() === 0,
+    rejectedC + ' / ' + g.aliveCorpses());
+
+  // ⑧ 누수 음성 검사. 관문 도달은 killEnemy 를 안 부른다. 새는 걸 처치처럼
+  // 보이게 하는 게 이 연출이 낼 수 있는 최악의 거짓말이다(2.6).
+  newRun();
+  state.towers.length = 0;
+  state.spawnQueue.length = 0;
+  state.phase = 'wave';
+  g.resetCorpses(); g.resetParticles();
+  const leakerC = put('grunt');
+  leakerC.dist = g.laneLen(leakerC.lane);
+  const lifeBeforeC = state.life;
+  g.update(1 / 30);
+  ok('관문 도달은 잔상이 안 난다',
+    state.life < lifeBeforeC && g.aliveCorpses() === 0 && g.aliveParticles() === 0,
+    `생명 ${lifeBeforeC}→${state.life}, 잔상 ${g.aliveCorpses()}, 파편 ${g.aliveParticles()}`);
+  // 그리기 층까지 본다. 상태 단언만 두면 drawCorpses 가 통째로 죽어 있어도 통과하므로,
+  // **같은 프레임에** 잔상 하나를 억지로 심어 drawImage 가 정확히 1 늘어나는 것까지
+  // 확인한다 — 이게 늘어야 위의 "누수 0"이 "잔상 기능이 죽어서 0"이 아니라는 증거가 된다.
+  g.render();                                    // 스프라이트 굽기 워밍업
+  g.draws.reset(); g.render();
+  const leakFrame = g.draws.count('drawImage');
+  g.killEnemy(put('grunt'), null, 'physical');
+  state.enemies.length = 0;
+  g.draws.reset(); g.render();
+  ok('누수 프레임에는 잔상 그림이 0 (처치 프레임에는 1)',
+    g.draws.count('drawImage') - leakFrame === 1,
+    `누수 ${leakFrame} → 처치 ${g.draws.count('drawImage')}`);
+
+  // ⑨ 잔상은 저장하지 않는다. 들어가면 SAVE_VERSION 을 올려야 한다.
+  newRun();
+  g.killEnemy(put('grunt'), null, 'physical');
+  ok('스냅샷에 잔상이 안 실린다', !('corpses' in (g.snapshotRun() || {})));
+}
+
 // ── 타격 3박자 ───────────────────────────────────────────────
 // 총구 화염 → 빔 → 착탄 스파크. 여기서 볼 건 "어디에 나는가"가 아니라
 // **어디에 안 나는가**다. 발사하지 않는 타워(서리탑·조폐소)에 화염이 붙거나,
