@@ -1130,6 +1130,389 @@ function ok(name, cond, detail) {
   ok('스냅샷에 파편이 안 실린다', !('particles' in (g.snapshotRun() || {})));
 }
 
+// ── 타격 3박자 ───────────────────────────────────────────────
+// 총구 화염 → 빔 → 착탄 스파크. 여기서 볼 건 "어디에 나는가"가 아니라
+// **어디에 안 나는가**다. 발사하지 않는 타워(서리탑·조폐소)에 화염이 붙거나,
+// 발사 빈도가 높은 마력로에 여파가 붙으면 화면이 통째로 타 버린다.
+{
+  console.log('타격 3박자');
+  const g = load();
+  const { state } = g;
+
+  // 그 종류를 반드시 포함하는 덱으로 판을 깐다. summon 은 덱에 없는 종류를 거른다.
+  const scene = (kind, opts) => {
+    g.restart();
+    g.pickStage(0);
+    [kind, 'frost', 'mint'].filter((k, i, a) => a.indexOf(k) === i)
+      .slice(0, 3).forEach(k => g.toggleDeckPick(k));
+    if (state.deckPick.length < 3) ['marksman', 'mortar'].forEach(k => {
+      if (state.deckPick.length < 3 && !state.deckPick.includes(k)) g.toggleDeckPick(k);
+    });
+    g.startRun();
+    state.wave = 5;
+    state.phase = 'wave';
+    state.spawnQueue.length = 0;
+    state.towers.length = 0;
+    state.enemies.length = 0;
+    state.gold = 999999;
+    g.summon(kind);
+    const t = state.towers[0];
+    Object.assign(t, { star: 5, b3: null, b5: null, t7: null, cd: 0, flash: 0 }, opts || {});
+    return t;
+  };
+
+  // 사거리 안에 세우고 안 죽게 만든다. 죽으면 처치 파편이 섞여서 스파크만 셀 수 없다.
+  const stand = (t, n) => {
+    const out = [];
+    for (let i = 0; i < (n || 1); i++) {
+      g.spawnEnemy('grunt');
+      const e = state.enemies[state.enemies.length - 1];
+      e.x = t.gx; e.y = t.gy;
+      e.maxHp = e.hp = 1e12;
+      out.push(e);
+    }
+    return out;
+  };
+  const sparks = () => state.particles.filter(p => p.alive && p.shape === 'spark').length;
+
+  // ── 화염이 붙는 타워 / 안 붙는 타워 ──────────────────────────
+  // 예전엔 쿨다운 통과 지점에서 flash 를 세웠는데, 서리탑은 그 뒤에 아무것도
+  // 안 쏘고 빠져나가므로 "발사 안 했는데 화염만 나는" 타워가 됐다.
+  const fired = (kind, opts, n) => {
+    const t = scene(kind, opts);
+    stand(t, n);
+    g.resetParticles();
+    g.fireTower(t, 1 / 30);
+    return t;
+  };
+  const flashes = [
+    ['파쇄자', 'shredder', true], ['침식자', 'eroder', true],
+    ['박격포', 'mortar', true], ['관측소', 'marksman', true],
+    ['서리탑', 'frost', false], ['조폐소', 'mint', false],
+  ];
+  for (const [label, kind, want] of flashes) {
+    const t = fired(kind, null, 1);
+    ok(`${label} 총구 화염 ${want ? 'O' : 'X'}`, (t.flash > 0) === want, 'flash ' + t.flash);
+  }
+
+  // 마력로는 빔 직선 위에 적이 얹혔을 때만 쏜다. 원 안에 있어도 선 밖이면 충전만 한다.
+  {
+    const t = fired('arc', null, 3);
+    ok('마력로(표적 있음) 총구 화염 O', t.flash > 0, 'flash ' + t.flash);
+
+    const t2 = scene('arc');
+    g.spawnEnemy('grunt');
+    const e = state.enemies[0];
+    e.maxHp = e.hp = 1e12;
+    // 정사각 사거리의 대각 모서리 — 체비셰프로는 안, 빔 직선 투영으로는 밖
+    const s = g.towerFootprint(t2), R = g.towerRange(t2);
+    e.x = t2.gx + s / 2 + R - 0.5;
+    e.y = t2.gy + s / 2 + R - 0.5;
+    g.fireTower(t2, 1 / 30);
+    ok('마력로(선 위에 표적 없음) 총구 화염 X', t2.flash === 0,
+      'flash ' + t2.flash + ', 빔 ' + state.beams.length);
+  }
+
+  // ── 발광점이 표적 쪽에 있다 ─────────────────────────────────
+  // 방향을 안 들고 있으면 5성 2x2 몸 한복판에서 빛나서 어디로 쐈는지가 안 읽힌다.
+  {
+    const t = scene('marksman');
+    const e = stand(t)[0];
+    e.x = t.gx + 3; e.y = t.gy;          // 오른쪽에 세운다
+    g.fireTower(t, 1 / 30);
+    const s = g.towerFootprint(t);
+    const vx = e.x + 0.5 - (t.gx + s / 2), vy = e.y + 0.5 - (t.gy + s / 2);
+    const dot = t.mzDx * vx + t.mzDy * vy;
+    ok('발광점이 표적 쪽에 있다', dot > 0, 'dot ' + dot.toFixed(2));
+  }
+
+  // 적이 타워와 같은 점에 있으면 방향 벡터 길이가 0 이다. || 1 가드가 없으면
+  // mzDx 가 NaN 이 되고, NaN 좌표는 arc() 를 조용히 통과해 그림만 사라진다.
+  {
+    const t = scene('shredder');
+    const s = g.towerFootprint(t);
+    const e = stand(t)[0];
+    e.x = t.gx + s / 2 - 0.5; e.y = t.gy + s / 2 - 0.5;   // 적 중심 == 타워 중심
+    g.fireTower(t, 1 / 30);
+    const nan = Number.isNaN(t.mzDx) || Number.isNaN(t.mzDy) ||
+      state.particles.some(p => p.alive && (Number.isNaN(p.x) || Number.isNaN(p.y) || Number.isNaN(p.rot)));
+    ok('타워와 같은 칸이어도 NaN 이 없다', !nan, 'mz ' + t.mzDx + ',' + t.mzDy);
+    try { g.render(); ok('  그 상태에서 render 가 안 터진다', true); }
+    catch (err) { ok('  그 상태에서 render 가 안 터진다', false, err.message); }
+  }
+
+  // ── 3박자의 수명 순서 ───────────────────────────────────────
+  // 화염(출발) < 스파크(여파) < 처치 파편. 이 순서가 곧 2.7 의 규칙이다.
+  // **동시 피크 예산으로는 이걸 못 잡는다** — 스파크는 발당 4~16개가 한 번에
+  // 터지는 버스트고 B 분기 공속이 낮아 버스트끼리 안 겹치므로, 수명을 3배로
+  // 늘려도 동시 개수가 44 → 48 로만 움직인다(실측). 수명은 여기서 직접 잠근다.
+  {
+    ok('수명이 화염 < 스파크 < 처치 파편',
+      g.MUZZLE_LIFE < g.SPARK_LIFE && g.SPARK_LIFE < g.PARTICLE_LIFE,
+      `화염 ${g.MUZZLE_LIFE} < 스파크 ${g.SPARK_LIFE} < 처치 ${g.PARTICLE_LIFE}`);
+
+    // 상수 비교만 두면 spawnSparks 가 p.life 를 다른 값으로 덮어써도 통과한다.
+    // 실제로 태어난 파티클의 수명을 재서 규칙과 실물을 함께 잠근다.
+    const t = fired('marksman', null, 1);
+    const sparkLife = state.particles.find(p => p.alive && p.shape === 'spark').life;
+    g.resetParticles();
+    g.killEnemy(stand(t)[0], null, 'physical');
+    const killLife = state.particles.find(p => p.alive && p.shape !== 'spark').life;
+    ok('  실물 수명도 같은 순서', sparkLife === g.SPARK_LIFE && sparkLife < killLife,
+      `스파크 ${sparkLife} < 처치 ${killLife}`);
+  }
+
+  // ── 저프레임 배속에서도 화염이 그려진다 ──────────────────────
+  // frame() 은 실제 프레임 간격(상한 0.05초)을 배속만큼 반복한다. 30fps x4 면
+  // 렌더 1프레임 사이에 게임시간 4x1/30 = 0.133초가 흘러 MUZZLE_LIFE(0.07)가
+  // 통째로 타 버린다 — 수명만 믿으면 그 프레임에 화염이 아예 안 그려진다.
+  // 렌더 없이 update 만 여러 번 돌린 상태가 정확히 그 조건이다.
+  {
+    const t = fired('marksman', null, 1);
+    for (let i = 0; i < 3; i++) g.update(1 / 30);   // x4 의 남은 스텝
+    state.enemies.length = 0;
+    state.beams.length = 0;
+    g.resetParticles();
+    // 연속 두 번 렌더한다. 첫 번째가 래치를 쓰고 두 번째는 안 쓰므로,
+    // 차이가 곧 "그 프레임에 화염이 그려졌다"다. 사이에 update 를 안 넣어
+    // 다른 그림은 완전히 같게 유지한다.
+    g.draws.reset(); g.render();
+    const withFlash = g.draws.count('fill');
+    g.draws.reset(); g.render();
+    const after = g.draws.count('fill');
+    ok('수명이 다 타도 그 프레임엔 화염이 그려진다',
+      t.flash <= 0 && withFlash - after === 2 && t.mzShown === true,
+      `flash ${t.flash.toFixed(4)}, fill ${withFlash} → ${after}`);
+  }
+
+  // ── 착탄 스파크의 완전 목록 ─────────────────────────────────
+  // 발당 4개. 처치 파편(8~10)보다 적어야 "맞았다"와 "죽었다"가 안 섞인다.
+  const sparkCase = (label, kind, opts, n, want) => {
+    const t = fired(kind, opts, n);
+    ok(label, sparks() === want && g.aliveParticles() === want,
+      `스파크 ${sparks()} / 전체 ${g.aliveParticles()} (기대 ${want})`);
+    return t;
+  };
+  sparkCase('파쇄자 스파크 4', 'shredder', null, 1, 4);
+  sparkCase('침식자 스파크 4', 'eroder', null, 1, 4);
+  sparkCase('관측소 스파크 4', 'marksman', null, 1, 4);
+  // 관통사격(B2)은 4마리를 꿴다. 명중 수만큼 나야 몇 마리를 맞혔는지가 보인다.
+  sparkCase('관측소 B2 스파크 4x4', 'marksman', { b3: 'B', b5: 'B2' }, 4, 16);
+  sparkCase('서리탑 스파크 0', 'frost', null, 1, 0);
+  sparkCase('조폐소 스파크 0', 'mint', null, 1, 0);
+  // 마력로만 여파가 없다. 충전 2.5초 한 발이 선 위 5마리를 동시에 꿰므로
+  // 여파를 얹으면 라인 전체가 불꽃 띠가 되어 관통 수가 오히려 안 읽힌다.
+  sparkCase('마력로 관통 스파크 0', 'arc', null, 3, 0);
+  sparkCase('마력로 A1 연쇄 스파크 0', 'arc', { b5: 'A1' }, 3, 0);
+
+  // 박격포는 발사에도 착탄에도 스파크가 없다. 착탄은 blasts 링이 이미 맡고 있다.
+  {
+    const t = fired('mortar', null, 1);
+    ok('박격포 발사 스파크 0', sparks() === 0, String(sparks()));
+    const shells = state.shells.length;
+    for (let i = 0; i < 30; i++) g.update(1 / 30);       // 착탄 지연 0.5초를 넘긴다
+    ok('박격포 착탄 스파크 0', shells > 0 && sparks() === 0,
+      '탄 ' + shells + ', 스파크 ' + sparks() + ', 링 ' + state.blasts.length);
+  }
+
+  // ── 장판·지속딜 ────────────────────────────────────────────
+  // 장판은 tick 이라 beam() 을 안 거친다. 그런데 "0 이 나왔다"만 보면 아무것도
+  // 증명하지 못한다 — e.x/e.y 만 세우면 첫 update 의 updateEnemies 가 e.dist 로
+  // 좌표를 되돌려 적이 스폰 지점으로 튀고, 장판이 한 번도 안 틱한 채 0 이 나온다.
+  // 그래서 (1) 적을 사거리 안 경로 지점에 못박고 (2) 통상 사격을 봉인해 틱만 남기고
+  // (3) **딜이 실제로 들어간 프레임 수를 같이 단언한다.**
+
+  // 사거리 안에 들어오는 경로 거리를 찾는다. 좌표가 아니라 dist 를 잡아야
+  // updateEnemies 가 매 프레임 되돌려 놓지 않는다.
+  const rangeDist = (t, lane) => {
+    const s = g.towerFootprint(t), R = g.towerRange(t);
+    const cx = t.gx + s / 2, cy = t.gy + s / 2;
+    const len = g.laneLen(lane);
+    for (let d = 0; d <= len; d += 0.2) {
+      const p = g.posAt(d, lane);
+      if (Math.max(Math.abs(p.x + 0.5 - cx), Math.abs(p.y + 0.5 - cy)) <= R) return d;
+    }
+    return null;
+  };
+
+  // 통상 사격 봉인은 cd 를 매 프레임 크게 밀어 두는 것으로 한다. fireTower 는
+  // 오라·장판을 cd 검사 **앞에서** 처리하므로 틱은 그대로 살아 있다.
+  const fieldCase = (label, kind, opts, prep) => {
+    const t = scene(kind, opts);
+    g.spawnEnemy('grunt');
+    const e = state.enemies[0];
+    e.maxHp = e.hp = 1e9;
+    const d0 = rangeDist(t, e.lane);
+    if (d0 === null) { ok(label, false, '사거리 안 경로 지점이 없다'); return; }
+
+    if (prep) prep(t, e, d0);       // 소이 장판처럼 먼저 한 발 쏴야 하는 경우
+    g.resetParticles();
+
+    let dealt = 0;
+    for (let i = 0; i < 30; i++) {
+      e.dist = d0;                  // 못박는다
+      t.cd = 1e9;                   // 통상 사격 봉인 (오라·장판은 cd 앞이라 살아 있다)
+      const hp = e.hp;
+      g.update(1 / 30);
+      if (e.hp < hp) dealt++;
+    }
+    ok(label, dealt > 0 && sparks() === 0,
+      `딜 프레임 ${dealt}/30, 스파크 ${sparks()}`);
+  };
+
+  fieldCase('서리탑 장판 스파크 0', 'frost', null);
+  fieldCase('서리탑 A2 동상 스파크 0', 'frost', { b5: 'A2' });
+  fieldCase('침식자 B2 소각 스파크 0', 'eroder', { b5: 'B2' });
+  // 소이 장판은 착탄이 만든다 — 한 발 쏘고 탄이 떨어질 때까지 기다려야 patches 가 생긴다.
+  fieldCase('박격포 A2 소이 장판 스파크 0', 'mortar', { b5: 'A2' }, (t, e, d0) => {
+    for (let i = 0; i < 30 && !state.patches.length; i++) {
+      e.dist = d0;
+      t.cd = 0;
+      g.update(1 / 30);
+    }
+    ok('  소이 장판이 실제로 깔렸다', state.patches.length > 0, '장판 ' + state.patches.length);
+  });
+
+  // ── 즉사 경로 ──────────────────────────────────────────────
+  // 처형은 damage() 를 안 거치고 continue 했다. 화염이 붙으면서
+  // "화염은 났는데 빔이 없고 적만 터지는" 프레임이 생겨서 같이 고쳤다.
+  const execCase = (label, opts) => {
+    const t = scene('marksman', Object.assign({ b3: 'B' }, opts));
+    const e = stand(t)[0];
+    e.maxHp = 1000; e.hp = 100;                 // 10% — 처형 문턱 아래
+    g.resetParticles();
+    state.beams.length = 0;
+    g.fireTower(t, 1 / 30);
+    ok(label, e.dead && state.beams.length === 1,
+      e.dead + ' / 빔 ' + state.beams.length);
+    ok('  ' + label + ' 여파는 없다', sparks() === 0, '스파크 ' + sparks());
+  };
+  execCase('관측소 처형(B1) 도 빔이 그려진다', { b5: 'B1' });
+  execCase('7성 처형 프로토콜도 빔이 그려진다', { t7: 'execute' });
+
+  // 즉사가 아닌 **정상 킬**도 같은 규칙을 따라야 한다. damage() 가 인라인으로
+  // killEnemy() 를 부르므로, 죽이는 한 방에서는 파편이 먼저 깔린 뒤 beam() 이
+  // 불린다 — 여기서 스파크가 나면 "겹치면 둘 다 안 읽힌다"는 근거가 훨씬 흔한
+  // 프레임에서 깨진다. 즉사 분기에만 예외를 두면 이 경로가 조용히 새어 나갔다.
+  {
+    const t = scene('marksman');
+    const e = stand(t)[0];
+    e.maxHp = 100; e.hp = 1;                    // 한 방에 죽는다
+    g.resetParticles();
+    state.beams.length = 0;
+    g.fireTower(t, 1 / 30);
+    ok('정상 킬은 여파를 안 낸다', e.dead && sparks() === 0 && g.aliveParticles() > 0,
+      `죽음 ${e.dead}, 스파크 ${sparks()}, 파편 ${g.aliveParticles()}, 빔 ${state.beams.length}`);
+    ok('  그래도 빔은 그려진다', state.beams.length === 1, String(state.beams.length));
+  }
+
+  // 안 죽는 표적에는 여전히 나야 한다 — 위 단언이 스파크를 통째로 죽여도 통과하면 안 된다.
+  {
+    const t = fired('marksman', null, 1);
+    ok('안 죽는 표적에는 여파가 난다', sparks() === 4, String(sparks()));
+  }
+
+  // ── 실제로 그려지는가 ───────────────────────────────────────
+  // 상태만 보면 draw 쪽을 통째로 지워도 위 단언이 전부 통과한다.
+  {
+    g.restart();
+    g.pickStage(0);
+    ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.enemies.length = 0;
+    state.beams.length = 0;
+    g.resetParticles();
+    g.render();                                   // 스프라이트 굽기 워밍업
+    g.draws.reset(); g.render();
+    const bare = g.draws.count('stroke');
+    state.beams.push({ x1: 1, y1: 1, x2: 5, y2: 5, t: 0.09, color: '#58a6ff' });
+    g.draws.reset(); g.render();
+    ok('빔 하나가 stroke 를 정확히 2번 부른다', g.draws.count('stroke') - bare === 2,
+      bare + ' → ' + g.draws.count('stroke'));
+    state.beams.length = 0;
+  }
+
+  // 파편 1개당 도형 1개 규약이 스파크에도 성립해야 한다.
+  {
+    const t = fired('marksman', null, 1);
+    const n = sparks();
+    state.enemies.length = 0;
+    state.beams.length = 0;
+    t.flash = 0; t.mzShown = true;                // 화염까지 세면 이 검사가 뭉개진다
+    g.render();
+    g.draws.reset(); g.render();
+    const withSpark = g.draws.count('fill', 'stroke');
+    g.resetParticles();
+    g.draws.reset(); g.render();
+    ok('스파크도 1개당 도형 1개', n > 0 && withSpark - g.draws.count('fill', 'stroke') === n,
+      `스파크 ${n}개에 도형 ${withSpark - g.draws.count('fill', 'stroke')}개`);
+  }
+
+  // 새 필드는 스냅샷에 안 들어간다. 들어가면 SAVE_VERSION 을 올려야 한다.
+  {
+    const t = fired('marksman', null, 1);
+    state.phase = 'build';                        // snapshotRun 은 준비 단계에서만 뜬다
+    const snap = g.snapshotRun() || {};
+    const leaked = (snap.towers || []).some(o => 'mzDx' in o || 'mzDy' in o || 'flash' in o);
+    ok('방향 필드가 스냅샷에 안 실린다', !leaked && t.mzDx !== undefined,
+      JSON.stringify(snap.towers && snap.towers[0]));
+  }
+}
+
+// ── 파편 예산 ────────────────────────────────────────────────
+// 스파크는 처치 파편과 같은 링 버퍼를 쓴다. 상한(360)에 닿으면 덮어쓰기가 돌아서
+// 하필 방금 죽은 적의 연출이 빠진다 — 실제 판을 끝까지 돌려서 예산을 확인한다.
+{
+  console.log('파편 예산');
+  // test.js 는 전역 Math.random 을 안 건드리는 게 규칙이라, 여기서만 시드를 씌우고
+  // 반드시 되돌린다. 안 되돌리면 뒤에 오는 블록이 조용히 결정적으로 바뀐다.
+  const orig = Math.random;
+  let s = 12345 >>> 0;
+  Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
+
+  let peak = 0, peakSpark = 0, peakKill = 0, cap = false, wave = 0;
+  try {
+    const g = load();
+    const up = g.update;
+    g.update = dt => {
+      up(dt);
+      const alive = g.state.particles.filter(p => p.alive);
+      const sp = alive.filter(p => p.shape === 'spark').length;
+      if (alive.length >= g.PARTICLE_CAP) cap = true;
+      if (alive.length > peak) peak = alive.length;
+      if (sp > peakSpark) peakSpark = sp;
+      if (alive.length - sp > peakKill) peakKill = alive.length - sp;
+    };
+    // 스파크가 가장 많이 나는 조합이다. 관통사격(B2)은 한 발이 4마리를 꿰어
+    // 발당 16개를 내고, B 분기는 딜을 몰아주는 대신 공속이 낮아 표적이 잘 안 죽는다
+    // — 스파크는 죽은 적에는 안 나므로 "안 죽는 표적을 여러 번 때리는" 빌드가 최악이다.
+    // 점사(A2)는 오히려 처치 연쇄라 스파크가 적다(파편이 대신 늘어난다).
+    wave = greedy(g, {
+      stage: 3, deck: ['shredder', 'marksman', 'mortar'], branch3: 'B', branch5: 'B2',
+    }).wave;
+  } finally {
+    Math.random = orig;
+  }
+
+  // 웨이브는 단언하지 않는다. 그리디가 몇 웨이브에서 죽는지는 난이도 지표(18~25)이고
+  // 밸런스를 목표대로 조이면 당연히 내려간다 — 여기서 고정하면 밸런스를 만질 때마다
+  // 「파편 예산」이 빨간불이 되어 엉뚱하게 연출을 의심하게 된다. 같은 덱·분기에서도
+  // 시드에 따라 w22~w29 로 흔들린다. 전투를 충분히 돌았다는 전제만 잡는다.
+  ok('전투를 충분히 돌았다', wave >= 15, 'w' + wave);
+
+  // 경계는 실측에 붙인다 — 이 조합이 스파크 44 / 총 69, 64판 스윕 최악값도 44 / 99.
+  // 이 단언이 잡는 건 **버스트 크기**다. SPARK_N 을 4 → 16 으로 늘린 사본에서
+  // 스파크가 176 으로 튀어 FAIL 하는 것을 확인했다.
+  // 반대로 **수명 폭주는 여기서 안 잡힌다**(0.20 → 0.60 에서 44 → 48). 수명은
+  // 버스트가 안 겹쳐서 동시 개수를 거의 안 바꾸므로, 위 「3박자의 수명 순서」가 맡는다.
+  ok('상한에 한 번도 안 닿는다', !cap, '동시 피크 ' + peak + '/' + 360);
+  ok('스파크 동시 피크가 60 이하', peakSpark <= 60, '스파크 ' + peakSpark);
+  ok('총 동시 피크가 200 이하', peak <= 200, '총 ' + peak);
+  // 처치 파편 몫은 티켓 1 에서 들어온 값이라 이 티켓의 예산이 아니다.
+  // 총 피크가 올랐을 때 어느 쪽이 올랐는지 보려고 출력만 한다(단언 없음).
+  console.log('       (참고) 처치 파편 몫 동시 피크 ' + peakKill + ' — main 지표, 단언 안 함');
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {
