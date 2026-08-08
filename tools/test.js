@@ -910,8 +910,30 @@ function ok(name, cond, detail) {
 {
   console.log('타워 대등성 (3종 덱, 분기 A/A1)');
   const { measure, K, NAME } = require('./parity.js');
-  // 시행이 적으면 파쇄자가 임계 근처에서 오르내려 테스트가 들쭉날쭉해진다
-  const { contrib, spread } = measure('A', 'A1', 7);
+  // measure() 는 전역 Math.random 을 쓴다. 그대로 두면 35개 덱 × 7시행이 매번 다른
+  // 판을 굴려 폭이 2.9~6.1 로 흔들렸다 — 임계 6 을 6~7% 확률로 넘어 무고한 PR 이
+  // 반려됐고, 더 나쁘게는 진짜 회귀가 「아 그 불안정한 거」로 넘어갔다. 시행을 늘려도
+  // 안 줄어든다(같은 시드 7/12/20 시행 = 4.95/3.99/4.67). 노이즈가 아니라 시드가
+  // 판을 가르는 것이므로 답은 시드 고정이다.
+  //
+  // 12345 는 seedcheck·verify-build·shot·아래 「파편 예산」과 같은 값이다. 이 시드의
+  // 여유는 4.95 대 6 으로 1.05 뿐인데, 좁다고 시드를 바꾸지 마라. 15개 시드 중앙값이
+  // 4.37 이라 12345 는 특이값이 아니고, 여유가 큰 시드(99991=3.28, 123=2.85)를 골라
+  // 앉히는 건 그만큼 감도를 버리는 것이다.
+  //
+  // **이 단언이 깨지면 그건 불안정이 아니다.** 같은 코드면 매번 같은 값이 나오므로,
+  // 값이 움직였다면 타워 기여도가 실제로 벌어진 것이다. 임계 6·3.5 나 시드를 손대서
+  // 통과시키지 말고 `npm run parity` 로 네 분기 전체를 다시 재라. 대신 시드를 박은
+  // 대가로 여기는 시드 공간을 훑지 않으니, 다른 시드에서만 벌어지는 불균형은 parity 가 맡는다.
+  const orig = Math.random;
+  let s = 12345 >>> 0;
+  Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
+  let contrib, spread;
+  try {
+    ({ contrib, spread } = measure('A', 'A1', 7));
+  } finally {
+    Math.random = orig;                           // 안 되돌리면 뒤의 모든 블록이 조용히 바뀐다
+  }
   ok('기여도 폭 6 미만', spread < 6,
     spread.toFixed(2) + '  ' + K.map(k => NAME[k] + (contrib[k] >= 0 ? '+' : '') + contrib[k].toFixed(1)).join(' '));
   const outlier = K.filter(k => Math.abs(contrib[k]) > 3.5).map(k => NAME[k]);
