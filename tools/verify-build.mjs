@@ -26,14 +26,26 @@ catch {
 // 픽셀 비교가 늘 실패한다.
 // 둘 다 file:// 라 같은 오리진이다. 앞 실행이 남긴 세이브를 뒤가 읽으면
 // 시작 상태부터 달라진다.
+// 가상 시계는 콜백당이 아니라 "실제 프레임당" 한 번만 돌아야 한다.
+// 프레임 수를 세는 아래의 rAF 루프도 같은 rAF 를 타므로, 콜백마다 시계를 밀면
+// 세는 쪽이 게임의 시간을 훔쳐 간다. 그러면 게임이 받는 dt 가 1/60 과 2/60 사이에서
+// 실행마다 달라지고, 같은 파일을 두 번 띄워도 결과가 갈린다(실측 3회 중 2회 불일치).
+// 같은 프레임의 콜백은 브라우저가 주는 실제 타임스탬프가 같으므로 그걸로 묶는다.
 const SEED_SCRIPT = `(() => {
   try { localStorage.clear(); } catch {}
   let s = 12345;
   Math.random = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
   const raf = window.requestAnimationFrame.bind(window);
-  let vt = 0;
-  window.requestAnimationFrame = cb => raf(() => cb(vt += 1000 / 60));
+  let vt = 0, realT = null, frozen = false;
+  window.requestAnimationFrame = cb => raf(t => {
+    if (!frozen && t !== realT) { realT = t; vt += 1000 / 60; }
+    cb(vt);
+  });
   performance.now = () => vt;
+  // 찍기 직전에 시계를 세운다. 프레임 수를 다 센 뒤에도 캡처가 끝날 때까지
+  // rAF 는 계속 도는데, 그 사이 몇 장이 더 그려지는지는 매번 다르다.
+  // 시계를 세우면 dt 가 0 이라 판이 안 흐르고 같은 그림만 다시 그린다.
+  window.__freezeClock = () => { frozen = true; };
 })();`;
 
 // 같은 순서로 판을 만든다
@@ -48,20 +60,45 @@ const DRIVE = `(() => {
   rushWave();
 })();`;
 
+// 게임 루프가 정확히 n 프레임 돌 때까지 기다린다.
+//
+// 예전에는 rAF 체인을 따로 하나 걸어서 셌는데, 그건 게임의 rAF 와 나란히 도는
+// 별개의 체인이라 "게임이 몇 프레임 굴렀나"를 못 센다. 등록 순서에 따라 120 이
+// 되기도 121 이 되기도 했다. waitForTimeout 도 같은 이유로 못 쓴다 — 실제 시각에
+// 좌우돼서 판이 몇 프레임 굴렀는지가 실행마다 다르다.
+// 게임 자신의 render 를 세면 그 수가 곧 게임이 돈 프레임 수다.
+//
+// render 가 터져도 카운트는 올린다. 안 그러면 promise 가 영원히 안 풀려서
+// "다르다"가 아니라 "멈춤"으로 끝난다. 예외는 pageerror 로 따로 잡힌다.
+//
+// 루프가 전역 render 를 안 부르게 바뀌면 이 대기는 영원히 안 풀린다. 그건 "다르다"가
+// 아니라 "멈춤"이라서, 검사가 실패를 못 알리고 CI 를 타임아웃까지 끌고 간다.
+// 그래서 벽시계 상한을 걸고 넘기면 던진다.
+const runFrames = (page, n, freeze) => page.evaluate(({ n, freeze }) => new Promise((res, rej) => {
+  let i = 0;
+  const orig = window.render;
+  const done = () => { window.render = orig; clearTimeout(timer); };
+  const timer = setTimeout(() => {
+    done();
+    rej(new Error(`프레임 ${n} 대기 시간 초과 (${i} 프레임에서 멈춤). 루프가 전역 render 를 안 부른다`));
+  }, 15000);
+  window.render = () => {
+    try { orig(); }
+    finally {
+      if (++i >= n) { done(); if (freeze) window.__freezeClock(); res(); }
+    }
+  };
+}), { n, freeze });
+
 async function shoot(browser, url) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   await page.addInitScript(SEED_SCRIPT);
   await page.goto(url);
-  await page.waitForTimeout(300);
+  await runFrames(page, 10, false);     // 시작 화면에서 같은 지점까지 맞춘다
   await page.evaluate(DRIVE);
-  // 프레임 수를 맞추기 위해 rAF 를 세어 가며 진행시킨다
-  await page.evaluate(() => new Promise(res => {
-    let n = 0;
-    const tick = () => (++n < 120 ? requestAnimationFrame(tick) : res());
-    requestAnimationFrame(tick);
-  }));
+  await runFrames(page, 120, true);     // 마지막 프레임에서 시계를 세우고 찍는다
   const shot = await page.screenshot();
   const snap = await page.evaluate(() => ({
     wave: state.wave, life: state.life, gold: Math.round(state.gold),
@@ -73,8 +110,15 @@ async function shoot(browser, url) {
 }
 
 const browser = await chromium.launch();
-const a = await shoot(browser, pathToFileURL(join(ROOT, 'index.html')).href);
-const b = await shoot(browser, pathToFileURL(join(ROOT, 'dist', 'games', 'canthold', 'index.html')).href);
+let a, b;
+try {
+  a = await shoot(browser, pathToFileURL(join(ROOT, 'index.html')).href);
+  b = await shoot(browser, pathToFileURL(join(ROOT, 'dist', 'games', 'canthold', 'index.html')).href);
+} catch (err) {
+  await browser.close();
+  console.error('검사를 못 돌렸다:\n  ' + err.message);
+  process.exit(1);
+}
 await browser.close();
 
 const problems = [];
