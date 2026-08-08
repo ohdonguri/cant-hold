@@ -6,18 +6,25 @@
 // 동작을 바꾸는 경우는 그걸로 못 잡는다. 그래서 실제로 렌더해서 비교한다.
 //
 // 게임에 난수가 있으므로 두 쪽 모두 같은 시드의 PRNG 로 Math.random 을 갈아끼운다.
-// playwright 는 개발용이라 없으면 그냥 건너뛴다.
+// playwright 가 반드시 있어야 한다 — 없으면 건너뛰지 않고 실패한다(아래 참고).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+// playwright 가 없으면 여기서 죽는다. 예전에는 건너뛰고 exit 0 을 냈는데, 그러면
+// "렌더 비교를 한 번도 안 돌린 실행"과 "돌려서 통과한 실행"이 똑같이 통과로 보인다.
+// TASK-24 때 실제로 그 통과를 믿고 압축본을 확인 안 한 채 넘어갔다.
+// 이 스크립트가 하는 일은 렌더 비교 하나뿐이라, 그걸 안 돌린 실행은 통과가 아니다.
+// 그래서 "없으면 넘어가는" 탈출구는 일부러 두지 않았다 — 탈출구가 있으면 CI 가
+// 그걸 밟은 채로 초록을 내는 같은 사고가 다시 난다.
+// 압축본의 문법·핵심 문자열만 보고 싶은 거라면 npm run build 가 이미 그걸 검사한다.
 let chromium;
 try { ({ chromium } = await import('playwright')); }
 catch {
-  console.log('playwright 없음 — 렌더 비교는 건너뛴다 (npm i -D playwright)');
-  process.exit(0);
+  console.error('playwright 를 못 불러왔다 — 렌더 비교를 돌릴 수 없다.\n  npm i -D playwright && npx playwright install chromium');
+  process.exit(1);
 }
 
 // 두 페이지를 같은 조건으로 만든다.
