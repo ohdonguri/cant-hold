@@ -1535,6 +1535,248 @@ function ok(name, cond, detail) {
   console.log('       (참고) 처치 파편 몫 동시 피크 ' + peakKill + ' — main 지표, 단언 안 함');
 }
 
+// ── 충격 등급 ────────────────────────────────────────────────
+// 등급표(아무것도 없음 / 약한 흔들림 / 강한 흔들림+히트스톱 / 비네트)가 코드로
+// 잠겨 있는지 본다. 여기서 제일 위험한 건 연출이 안 나는 게 아니라 **연출이
+// 로직을 건드리는 것**이다 — 히트스톱은 update 호출을 건너뛰는 기능이라,
+// 한 줄만 잘못 두면 판정이 프레임레이트와 배속에 묶인다.
+{
+  console.log('충격 등급');
+  const g = load();
+  const { state, CFG } = g;
+
+  const newRun = () => {
+    g.restart();
+    g.pickStage(0);
+    ['mortar', 'marksman', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5;
+    state.phase = 'wave';
+    state.spawnQueue.length = 0;
+    g.resetImpact();
+  };
+  const put = (kind, opts) => {
+    g.spawnEnemy(kind);
+    const e = state.enemies[state.enemies.length - 1];
+    e.x = 3; e.y = 4;
+    Object.assign(e, opts || {});
+    return e;
+  };
+  const grade = () => `t=${g.shake.t.toFixed(3)} amp=${g.shake.amp} hs=${g.hitstopState()}`;
+
+  // ① 히트스톱이 로직에 안 샌다.
+  // (a) 구조: frame() 은 시뮬에 아예 안 보인다. 히트스톱을 여기 둔 유일한 이유다.
+  ok('frame 은 시뮬에 안 샌다', g.frame === undefined, String(g.frame));
+
+  // (b) 행동: hitstopT 가 뭐든 update 200스텝의 결과가 글자 하나까지 같아야 한다.
+  // dt 를 곱하거나 나누는 구현으로 바꾸면 여기서 갈린다.
+  const runWith = (hs) => {
+    const origRand = Math.random;
+    let s = 4242 >>> 0;
+    Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
+    try {
+      const h = load();
+      const st = h.state;
+      h.pickStage(0);
+      ['shredder', 'mortar', 'marksman'].forEach(k => h.toggleDeckPick(k));
+      h.startRun();
+      st.gold = 99999;
+      for (let i = 0; i < 14; i++) h.summon(st.deck[i % 3]);
+      st.wave = 9;
+      h.rushWave();               // w10 — 판에서 정예가 처음 나오는 웨이브
+      h.setHitstop(hs);
+      for (let i = 0; i < 200; i++) h.update(1 / 30);
+      return [st.wave, st.life, Math.round(st.gold), st.enemies.length,
+        st.towers.map(t => t.kind + t.star).sort().join('')].join('|');
+    } finally { Math.random = origRand; }
+  };
+  const froze = runWith(0.5), ran = runWith(0);
+  ok('히트스톱은 update 를 한 톨도 안 건드린다', froze === ran, froze + '  vs  ' + ran);
+
+  // ② 등급표. 아무것도 안 나야 하는 세 경로부터 본다 — 여기가 무너지면
+  // 후반 웨이브에서 화면이 초당 수십 번 얼어붙는다.
+  newRun();
+  const tank = put('grunt', { maxHp: 1e9, hp: 1e9 });
+  g.summon('marksman');
+  const gun = state.towers[0];
+  g.damage(tank, 1, 'physical', gun);
+  ok('일반 타격은 아무것도 안 낸다', g.shake.t === 0 && g.hitstopState() === 0, grade());
+  g.damage(tank, 1, 'magic', gun, true);
+  ok('오라·지속딜도 아무것도 안 낸다', g.shake.t === 0 && g.hitstopState() === 0, grade());
+  g.killEnemy(put('grunt'), null, 'physical');
+  ok('일반 처치는 아무것도 안 낸다', g.shake.t === 0 && g.hitstopState() === 0, grade());
+
+  // 박격포 착탄: 약한 흔들림만. 히트스톱은 없다.
+  newRun();
+  g.summon('mortar');
+  const mortar = state.towers[0];
+  const shell = (dmg) => ({ x: 1, y: 1, tx: 3.5, ty: 4.5, t: 0.5, tt: 0.5, tower: mortar.id, dmg, radius: 1.5 });
+  const boom = (n, keep) => {
+    if (!keep) g.resetImpact();
+    state.enemies.length = 0;
+    state.shells.length = 0;
+    for (const t of state.towers) t.cd = 99;      // 이 프레임에는 아무도 안 쏜다
+    put('grunt', { maxHp: 1e9, hp: 1e9, x: 0, y: 0 });   // 폭심 밖. 웨이브가 안 끝나게 붙잡아 둔다
+    for (let i = 0; i < n; i++) state.shells.push(shell(1));
+    g.update(1 / 30);
+  };
+  boom(1);
+  ok('박격포 착탄은 약한 흔들림만', g.shake.amp === g.BLAST_SHAKE_AMP && g.hitstopState() === 0, grade());
+
+  // 쿨다운이 실제로 게이트하는지. 첫 착탄의 흔들림을 절반만 흘려보낸 뒤 다시 착탄시킨다 —
+  // 쿨다운(0.25)이 아직 0.21 남았으므로 흔들림이 되살아나면 안 된다.
+  const tBoom = g.shake.t;
+  g.decayShake(0.04);
+  boom(1, true);
+  ok('쿨다운 안에서는 착탄이 흔들림을 못 되살린다', g.shake.t < tBoom,
+    tBoom.toFixed(3) + ' → ' + g.shake.t.toFixed(3));
+
+  // 합치기가 최댓값인지는 **착탄끼리로는 원리적으로 못 잰다.** 같은 프레임에 3발이
+  // 떨어져도 위의 shakeCd 게이트 때문에 bumpShake 는 어차피 한 번만 불린다 —
+  // 합산 구현으로 바꿔도 amp 는 0.05 그대로라 그 단언은 통과한다(실제로 통과했다).
+  // 등급표가 실제로 뒤집히는 경로는 **같은 프레임에 착탄 + 정예 처치**다.
+  // 박격포 한 발이 정예를 죽이면 0.14 와 0.05 가 한 프레임에 들어오고,
+  // 합산이면 0.19 가 되어 정예 처치보다 센 흔들림이 나온다.
+  g.resetImpact();
+  state.enemies.length = 0;
+  state.shells.length = 0;
+  for (const t of state.towers) t.cd = 99;
+  const doomed = put('elite');                    // 폭심(3.5, 4.5) 안이다
+  doomed.hp = 1;
+  put('grunt', { maxHp: 1e12, hp: 1e12, x: 0, y: 0 });
+  state.shells.push(shell(1e9));
+  g.update(1 / 30);
+  ok('착탄과 정예 처치가 겹쳐도 합산이 아니다',
+    doomed.dead && g.shake.amp === g.KILL_SHAKE_AMP, doomed.dead + ' / ' + grade());
+  // 위는 killEnemy(0.14) 가 blasts.push(0.05) 보다 먼저 온다. 반대 순서도 막혀야 한다.
+  g.resetImpact();
+  g.bumpShake(g.BLAST_SHAKE_AMP, g.BLAST_SHAKE_DUR);
+  g.killEnemy(put('elite'), null, 'physical');
+  ok('  반대 순서(착탄이 먼저)도 합산이 아니다', g.shake.amp === g.KILL_SHAKE_AMP, grade());
+
+  // 정예 처치: 강한 흔들림 + 히트스톱. 두 등급은 눈으로 갈려야 한다.
+  newRun();
+  g.killEnemy(put('elite'), null, 'physical');
+  ok('정예 처치는 강한 흔들림 + 히트스톱',
+    g.shake.amp === g.KILL_SHAKE_AMP && g.hitstopState() === g.HITSTOP, grade());
+  ok('  두 등급의 진폭이 갈린다', g.KILL_SHAKE_AMP > g.BLAST_SHAKE_AMP * 2,
+    g.BLAST_SHAKE_AMP + ' → ' + g.KILL_SHAKE_AMP);
+  // 흔들림은 처치 파편(0.3초)이 살아 있는 동안 끝나야 원인이 읽힌다.
+  ok('  흔들림이 파편보다 먼저 끝난다', g.KILL_SHAKE_DUR < g.PARTICLE_LIFE,
+    g.KILL_SHAKE_DUR + ' < ' + g.PARTICLE_LIFE);
+
+  newRun();
+  for (let i = 0; i < 4; i++) g.killEnemy(put('elite'), null, 'physical');
+  ok('정예 4마리를 한 프레임에 죽여도 1회분', g.hitstopState() <= g.HITSTOP, grade());
+  // 약한 흔들림이 진행 중인 강한 흔들림을 덮어쓰면 정예가 잡몹처럼 보인다.
+  g.bumpShake(g.BLAST_SHAKE_AMP, g.BLAST_SHAKE_DUR);
+  ok('약한 흔들림이 강한 것을 못 덮는다', g.shake.amp === g.KILL_SHAKE_AMP, grade());
+
+  // ③ 흔들림이 히트박스를 안 옮긴다. 이게 이 티켓에서 제일 조용히 깨질 수 있는 곳이다 —
+  // view 를 밀어서 흔드는 구현으로 바꾸면 화면은 똑같이 흔들리는데 손가락만 어긋난다.
+  newRun();
+  const probe = () => {
+    const out = [];
+    const c = g.view.cell;
+    for (let gy = 0; gy < CFG.BOARD_H; gy++)
+      for (let gx = 0; gx < CFG.BOARD_W; gx++) {
+        const p = g.cellToPx(gx, gy);
+        for (const [dx, dy] of [[c / 2, c / 2], [1, 1], [-1, -1], [c - 1, c - 1], [c + 1, c + 1]]) {
+          const r = g.pxToCell(p.x + dx, p.y + dy);
+          out.push(r ? r.gx + ':' + r.gy : '-');
+        }
+      }
+    return out.join(' ');
+  };
+  g.resetImpact();
+  const still = probe();
+  const viewBefore = JSON.stringify(g.view);
+  // 흔들림이 0 인 기준 프레임. 이 판의 그리기 호출을 세 두고 흔들린 판과 뺀다.
+  g.draws.reset(); g.render();
+  const drawsStill = g.draws.count('translate');
+
+  g.bumpShake(g.KILL_SHAKE_AMP, g.KILL_SHAKE_DUR);   // 최대 진폭 지점
+  const off = g.shakeOffset();
+  g.draws.reset();
+  g.render();
+  const log = g.draws.log.slice();
+
+  // shakeOffset() 의 반환값만 보면 render() 가 그 값을 쓰는지는 못 본다 —
+  // ctx.translate 한 줄을 통째로 지워도 이 단언은 통과한다(실제로 통과했다).
+  // sim.js 의 캔버스 스텁이 그리기 호출을 기록하는 게 헤드리스에서 그림을 보는 유일한 창이다.
+  ok('오프셋이 0 이 아니다', Math.abs(off.x) + Math.abs(off.y) > 1,
+    off.x.toFixed(2) + ', ' + off.y.toFixed(2));
+  ok('render 가 그 오프셋으로 실제로 민다',
+    drawsStill === 0 && g.draws.count('translate') === 1,
+    '흔들림 0 → translate ' + drawsStill + ' / 흔들림 최대 → translate ' + g.draws.count('translate'));
+  // 클립 뒤에 두면 고정된 창 안에서 내용만 밀려 가장자리에 #0d1117 틈이 생긴다.
+  // save 안이 아니면 변환이 그 뒤의 모든 그리기로 새어 나간다(2.7 의 lineCap 함정).
+  ok('  흔들림이 save 안 · 보드 클립 앞이다',
+    log.indexOf('save') >= 0 && log.indexOf('save') < log.indexOf('translate')
+    && log.indexOf('translate') < log.indexOf('clip'),
+    's' + log.indexOf('save') + ' < t' + log.indexOf('translate') + ' < c' + log.indexOf('clip'));
+  ok('흔들려도 히트박스가 그대로다', probe() === still);
+  ok('흔들려도 view 가 안 움직인다', JSON.stringify(g.view) === viewBefore, JSON.stringify(g.view));
+  ok('save / restore 가 짝이 맞는다', g.draws.count('save') === g.draws.count('restore'),
+    g.draws.count('save') + ' / ' + g.draws.count('restore'));
+
+  // 오프셋은 shake 상태의 순수 함수다. 난수를 쓰면 verify:build 의 두 페이지가
+  // 프레임 수 차이 한 번에 갈리고, 값을 단언할 방법도 없어진다.
+  const twice = JSON.stringify(g.shakeOffset()) === JSON.stringify(g.shakeOffset());
+  ok('오프셋은 같은 상태에서 같은 값', twice, JSON.stringify(g.shakeOffset()));
+
+  // ④ 끄기 옵션. 멀미의 원인은 카메라 운동이라 흔들림만 끈다 — 히트스톱은 안 끈다.
+  g.setShakeEnabled(false);
+  const offZero = g.shakeOffset();
+  ok('끄면 오프셋이 0', offZero.x === 0 && offZero.y === 0, JSON.stringify(offZero));
+  ok('  끄면 진행 중이던 흔들림도 죽는다', g.shake.t === 0, String(g.shake.t));
+  newRun();
+  g.killEnemy(put('elite'), null, 'physical');
+  ok('  꺼도 히트스톱은 산다', g.hitstopState() === g.HITSTOP, grade());
+  g.setShakeEnabled(true);
+
+  // ⑤ 정지·판 갈아끼우기. 흔들리는 도중에 멈추면 진폭이 얼어붙었다가 재개할 때 튄다.
+  newRun();
+  g.killEnemy(put('elite'), null, 'physical');
+  g.togglePause();
+  ok('정지하면 카메라가 원위치', g.shake.t === 0 && g.hitstopState() === 0, grade());
+  state.paused = false;
+  g.killEnemy(put('elite'), null, 'physical');
+  g.restart();
+  ok('재시작하면 카메라가 원위치', g.shake.t === 0 && g.hitstopState() === 0, grade());
+
+  // ⑥ 누수는 2.6 과 안 부딪힌다. 화면 층 비네트만 나고 보드 층은 조용해야 한다.
+  newRun();
+  state.towers.length = 0;              // 타워가 대신 죽여버리면 검사가 무의미하다
+  state.enemies.length = 0;
+  g.resetParticles();
+  g.resetImpact();
+  const leaker = put('grunt');
+  leaker.dist = g.laneLen(leaker.lane);
+  const lifeBefore = state.life;
+  g.update(1 / 30);
+  ok('누수는 흔들림도 히트스톱도 안 낸다',
+    state.life < lifeBefore && g.shake.t === 0 && g.hitstopState() === 0,
+    '생명 ' + lifeBefore + '→' + state.life + ', ' + grade());
+  ok('  대신 비네트가 켜진다', g.leakWarnState() === g.LEAK_WARN_DUR, String(g.leakWarnState()));
+  ok('  파편은 여전히 0 (2.6)', g.aliveParticles() === 0, String(g.aliveParticles()));
+  // 누수가 몰리는 구간(w21)에서는 사실상 상시다. 누적되면 판이 안 보인다.
+  const leaker2 = put('grunt');
+  leaker2.dist = g.laneLen(leaker2.lane);
+  g.update(1 / 30);
+  ok('  비네트는 누적이 아니라 덮어쓰기', g.leakWarnState() === g.LEAK_WARN_DUR, String(g.leakWarnState()));
+  // 여기까지는 전부 leakWarnT(=상태)만 본다. drawLeakWarn() 호출을 render 에서 통째로
+  // 지워도 하나도 안 깨진다(실제로 안 깨졌다). 비네트의 유일한 출력은 fillRect 다 —
+  // 겹치지 않는 띠 10겹 x 사방 4개 = 40개. 그 40개가 화면에 나오는지를 직접 센다.
+  g.draws.reset(); g.render();
+  const withLeak = g.draws.count('fillRect');
+  g.resetImpact();                     // leakWarnT = 0. 나머지 판은 그대로다
+  g.draws.reset(); g.render();
+  const noLeak = g.draws.count('fillRect');
+  ok('  비네트가 실제로 그려진다', withLeak - noLeak === 40,
+    `fillRect ${noLeak} → ${withLeak} (차이 ${withLeak - noLeak})`);
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {

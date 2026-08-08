@@ -45,6 +45,17 @@ const EXPOSE = [
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
   'spawnKillFx', 'aliveParticles', 'resetParticles', 'drawParticles', 'PARTICLE_CAP', 'fireTower',
   'PARTICLE_LIFE', 'MUZZLE_LIFE', 'SPARK_LIFE',
+  // 충격 등급. 상수까지 내보내는 건 PARTICLE_LIFE 와 같은 이유다 — 테스트가 숫자를
+  // 손으로 베끼면 값을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
+  // hitstopT / leakWarnT 는 모듈 레벨 원시값이라 객체처럼 못 넘긴다. 읽기용 게터를 둔다.
+  // setHitstop 은 "히트스톱이 로직에 안 샌다"를 재는 용도로만 있다 — 게임 코드는 bumpHitstop 만 쓴다.
+  // decayShake 는 frame() 이 도는 감쇠다. frame 은 시뮬에 안 새게 일부러 안 내보내므로
+  // 테스트가 흔들림 시간을 앞으로 감을 수 있는 통로는 이것뿐이다.
+  'shake', 'shakeOffset', 'bumpShake', 'bumpHitstop', 'decayShake', 'resetImpact',
+  'hitstopState', 'leakWarnState', 'setHitstop',
+  'setShakeEnabled', 'pxToCell', 'cellToPx', 'view',
+  'BLAST_SHAKE_AMP', 'BLAST_SHAKE_DUR', 'BLAST_SHAKE_CD', 'KILL_SHAKE_AMP', 'KILL_SHAKE_DUR',
+  'HITSTOP', 'LEAK_WARN_DUR',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
