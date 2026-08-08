@@ -116,6 +116,9 @@ npm run seedcheck 시드 회귀만 따로
 npm run tune 밸런스 상수 그리드 서치
 npm run sim  그리디 플레이 1회 결과
 npm run shot 레이아웃 스크린샷 (playwright 필요)
+npm run shot -- --repeat 10  같은 캡처를 10번 돌려 컷별 md5 가 갈리는지 본다.
+                             갈리면 어느 컷이 어떤 값들을 오갔는지 찍고 exit 1.
+                             재현이 확률적이라 2~5런으로는 놓친다 — 10런을 돌려라.
 npm run verify:build 압축본이 원본과 같은 화면인지 (playwright 필요)
 node tools/paths.js       경로 후보 비교
 node tools/stagetune.js N 스테이지 N 의 HP 배율 역산

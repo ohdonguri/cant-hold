@@ -1,9 +1,25 @@
 // 레이아웃 확인용 스크린샷. 헤드리스 테스트로는 그림이 깨진 걸 못 잡는다.
 // playwright 가 필요하다:  npx playwright install chromium
-//   node tools/shot.js [출력디렉토리]
+//   node tools/shot.js [출력디렉토리] [--repeat N]
+//
+// --repeat N 은 같은 캡처를 N 번 돌려 컷별 md5 가 전부 같은지 본다. 흔들리면
+// 어느 컷이 어떤 값들 사이를 오갔는지 찍고 exit 1 한다. 사람이 매번 손으로 N 번
+// 돌려 md5 를 눈으로 맞춰 보던 걸 하네스 안으로 들여놓은 것이다 — 재현이
+// 확률적이라 2런·5런으로는 두 번이나 놓쳤다(TASK-28·TASK-30). 잡으려면 10런.
+// 기본값은 1 이다. 평소 `npm run shot` 은 예전과 똑같이 한 번만 돈다.
 const path = require('path');
+const crypto = require('crypto');
 
-const OUT = process.argv[2] || path.join(__dirname, '..', '.shots');
+const argv = process.argv.slice(2);
+let REPEAT = 1;
+const rest = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--repeat') REPEAT = Math.max(1, parseInt(argv[++i], 10) || 1);
+  else if (a.startsWith('--repeat=')) REPEAT = Math.max(1, parseInt(a.slice(9), 10) || 1);
+  else rest.push(a);
+}
+const OUT = rest[0] || path.join(__dirname, '..', '.shots');
 const URL = 'file://' + path.join(__dirname, '..', 'index.html');
 
 // 처치 연출은 0.3초짜리라 waitForTimeout 으로는 절대 못 잡는다. 난수를 시드로
@@ -21,20 +37,47 @@ const SEED_SCRIPT = `(() => {
     cb(vt);
   });
   performance.now = () => vt;
+  // 컷 그룹마다 난수 스트림을 원점으로 되돌린다. 이게 없으면 한 페이지에서 열 컷이
+  // 같은 LCG 를 나눠 쓰기 때문에, 앞 컷이 난수를 몇 번 뽑느냐가 뒤 컷을 통째로
+  // 밀어 버린다 — 새 컷을 중간에 끼웠더니 6-fire 의 스파크 분사각이 달라진 게
+  // 그 증상이다(TASK-28). 판정용(Math.random)과 연출용(fxRand) 두 스트림을 같이
+  // 되돌린다. 한쪽만 되돌리면 다음 사람이 나머지를 빠뜨린다.
+  window.__reseed = () => { s = 12345; fxSeed = 0x9e3779b9; };
 })();`;
 
-(async () => {
-  let chromium;
-  try { ({ chromium } = require('playwright')); }
-  catch { console.error('playwright 없음.  npm i -D playwright && npx playwright install chromium'); process.exit(1); }
+let chromium;
+try { ({ chromium } = require('playwright')); }
+catch { console.error('playwright 없음.  npm i -D playwright && npx playwright install chromium'); process.exit(1); }
 
-  require('fs').mkdirSync(OUT, { recursive: true });
-
-  const browser = await chromium.launch();
+// 한 번의 캡처. OUT 에 컷을 쓰고 [컷이름, md5] 표와 사고 목록을 돌려준다.
+// --repeat 은 이걸 N 번 부르고 표끼리 맞춰 본다.
+const capture = async (browser) => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
-  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  // 아래에서 외부 요청을 일부러 끊기 때문에 그 실패가 콘솔 에러로 올라온다. 그건
+  // 하네스가 만든 소음이라 세면 안 된다 — 진짜 페이지 에러가 그 속에 묻힌다.
+  // 다만 file:// 것은 반드시 남긴다. 로컬 자산이 빠진 건 진짜 사고다.
+  page.on('console', m => {
+    if (m.type() !== 'error') return;
+    const from = (m.location() || {}).url || '';
+    if (from && !from.startsWith('file://')) return;
+    errors.push(m.text());
+  });
+
+  // 이 하네스는 네트워크를 쓰지 않는다. cloudPreload() 가 requestIdleCallback 으로
+  // 받아 오는 firebase SDK 는 _generateCallbackName 에서 Math.random() 을 부르는데,
+  // 그 한 번이 시드 LCG 를 한 칸 민다. 그게 소환 자리 뽑기(summon) **앞**에 떨어지는지
+  // 뒤에 떨어지는지는 CDN 왕복 시간에 달린 경주라, 같은 코드가 판 배치가 통째로 다른
+  // 두 그림을 무작위로 번갈아 냈다 — 2-towers 가 15764302 / 621d7e94 두 값을 오간
+  // 원인이 정확히 이거다. 난수를 한 번만 밀어도 뒤 컷이 전부 딸려 간다.
+  // file:// 이 아닌 요청은 전부 끊는다. import() 가 거절되면 cloudInit 의 catch 가
+  // 받아 삼키므로 난수는 한 칸도 안 밀린다. 덤으로 CDN 버전이 바뀌든 오프라인이든
+  // 하네스가 같은 그림을 낸다.
+  await page.route('**/*', route =>
+    route.request().url().startsWith('file://') ? route.continue() : route.abort());
+
+  const hashes = [];
 
   // 컷마다 "무엇이 찍혀 있어야 하는가"를 판 상태로 확인한다. 이게 없으면 진입 코드가
   // 통째로 no-op 이 돼도 스크린샷은 멀쩡히 나온다 — 실제로 2·3·4 컷이 판에 들어간 적이
@@ -46,7 +89,8 @@ const SEED_SCRIPT = `(() => {
       const why = await page.evaluate(check);
       if (why) bad.push(`${name}: ${why}`);
     }
-    await page.screenshot({ path: path.join(OUT, name + '.png') });
+    const png = await page.screenshot({ path: path.join(OUT, name + '.png') });
+    hashes.push([name, crypto.createHash('md5').update(png).digest('hex')]);
   };
 
   await page.addInitScript(SEED_SCRIPT);
@@ -59,6 +103,7 @@ const SEED_SCRIPT = `(() => {
   // startRun 까지 밟아야 summon 이 판에 타워를 올린다. 아래 컷들은 전부 이 상태를
   // 이어받으므로, 여기서 한 번만 들어가고 컷 사이에는 필요한 것만 건드린다.
   await page.evaluate(() => {
+    __reseed();
     restart();
     pickStage(0);
     ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
@@ -101,6 +146,7 @@ const SEED_SCRIPT = `(() => {
   // 실시간 대기로는 몇 프레임이 들어올지 모른다 — 고정 dt 로 직접 돌려야 같은 코드가
   // 항상 같은 그림을 낸다. wave 12 + timer 0 이면 첫 스텝에서 startWave 가 13 을 연다.
   await page.evaluate(() => {
+    __reseed();
     window.update = window.__update;
     state.selected = null;
     state.wave = 12;
@@ -115,7 +161,7 @@ const SEED_SCRIPT = `(() => {
     return null;
   });
 
-  await page.evaluate(() => { openChoice(state.towers[0], 3); });
+  await page.evaluate(() => { __reseed(); openChoice(state.towers[0], 3); });
   await page.waitForTimeout(120);
   await shot('4-choice', () => {
     // render 는 'stage'·'deck' 에서 곧바로 빠져나가므로 state.choice 만 봐서는
@@ -126,7 +172,7 @@ const SEED_SCRIPT = `(() => {
     return null;
   });
 
-  await page.evaluate(() => { applyChoice('A'); state.phase = 'over'; });
+  await page.evaluate(() => { __reseed(); applyChoice('A'); state.phase = 'over'; });
   await page.waitForTimeout(120);
   await shot('5-over', () => {
     if (state.phase !== 'over') return '게임 오버 화면이 아니다: ' + state.phase;
@@ -140,6 +186,7 @@ const SEED_SCRIPT = `(() => {
   await page.evaluate(() => {
     // window.__update 는 앞 컷(2-towers)이 원본을 잡아 뒀다. 여기서 다시 잡으면
     // 앞 컷이 세워 둔 스텁을 "원본"으로 저장해 버려서 이후 컷이 전부 정지한다.
+    __reseed();
     window.update = window.__update;
     restart();
     pickStage(0);
@@ -159,6 +206,7 @@ const SEED_SCRIPT = `(() => {
   // 눈으로 못 본다. 잔상 컷만 1프레임(알파 0.81)으로 따로 찍는다.
   const killShot = async (name, kind, type, frozen, steps = 4) => {
     await page.evaluate(({ kind, type, frozen, steps }) => {
+      __reseed();
       window.update = window.__update;
       resetParticles();
       resetCorpses();
@@ -193,6 +241,7 @@ const SEED_SCRIPT = `(() => {
   // 표적은 안 죽여야 한다. 처치 파편이 같은 자리에 겹치면 무엇이 여파인지 못 가른다.
   const fireShot = async (name) => {
     await page.evaluate(() => {
+      __reseed();
       window.update = window.__update;
       resetParticles();
       // 잔상도 같이 비운다. 앞 컷(kill-squash)의 잔상은 수명이 아직 남아 있어서,
@@ -263,6 +312,7 @@ const SEED_SCRIPT = `(() => {
   // 흔들림 변환은 보드 클립보다 앞에 들어가므로 창째로 움직인다. 보드는 원래
   // 화면 중앙에 정렬되므로(resize), 좌우 여백이 비대칭이면 그게 곧 밀린 증거다.
   await page.evaluate(() => {
+    __reseed();
     window.update = window.__update;
     restart();
     pickStage(0);
@@ -283,10 +333,39 @@ const SEED_SCRIPT = `(() => {
     return null;
   });
 
-  await browser.close();
-  console.log(errors.length ? '페이지 에러:\n' + errors.join('\n') : '페이지 에러 없음 — ' + OUT);
-  if (bad.length) {
-    console.error('컷이 의도한 화면이 아니다:\n  ' + bad.join('\n  '));
-    process.exit(1);
+  await page.close();
+  return { hashes, errors, bad };
+};
+
+(async () => {
+  require('fs').mkdirSync(OUT, { recursive: true });
+
+  const browser = await chromium.launch();
+  const runs = [];
+  for (let i = 0; i < REPEAT; i++) {
+    const r = await capture(browser);
+    runs.push(r);
+    if (REPEAT > 1) console.log(`run ${i + 1}/${REPEAT}: ` + r.hashes.map(([n, h]) => `${n}=${h.slice(0, 8)}`).join(' '));
   }
+  await browser.close();
+
+  const errors = runs.flatMap(r => r.errors);
+  const bad = runs.flatMap(r => r.bad);
+  console.log(errors.length ? '페이지 에러:\n' + errors.join('\n') : '페이지 에러 없음 — ' + OUT);
+
+  // 런끼리 컷별 md5 를 맞춰 본다. 컷 이름을 키로 모으므로, 어느 런에서 컷이
+  // 통째로 빠져도(진입 코드가 no-op 이 되면 그럴 수 있다) 값 개수로 드러난다.
+  const flaky = [];
+  if (REPEAT > 1) {
+    const names = runs[0].hashes.map(([n]) => n);
+    for (const n of names) {
+      const vals = new Set(runs.map(r => (r.hashes.find(([m]) => m === n) || [, '(없음)'])[1]));
+      if (vals.size > 1) flaky.push(`${n}: ${[...vals].map(v => v.slice(0, 8)).join(' / ')}`);
+    }
+    console.log(flaky.length ? '' : `${REPEAT}런 전 컷 md5 동일`);
+  }
+
+  if (bad.length) console.error('컷이 의도한 화면이 아니다:\n  ' + bad.join('\n  '));
+  if (flaky.length) console.error(`${REPEAT}런에서 md5 가 갈린 컷:\n  ` + flaky.join('\n  '));
+  if (bad.length || flaky.length) process.exit(1);
 })();
