@@ -1514,11 +1514,13 @@ function fireTower(t, dt) {
   if (!targets.length) { if (t.kind === 'marksman') t.streak = 0; return; }
 
   t.cd = towerCd(t);
-  t.flash = 0.1;
+  // 총구 화염은 여기서 세우지 않는다. 서리탑은 바로 아래에서 아무것도 안 쏘고
+  // 빠져나가므로(딜은 위 장판에서 이미 나갔다) 여기 두면 발사 안 한 타워가 화염만 낸다.
   const dmg = towerDmg(t);
   const type = dmgType(t);
 
   if (t.kind === 'shredder') {
+    muzzle(t, targets[0].x + 0.5, targets[0].y + 0.5);
     damage(targets[0], dmg, type, t);
     beam(t, targets[0]);
     return;
@@ -1526,6 +1528,7 @@ function fireTower(t, dt) {
 
   if (t.kind === 'eroder') {
     const e = targets[0];
+    muzzle(t, e.x + 0.5, e.y + 0.5);
     damage(e, dmg, type, t);
     beam(t, e);
     return;
@@ -1541,6 +1544,9 @@ function fireTower(t, dt) {
       const aim = targets[Math.min(i, targets.length - 1)];
       // 착탄 지연만큼 앞을 겨냥한다. 그래도 질주몹은 놓치는데, 그게 의도된 약점이다.
       const lead = posAt(aim.dist + enemySpeed(aim) * 0.5, aim.lane);
+      // 화염은 발사 1회에 하나다. 탄막(A1)의 3발은 한 번의 발사라, 발마다 내면
+      // 같은 자리에서 세 번 겹쳐 밝기만 세 배가 된다.
+      if (i === 0) muzzle(t, lead.x + 0.5, lead.y + 0.5);
       const jitter = shots > 1 ? (i - 1) * 0.6 : 0;
       state.shells.push({
         x: c.x, y: c.y, tx: lead.x + 0.5 + jitter, ty: lead.y + 0.5,
@@ -1553,6 +1559,7 @@ function fireTower(t, dt) {
   if (t.kind === 'marksman') {
     targets.sort((a, b) => b.hp - a.hp);
     const main = targets[0];
+    muzzle(t, main.x + 0.5, main.y + 0.5);
     t.streak = (t.lastTarget === main.id) ? (t.streak || 0) + 1 : 1;
     t.lastTarget = main.id;
 
@@ -1561,8 +1568,13 @@ function fireTower(t, dt) {
 
     const hits = t.b5 === 'B2' ? targets.slice(0, 4) : [main];
     for (const e of hits) {
-      if (t.b5 === 'B1' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.18) { killEnemy(e, t, type); continue; }
-      if (t.t7 === 'execute' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.12) { killEnemy(e, t, type); continue; }
+      // 즉사 2경로도 빔은 그린다. 안 그리면 총구 화염만 나고 선이 없는 채로
+      // 적이 터져서 "무엇이 죽였는지"가 화면에서 끊긴다.
+      // 빔을 죽인 **뒤에** 부르는 게 중요하다 — beam() 이 e.dead 를 보고 여파를
+      // 빼므로, 이 순서라야 "죽은 적에는 스파크가 없다"가 정상 킬과 같은 한 규칙이
+      // 된다. 딜·판정·killEnemy 인자는 그대로고 연출 호출 하나가 뒤에 붙었다.
+      if (t.b5 === 'B1' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.18) { killEnemy(e, t, type); beam(t, e); continue; }
+      if (t.t7 === 'execute' && !ENEMY[e.kind].elite && e.hp / e.maxHp <= 0.12) { killEnemy(e, t, type); beam(t, e); continue; }
       damage(e, d, type, t);
       beam(t, e);
     }
@@ -1618,6 +1630,8 @@ function fireTower(t, dt) {
         cur = best;
       }
     }
+    // 방향이 정해진 뒤라야 화염이 라인과 같은 쪽을 본다.
+    muzzle(t, c.x + dir.dx, c.y + dir.dy);
     state.beams.push({ x1: c.x, y1: c.y, x2: c.x + dir.dx * r, y2: c.y + dir.dy * r, t: 0.16, wide: true });
     return;
   }
@@ -1638,9 +1652,39 @@ function freeze(e, dur, src) {
   }
 }
 
+// 총구 화염. flash 만으로는 "타워 어딘가가 밝아졌다"까지밖에 안 읽혀서,
+// 어느 쪽으로 쐈는지를 같이 저장한다. 발광점은 그릴 때 이 방향으로 민다.
+// 발사한 타워만 부른다 — 서리탑(장판)과 조폐소(딜 0)는 부르지 않는다.
+//
+// mzShown 은 렌더 래치다. 배속은 update 를 여러 번 돌리므로 화염이 태어나서
+// 죽는 일이 렌더 1프레임 사이에 통째로 벌어질 수 있다(아래 MUZZLE_LIFE 주석).
+// 수명을 늘려 해결하려 들면 배속·프레임레이트마다 다른 값이 필요해지므로,
+// "아직 한 번도 안 그려졌다"를 들고 있다가 그 프레임에 반드시 한 번 그린다.
+function muzzle(t, tx, ty) {
+  const c = towerCenter(t);
+  const dx = tx - c.x, dy = ty - c.y;
+  const len = Math.hypot(dx, dy) || 1;   // 적이 타워와 같은 칸이면 0 이 된다
+  t.flash = MUZZLE_LIFE;
+  t.mzDx = dx / len;
+  t.mzDy = dy / len;
+  t.mzShown = false;
+}
+
+// 착탄 스파크는 beam() 안에서만 난다. 마력로는 beam() 을 안 쓰고 관통 라인을
+// 직접 push 하므로, 여기 두는 것만으로 마력로가 구조적으로 빠진다 —
+// 충전 2.5초짜리 한 발이 선 위 5마리를 동시에 꿰기 때문에 여파를 얹으면
+// 라인 전체가 불꽃 띠가 되어 관통이 몇 마리를 꿰었는지가 오히려 안 보인다.
+// damage() 에 !tick 으로 걸면 마력로 본체와 A1 연쇄가 그대로 통과한다.
+//
+// 죽은 적에는 여파를 안 낸다. 그 자리에 처치 파편 8~10개가 통째로 깔리는데
+// 스파크 4개를 얹으면 "맞았다"와 "죽었다"가 한 덩어리가 된다. 즉사 2경로만
+// 특별 취급하면 규칙이 그 두 줄에서만 지켜지고, damage() 가 인라인으로
+// killEnemy() 를 부르는 훨씬 흔한 정상 킬에서 조용히 깨진다 —
+// 그래서 호출부 플래그가 아니라 e.dead 하나로 잠갔다.
 function beam(t, e) {
   const c = towerCenter(t);
   state.beams.push({ x1: c.x, y1: c.y, x2: e.x + 0.5, y2: e.y + 0.5, t: 0.09, color: KINDS[t.kind].color });
+  if (!e.dead) spawnSparks(t, e);
 }
 
 function updateShells(dt) {
@@ -2798,6 +2842,20 @@ const PARTICLE_CAP = 360;       // 동시 파편 상한
 const PARTICLE_GRAVITY = 5.0;   // 칸/초^2
 const PARTICLE_LIFE = 0.3;      // 초
 
+// 타격 3박자(총구 화염 → 빔 → 착탄 스파크)의 수명.
+//
+// 배속은 dt 를 키우지 않고 update 를 여러 번 돈다. frame() 은 실제 프레임 간격
+// (상한 0.05초)을 배속만큼 반복하므로 렌더 1프레임 사이에 흐르는 게임시간의
+// 최악값은 x4 에서 4x0.05 = 0.20초다. 60fps 라는 전제로 4x1/60 = 0.0667 을
+// 잡으면 30fps 기기 x4(0.133초)에서 틀린다 — 실측으로 화염이 통째로 안 그려졌다.
+// 그래서 수명으로 해결하지 않고 muzzle() 의 mzShown 래치로 잠갔다. 이 값은
+// "x1 에서 몇 프레임 보일지"만 정한다(60fps 에서 약 4프레임).
+const MUZZLE_LIFE = 0.07;       // 초
+// 처치 파편(0.3)보다 짧아야 "맞았다"와 "죽었다"가 안 섞인다.
+// 파티클은 태어난 스텝에서 감쇠하지 않으므로 한 렌더 프레임에 최대 3번(3x0.05
+// = 0.15초) 깎인다 — 0.20 이면 최악 배속에서도 0.05 가 남아 반드시 한 번 그려진다.
+const SPARK_LIFE = 0.20;        // 초
+
 // 연출 전용 난수. 전역 Math.random 은 절대 쓰지 않는다 —
 // 관측소 치명(25%), 조폐소 약탈(25%), 소환 자리, 덱·특성 롤이 전부 같은
 // 스트림이라 처치할 때마다 난수를 한 번 뽑으면 그 뒤의 모든 판정이 밀린다.
@@ -2901,6 +2959,49 @@ function spawnKillFx(e, type) {
     p.size = (magic ? 0.055 : 0.05) + d.r * 0.12;
     p.rot = fxRand() * Math.PI * 2;
     p.spin = magic ? 0 : (fxRand() - 0.5) * 22;
+  }
+}
+
+// 착탄 스파크. 빔이 닿은 표면에서 되튀는 여파고, 처치 파편과 헷갈리면 안 된다.
+// 그래서 개수는 처치(8~10)보다 적고, 수명은 짧고, 색은 적 색이 아니라 타워 색이다.
+// 딜 타입으로 색을 가르지 않는다 — 속성 상성은 7장에서 기각했다.
+const SPARK_N = 4;
+const SPARK_SPEED = 2.2;    // 칸/초. 수명 동안 0.44칸 — 처치 파편(0.75칸)보다 덜 퍼진다
+const SPARK_GRAV = 0.4;     // 여파는 튀는 그림이지 떨어지는 그림이 아니다
+
+function spawnSparks(t, e) {
+  const c = towerCenter(t);
+  const dx = e.x + 0.5 - c.x, dy = e.y + 0.5 - c.y;
+  const len = Math.hypot(dx, dy) || 1;   // 적이 타워와 같은 칸이면 0 이 된다
+  const ux = dx / len, uy = dy / len;
+
+  // 적 중심이 아니라 타워 쪽 표면이다. 중심에서 뿌리면 몸 안에서 나온 것처럼 보인다.
+  const r = ENEMY[e.kind].r;
+  const px = e.x + 0.5 - ux * r, py = e.y + 0.5 - uy * r;
+
+  // 보드 바닥이 어두워서 타워 색을 그대로 쓰면 묻힌다(2.6 과 같은 이유).
+  // 발당 한 번만 계산해 4개가 공유한다.
+  const color = mixHex(KINDS[t.kind].color, '#ffffff', 0.45);
+
+  // 빔 진행의 역방향으로 튄다. 등방으로 뿌리면 처치 파편과 구분이 안 된다.
+  const back = Math.atan2(-uy, -ux);
+
+  for (let i = 0; i < SPARK_N; i++) {
+    const p = allocParticle();
+    p.alive = true;
+    p.x = px;
+    p.y = py;
+    p.t = p.life = SPARK_LIFE;
+    p.color = color;
+    p.grav = SPARK_GRAV;
+    const a = back + (fxRand() - 0.5) * (Math.PI * 2 / 3);   // 역방향 ±60도
+    const sp = SPARK_SPEED * (0.6 + fxRand() * 0.8);
+    p.vx = Math.cos(a) * sp;
+    p.vy = Math.sin(a) * sp;
+    p.shape = 'spark';
+    p.size = 0.08;
+    p.rot = Math.atan2(p.vy, p.vx);   // 선을 진행 방향으로 눕힌다
+    p.spin = 0;
   }
 }
 
@@ -3151,15 +3252,53 @@ function drawEffects() {
     ctx.fill();
   }
 
+  // 빔은 두 겹이다. 한 겹이면 굵기를 어떻게 잡아도 "선"이지 "빛"이 아니다.
+  // 넓고 흐린 글로우 위에 얇고 흰 코어를 같은 두 점에 겹쳐 긋는다.
+  // lineCap 은 건드리지 않는다 — ctx 전역이라 복구를 한 번 빠뜨리면
+  // 그 뒤의 모든 stroke(디버프 막대·블라스트 링)로 새어 나간다.
   for (const b of state.beams) {
     const a = P(b.x1, b.y1), c = P(b.x2, b.y2);
-    ctx.strokeStyle = b.color || '#db61a2';
-    ctx.globalAlpha = Math.min(1, b.t * 8);
-    ctx.lineWidth = b.wide ? 6 : 2;
+    const al = Math.min(1, b.t * 8);
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(c.x, c.y);
+    ctx.strokeStyle = b.color || '#db61a2';
+    ctx.globalAlpha = al * 0.45;
+    ctx.lineWidth = b.wide ? 12 : 5;
     ctx.stroke();
+    ctx.strokeStyle = '#fff';
+    ctx.globalAlpha = al;
+    ctx.lineWidth = b.wide ? 3.5 : 1.6;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // 총구 화염. 빔 뒤에 그려야 빔 위에 얹혀서 "여기서 나갔다"로 읽힌다.
+  // 게이트는 둘이다 — 아직 살아 있거나(flash), 살아 있던 적이 없더라도 이 프레임에
+  // 태어난 것(mzShown === false). 두 번째가 없으면 배속에서 화염이 update 사이에
+  // 통째로 죽어 한 번도 안 그려진다. 방향 필드가 없는 타워(세이브 복원, 테스트
+  // 리터럴)는 muzzle() 을 거친 적이 없어 두 조건 다 거짓이므로 못 들어온다.
+  for (const t of state.towers) {
+    const live = t.flash > 0;
+    if (!live && t.mzShown !== false) continue;
+    const c = towerCenter(t);
+    // 발밑이 아니라 몸 바깥 끝이다. 상수로 박으면 5성 2x2 의 몸 안에서 빛난다.
+    const off = towerFootprint(t) * 0.45;
+    const p = P(c.x + t.mzDx * off, c.y + t.mzDy * off);
+    // 래치로 들어온 프레임은 수명이 이미 다 탔다. 알파를 수명으로 계산하면
+    // 0 이 되어 게이트만 통과하고 아무것도 안 보인다 — 그 한 프레임은 최대로 낸다.
+    const a = live ? Math.min(1, t.flash / MUZZLE_LIFE) : 1;
+    t.mzShown = true;
+    ctx.fillStyle = KINDS[t.kind].color;
+    ctx.globalAlpha = a * 0.5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, cell * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = a;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, cell * 0.07, 0, Math.PI * 2);
+    ctx.fill();
     ctx.globalAlpha = 1;
   }
 
@@ -3257,6 +3396,20 @@ function drawParticles() {
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(x, y, p.size * cell * (0.4 + (1 - k) * 2.6), 0, Math.PI * 2);
+      ctx.stroke();
+      continue;
+    }
+
+    if (p.shape === 'spark') {
+      // 착탄 여파. 진행 방향으로 누운 짧은 선 하나다 — 점으로 그리면 처치 파편과
+      // 구분이 안 되고, 각진 도형으로 그리면 크기가 작아서 그냥 얼룩이 된다.
+      const s = p.size * cell;
+      const dx = Math.cos(p.rot) * s, dy = Math.sin(p.rot) * s;
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - dx, y - dy);
+      ctx.lineTo(x + dx, y + dy);
       ctx.stroke();
       continue;
     }

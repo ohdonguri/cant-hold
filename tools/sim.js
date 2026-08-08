@@ -44,6 +44,7 @@ const EXPOSE = [
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
   'spawnKillFx', 'aliveParticles', 'resetParticles', 'drawParticles', 'PARTICLE_CAP', 'fireTower',
+  'PARTICLE_LIFE', 'MUZZLE_LIFE', 'SPARK_LIFE',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',

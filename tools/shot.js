@@ -104,6 +104,52 @@ const SEED_SCRIPT = `(() => {
   await killShot('kill-magic', 'elite', 'magic', false);
   await killShot('kill-frozen', 'elite', 'magic', true);
 
+  // ── 발사 3박자 고정 프레임 ──────────────────────────────────
+  // 세 박자의 수명이 다 다르다(화염 0.07 / 빔 0.09 / 스파크 0.20). 발사 직후
+  // update 를 딱 한 번 돌린 프레임이 셋이 동시에 살아 있는 유일한 지점이다 —
+  // 화염 0.037 · 빔 0.057 · 스파크 0.167 이 남는다. 두 번 돌리면 화염이
+  // 0.003 만 남아서(알파 0.05) 사실상 안 찍힌다.
+  // 표적은 안 죽여야 한다. 처치 파편이 같은 자리에 겹치면 무엇이 여파인지 못 가른다.
+  const fireShot = async (name) => {
+    await page.evaluate(() => {
+      window.update = window.__update;
+      resetParticles();
+      state.enemies.length = 0;
+      state.beams.length = 0;
+      // 이 프레임에는 딱 한 발만 나가게 한다. 여러 타워가 같이 쏘면 빔이 겹쳐서
+      // 어느 화염이 어느 선의 뿌리인지가 안 읽힌다.
+      for (const t of state.towers) { t.cd = 99; t.flash = 0; }
+      const t = state.towers.find(v => v.kind === 'marksman');   // 사거리가 가장 길다
+      t.cd = 0;
+
+      // 사거리 안의 경로 칸 중 가장 먼 칸. 빔이 길게 누워서 2겹이 보인다.
+      const c = towerCenter(t), R = towerRange(t);
+      let spot = null, far = -1;
+      for (let y = 0; y < CFG.BOARD_H; y++)
+        for (let x = 0; x < CFG.BOARD_W; x++) {
+          if (!isPath(x, y)) continue;
+          const d = Math.max(Math.abs(x + 0.5 - c.x), Math.abs(y + 0.5 - c.y));
+          if (d > R || d <= far) continue;
+          far = d; spot = { x, y };
+        }
+
+      spawnEnemy('elite');            // 몸집이 커야 착탄면과 여파가 갈려 보인다
+      const e = state.enemies[0];
+      e.maxHp = e.hp = 1e9;           // 안 죽어야 처치 파편이 안 섞인다
+      e.x = spot.x; e.y = spot.y;
+      fireTower(t, 1 / 30);
+      update(1 / 30);
+      // update 안의 updateEnemies 가 적을 자기 레인 위치로 되돌려 놓는다. 그러면
+      // 착탄점(스파크)과 적이 따로 떨어져서 여파로 안 읽힌다 — 다시 세워 준다.
+      e.x = spot.x; e.y = spot.y;
+      window.update = () => {};       // 여기서 그림이 영구 정지한다
+    });
+    await page.waitForTimeout(120);
+    await shot(name);
+  };
+
+  await fireShot('6-fire');
+
   await browser.close();
   console.log(errors.length ? '페이지 에러:\n' + errors.join('\n') : '페이지 에러 없음 — ' + OUT);
 })();
