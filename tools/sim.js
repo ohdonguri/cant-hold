@@ -21,6 +21,45 @@ function stubCtx(log) {
   });
 }
 
+// 오디오 노드 스텁. 호출도 되고 속성 접근도 되는 만능 no-op 이라야 한다 —
+// 게임 코드가 `o.frequency.setValueAtTime(...)` 처럼 중첩으로 파고들기 때문이다.
+function stubAudioNode() {
+  const f = () => stubAudioNode();
+  return new Proxy(f, {
+    get: () => stubAudioNode(),
+    set: () => true,
+    apply: () => stubAudioNode(),
+  });
+}
+
+// AudioContext 스텁. draws 와 같은 취지지만 오디오에는 프록시 로그를 걸 자리가 없다
+// (§2.9 는 게임 코드 안의 sfxStats() 카운터로 대신한다). 이 스텁이 하는 일은
+// **시계를 들고 있는 것**뿐이다 — 큐 쿨다운을 actx.currentTime 으로 재므로
+// 테스트가 시간을 앞으로 감을 수 있어야 게이트를 검사할 수 있다.
+function makeAudio() {
+  let now = 0;
+  const AudioContext = function () {
+    return {
+      get currentTime() { return now; },
+      state: 'running',
+      destination: stubAudioNode(),
+      createGain: () => stubAudioNode(),
+      createOscillator: () => stubAudioNode(),
+      createDynamicsCompressor: () => stubAudioNode(),
+      resume: () => {},
+      close: () => {},
+    };
+  };
+  return {
+    AudioContext,
+    api: {
+      advance(s) { now += s; },
+      set(s) { now = s; },
+      now() { return now; },
+    },
+  };
+}
+
 // CFG 안의 숫자 상수를 덮어쓴 소스를 만든다.
 function patch(src, overrides) {
   let out = src;
@@ -60,6 +99,12 @@ const EXPOSE = [
   'setShakeEnabled', 'pxToCell', 'cellToPx', 'view',
   'BLAST_SHAKE_AMP', 'BLAST_SHAKE_DUR', 'BLAST_SHAKE_CD', 'KILL_SHAKE_AMP', 'KILL_SHAKE_DUR',
   'HITSTOP', 'LEAK_WARN_DUR',
+  // 사운드(2.9). SFX 와 SFX_VOICE_CAP 까지 내보내는 건 위 상수들과 같은 이유다 —
+  // 테스트가 쿨다운·상한을 손으로 베끼면 값을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
+  // sfxUnlock 은 테스트가 **명시적으로** 부른다. 게임에서는 pointerdown 이 부르는데
+  // canvas.addEventListener 가 여기서는 no-op 이라 greedy/tune/seedcheck 는
+  // AudioContext 스텁이 있어도 actx 가 null 인 채로 돈다(밸런스 경로 영향 0).
+  'sfx', 'sfxUnlock', 'sfxStats', 'SFX', 'SFX_VOICE_CAP', 'setSoundEnabled', 'toggleSound', 'fxState',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
@@ -79,6 +124,8 @@ function load(overrides) {
     setItem: (k, v) => store.set(k, String(v)),
   };
 
+  const audio = makeAudio();
+
   const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame', 'localStorage',
     js + '\nreturn {' + EXPOSE.join(',') + '};');
   const api = fn(
@@ -87,7 +134,10 @@ function load(overrides) {
       // 스프라이트를 오프스크린 캔버스에 굽는다
       createElement: () => ({ width: 0, height: 0, getContext: () => stubCtx() }),
     },
-    { innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener: () => {} },
+    {
+      innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener: () => {},
+      AudioContext: audio.AudioContext,
+    },
     { now: () => 0 },
     () => {},
     localStorageStub,
@@ -100,6 +150,12 @@ function load(overrides) {
     reset() { drawLog.length = 0; },
     count(...names) { return drawLog.filter(n => names.includes(n)).length; },
   };
+  // 오디오 시계를 앞으로 감는 창. 큐 쿨다운은 게임 dt 가 아니라 이 시계로 잰다.
+  //   g.sfxUnlock(); g.audio.advance(0.06); g.sfx('shot')
+  api.audio = audio.api;
+  // 기기 로컬 플래그(cant-hold-shake / -sound / -tute)가 실제로 그 키에 들어갔는지
+  // 테스트가 볼 수 있어야 한다. 세이브 번들과 섞이지 않았다는 증거가 이것뿐이다.
+  api.storage = localStorageStub;
   return api;
 }
 

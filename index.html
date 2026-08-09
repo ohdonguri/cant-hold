@@ -327,6 +327,7 @@ function togglePause() {
   // 토글 자리는 drawPause 가 매 프레임 다시 세운다. 여기서 비워 두지 않으면
   // 지난번 정지 화면의 자리가 아직 안 그려진 첫 프레임에 그대로 먹힌다.
   shakeToggleRect = null;
+  soundToggleRect = null;
   if (!state.paused) return;
   // 멈추는 순간 손에 들고 있던 것들을 놓는다. 키보드 ESC 로 멈추면
   // 손가락은 아직 타워를 끄는 중일 수 있고, 그대로 두면 재개할 때
@@ -1443,7 +1444,12 @@ function killEnemy(e, src, type) {
   // 충격 등급: 정예 처치만 화면을 흔들고 시간을 멈춘다. 일반 처치는 아무것도
   // 안 낸다 — 처치가 연쇄하는 구간에서 매번 멎으면 배속이 무의미해진다.
   // 자리는 spawnKillFx 와 같은 맨 끝이다. 위 주석의 이유가 그대로 적용된다.
-  if (ENEMY[e.kind].elite) { bumpShake(KILL_SHAKE_AMP, KILL_SHAKE_DUR); bumpHitstop(); }
+  // 소리(2.9)는 흔들림과 달리 **일반 처치에도 낸다.** 2.8 이 일반 처치를 뺀 근거는
+  // "초당 수십 번 얼어붙으면 배속이 무의미해진다"였고 그 비용은 시간축에 있었다.
+  // 소리에는 그 비용이 없고, 밀도는 kill 큐의 쿨다운이 초당 6.7회로 자른다.
+  // 등급은 kill / killBig 두 큐와 sfx() 안의 마스킹으로 그대로 유지된다.
+  if (ENEMY[e.kind].elite) { bumpShake(KILL_SHAKE_AMP, KILL_SHAKE_DUR); bumpHitstop(); sfx('killBig'); }
+  else sfx('kill');
 }
 
 function applyStacks(e, n, per, src) {
@@ -1687,6 +1693,10 @@ function muzzle(t, tx, ty) {
   t.mzDx = dx / len;
   t.mzDy = dy / len;
   t.mzShown = false;
+  // 발사음(2.9). 총구 화염과 **같은 자리**다. 이 함수를 실제로 쏜 타워만 부르므로
+  // 서리탑(장판)·조폐소(딜 0)·오라·장판·tick 딜 제외가 구조적으로 공짜가 된다 —
+  // 2.7 이 화염에서 얻은 것과 같은 이득을 소리가 그대로 물려받는다.
+  sfx('shot');
 }
 
 // 착탄 스파크는 beam() 안에서만 난다. 마력로는 beam() 을 안 쓰고 관통 라인을
@@ -1725,7 +1735,11 @@ function updateShells(dt) {
     // 서리 장판·소이 장판은 제외한다 — 전부 발생 빈도가 훨씬 높아서 흔들면 상시가 된다.
     // 쿨다운을 여기서 재는 이유: 탄막(A1)은 한 프레임에 3발이 착탄하고, 연발(A) 7성은
     // cd 0.8초짜리가 여러 대다. 게이트가 없으면 착탄 흔들림이 끊기지 않는다.
-    if (shakeCd <= 0) { bumpShake(BLAST_SHAKE_AMP, BLAST_SHAKE_DUR); shakeCd = BLAST_SHAKE_CD; }
+    // 착탄음도 이 게이트 안이다. blast 큐가 자체 쿨다운을 안 두는 이유가 그것이다 —
+    // 게이트를 공유하면 보이는 흔들림과 들리는 쿵이 항상 1:1 이라 "소리는 났는데
+    // 안 흔들림"이 원리적으로 없다. BLAST_SHAKE_CD 를 소리 때문에 고치면 안 된다:
+    // 그 값은 2.8 의 흔들림 듀티 근거다.
+    if (shakeCd <= 0) { bumpShake(BLAST_SHAKE_AMP, BLAST_SHAKE_DUR); sfx('blast'); shakeCd = BLAST_SHAKE_CD; }
   }
   state.shells = alive;
 }
@@ -2592,12 +2606,17 @@ function choiceLabel(opt) {
 canvas.addEventListener('pointerdown', e => {
   const px = e.clientX, py = e.clientY;
   cloudPreload();   // 첫 터치에 미리 받아 둔다
+  // 오디오는 사용자 제스처 안에서만 열린다(2.9). 아래 정지 화면 분기보다 **위**여야
+  // 정지 화면을 탭해도 열린다 — 그 분기는 탭을 통째로 먹고 return 한다.
+  // 멱등하고, 탭 복귀 후 suspended 로 내려간 컨텍스트도 여기서 되살린다.
+  sfxUnlock();
 
-  // 정지 화면은 탭을 통째로 먹는다. 유일한 예외가 흔들림 토글이다 — 여기서
+  // 정지 화면은 탭을 통째로 먹는다. 유일한 예외가 토글 두 줄이다 — 여기서
   // 같이 재개해 버리면 켜졌는지 꺼졌는지 확인할 화면이 그 순간 사라진다.
   if (state.paused) {
-    const r = shakeToggleRect;
-    if (r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) { toggleShake(); return; }
+    const onRect = r => r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+    if (onRect(shakeToggleRect)) { toggleShake(); return; }
+    if (onRect(soundToggleRect)) { toggleSound(); return; }
     state.paused = false;
     return;
   }
@@ -2849,6 +2868,9 @@ function updateEnemies(dt) {
       // 누수는 화면 층 경고만 낸다. 흔들림도 히트스톱도 파편도 없다(2.6·2.8).
       // += 가 아니라 = 다 — 누수가 몰리는 구간에서 알파가 누적되면 판이 안 보인다.
       leakWarnT = LEAK_WARN_DUR;
+      // 경고음도 화면 층이다. 2.6 이 누수에 금지한 것은 파편·셀 좌표·killEnemy
+      // 경로이고, 소리는 그 셋을 하나도 안 쓴다.
+      sfx('leak');
       continue;
     }
     const p = posAt(e.dist, e.lane);
@@ -2903,6 +2925,12 @@ function fxRand() {
   fxSeed = (fxSeed * 1664525 + 1013904223) >>> 0;
   return fxSeed / 4294967296;
 }
+// 테스트에서만 쓰는 창(tools/sim.js EXPOSE). hitstopState() 와 같은 형태다.
+// 이게 필요한 이유는 2.9 다 — 사운드가 이 스트림을 한 칸이라도 밀면, 소리를 낸 판과
+// 안 낸 판(음소거·미개방)에서 파티클 각도가 갈린다. 그 회귀는 게임 상태에 아무 흔적을
+// 안 남기고 verify:build 의 두 페이지 그림 차이로만 나타나는데, verify:build 는
+// pointerdown 을 한 번도 안 보내서 오디오를 아예 안 연다. 그래서 여기서 직접 잰다.
+function fxState() { return fxSeed; }
 
 // 링 버퍼. 배열 길이를 줄이지 않고 alive 플래그로 재사용한다 —
 // 장판(서리·소이·동상)은 한 프레임에 여러 마리를 동시에 죽이므로
@@ -3308,6 +3336,211 @@ function drawLeakWarn() {
     ctx.fillRect(o, o + s, s, view.h - o * 2 - s * 2);           // 왼쪽
     ctx.fillRect(view.w - o - s, o + s, s, view.h - o * 2 - s * 2); // 오른쪽
   }
+}
+
+// ═════════════════════════════════════════════════════════════
+// 2.9 사운드
+// ═════════════════════════════════════════════════════════════
+// 2.8 이 사건마다 등급을 매겼는데 그 등급이 눈에만 있었다. 화면을 안 보고 있으면
+// 아무 일도 안 일어난 것과 같다. 그래서 같은 등급표를 귀로 한 벌 더 낸다.
+// 등급표는 2.8 과 같은 것을 쓴다 — 새로 만들면 두 표가 조용히 갈린다.
+//
+// 이 절의 전부는 세 가지다.
+//   ① 지연 개방 — 로드 시점에 AudioContext 를 만들지 않는다. 브라우저는 사용자
+//      제스처 전에 만든 컨텍스트를 suspended 로 태우고, 헤드리스에는 AudioContext
+//      자체가 없다. 그래서 pointerdown 에서만 연다(sfxUnlock).
+//   ② 시계는 오디오 시계다 — 쿨다운을 게임 dt 로 재면 배속 x4 에서 쿨다운도 4배
+//      빨리 풀리고, 히트스톱 프레임에는 dt 누적이 통째로 멈춘다. actx.currentTime 은
+//      배속·히트스톱과 무관한 실시간 초다.
+//   ③ 난수는 사운드 전용 스트림 — fxRand() 를 쓰면 음소거·미개방일 때 sfx() 가
+//      조기 반환하므로 소리를 낸 판과 안 낸 판에서 fxSeed 가 갈린다. 그러면
+//      파티클 각도가 달라져서 verify:build 의 두 페이지가 다른 그림을 그린다.
+//      전역 Math.random 은 2.6 과 같은 이유로 금지다.
+
+const SFX_MASTER = 0.6;      // 8보이스 x 피크 게인 합이 1.0 을 넘는다. 아래 컴프레서와 한 쌍이다
+const SFX_VOICE_CAP = 8;     // 최악 동시 보이스가 약 4.0 이라 정상 플레이에서는 안 닿는다.
+                             // 폭주할 때만 문 역할을 한다
+const SFX_MASK_KILL = 0.30;  // 정예 처치음이 난 뒤 잡몹 처치음을 막는 시간(A-6)
+const SFX_MUTE_RAMP = 0.02;  // 음소거 램프. 즉시 0 을 대입하면 울리던 소리가 딸깍 끊긴다
+// onended 가 안 오는 환경(컨텍스트 close, 헤드리스 스텁)이 있다. voices 가 영영
+// 안 줄면 상한에 막혀 소리가 통째로 죽으므로, stop() 예약 시각 + 이 여유를 지나면
+// 강제로 회수한다. onended 가 정상으로 오면 그쪽이 먼저 줄이고 이건 빈 손이 된다.
+const SFX_REAP_SLACK = 0.10;
+
+let actx = null;
+let sfxDead = false;         // 한 번 실패하면 다시 시도하지 않는다
+let master = null, comp = null;
+let voices = 0;
+const sfxPlayed  = { shot: 0, blast: 0, kill: 0, killBig: 0, leak: 0 };
+const sfxDropped = { shot: 0, blast: 0, kill: 0, killBig: 0, leak: 0 };
+const sfxNextAt  = { shot: 0, blast: 0, kill: 0, killBig: 0, leak: 0 };
+const sfxPending = [];       // { until, end } — 위 SFX_REAP_SLACK 참고
+let soundToggleRect = null;  // 정지 화면의 소리 토글. drawPause 가 세우고 pointerdown 이 읽는다
+
+// 기기 로컬 플래그다. shakeEnabled 와 같은 형태로 세이브 번들·클라우드에 안 넣고
+// SAVE_VERSION 도 안 올린다. 기본값은 **켜짐**이다 — 대응할 미디어 쿼리가 없고,
+// 첫 터치 전에는 AudioContext 가 안 열려서 예고 없이 소리가 날 창이 원리적으로 없다.
+let soundEnabled = true;
+try {
+  const v = localStorage.getItem('cant-hold-sound');
+  if (v !== null) soundEnabled = v === '1';
+} catch { /* 무시 */ }
+
+// 사운드 전용 LCG. fxRand() 와 **별개 시드**여야 한다(위 ③).
+let sfxSeed = 0x2545f491;
+function sfxRand() {
+  sfxSeed = (sfxSeed * 1664525 + 1013904223) >>> 0;
+  return sfxSeed / 4294967296;
+}
+
+// pointerdown 에서만 불린다. 멱등이다 — 탭 전환 후 복귀하면 컨텍스트가 백그라운드에서
+// suspended 로 내려간 채 돌아오는데, 첫 터치 전용으로 만들면 그 뒤로 소리가 영영 안 난다.
+function sfxUnlock() {
+  if (sfxDead) return;
+  if (!actx) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { sfxDead = true; return; }        // 헤드리스 1차 방어
+      actx = new AC();
+      master = actx.createGain();
+      master.gain.value = soundEnabled ? SFX_MASTER : 0;
+      // 컴프레서 하나를 마스터 뒤에 문다. 없으면 8보이스가 겹칠 때 합이 1.0 을
+      // 넘겨 클리핑으로 찢어진다 — 폰 스피커에서 특히 심하다.
+      comp = actx.createDynamicsCompressor();
+      master.connect(comp); comp.connect(actx.destination);
+    } catch { sfxDead = true; actx = null; return; }   // 2차 방어
+  }
+  // iOS 는 AudioContext 가 suspended 로 태어난다. 탭 복귀 경로도 여기로 들어온다.
+  if (actx.state === 'suspended') actx.resume?.();
+}
+
+// 전부 createOscillator + createGain 이다. 파일을 안 쓰는 이유는 2.5 와 같다 —
+// 받는 시간이 없고 큐를 고칠 때 값만 만지면 된다.
+// 감쇠는 exponentialRampToValueAtTime 인데 **목표가 0 이면 예외가 난다.**
+// 그래서 0.0001 로 끝내고 stop() 한다.
+function sfxTone(type, f0, f1, glide, atk, dec, peak, t) {
+  const o = actx.createOscillator();
+  const g = actx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t);
+  // 하강 처프로 통일한다. 상승은 "얻음"으로 읽혀서 처치·발사에 안 맞는다.
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + glide);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(peak, t + atk);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + atk + dec);
+  o.connect(g); g.connect(master);
+  o.start(t);
+  o.stop(t + atk + dec);
+  return o;
+}
+
+// 큐 테이블. 호출부는 이름만 안다 — 음색을 고치는 자리가 여기 하나여야
+// "박격포 소리를 바꿨더니 처치음이 같이 바뀌는" 일이 안 생긴다.
+//
+// **파형이 큐마다 다른 게 핵심이다.** 같은 파형에 주파수만 다르면 겹쳤을 때
+// 무엇이 무엇인지 안 갈린다. 길이는 항상 쿨다운보다 짧다 — 듀티가 100% 를 넘으면
+// 자기 꼬리와 겹쳐서 그 자체로 하나의 톤이 된다(전 큐 듀티 <= 72%).
+const SFX = {
+  // 0.06s = 16.7Hz. 20Hz 를 넘기면 귀가 개별 사건이 아니라 하나의 버즈로 융합한다.
+  // 통상 구간 상한(9발/초 = 111ms)의 절반보다 작아서 x1 통상 플레이에서는 드롭이 0 이다.
+  shot: {
+    cd: 0.06, spread: 0.06, len: 0.035,
+    play(t, rate) { return sfxTone('square', 1800 * rate, 900 * rate, 0.030, 0.002, 0.033, 0.09, t); },
+  },
+  // 자체 쿨다운을 안 둔다(cd 0). 게이트는 updateShells 의 shakeCd 가 대신한다 —
+  // 게이트를 공유하면 보이는 흔들림과 들리는 쿵이 항상 1:1 이라 "소리는 났는데
+  // 안 흔들림"이 원리적으로 없다.
+  blast: {
+    cd: 0, spread: 0.04, len: 0.18,
+    play(t, rate) {
+      // ① 탁. 220Hz square 는 missing fundamental 로 저음을 암시하는 장치다.
+      sfxTone('square', 220 * rate, 220 * rate, 0, 0.001, 0.028, 0.06, t);
+      // ② 쿵. 하한이 70Hz 인 건 폰 스피커 때문이다 — 45Hz 까지 떨어뜨리면
+      // 뒷부분이 통째로 안 들리고 "앞만 있고 끝이 없는" 소리가 된다.
+      return sfxTone('sine', 150 * rate, 70 * rate, 0.16, 0.004, 0.176, 0.30, t);
+    },
+  },
+  // 0.14s = 7.1Hz. 처치가 연쇄하는 구간의 간격(g=27~33ms)보다 훨씬 크다.
+  kill: {
+    cd: 0.14, spread: 0.05, len: 0.09,
+    play(t, rate) { return sfxTone('triangle', 520 * rate, 260 * rate, 0.075, 0.001, 0.088, 0.07, t); },
+  },
+  // 판당 15회뿐이라(2.8) 길고 무겁게 낸다.
+  killBig: {
+    cd: 0.20, spread: 0.03, len: 0.30,
+    play(t, rate) {
+      sfxTone('square', 130 * rate, 130 * rate, 0, 0.002, 0.055, 0.05, t);   // ② 배음
+      return sfxTone('triangle', 260 * rate, 90 * rate, 0.26, 0.002, 0.298, 0.16, t);  // ① 본체
+    },
+  },
+  // **피치 스프레드가 0 인 유일한 큐다.** 경고음은 매번 같아야 경고로 읽힌다.
+  // attack 도 혼자 10ms(다른 큐의 5~10배)다 — 느린 어택은 "타격"이 아니라 "상태"로
+  // 읽힌다. sawtooth 는 거칠어서 불쾌한데, 누수는 불쾌해야 한다.
+  leak: {
+    cd: 0.35, spread: 0, len: 0.24,
+    play(t, rate) { return sfxTone('sawtooth', 200 * rate, 130 * rate, 0.22, 0.010, 0.230, 0.13, t); },
+  },
+};
+
+// 보이스 회수. 위 SFX_REAP_SLACK 참고.
+function sfxReap(now) {
+  for (let i = sfxPending.length - 1; i >= 0; i--) {
+    if (sfxPending[i].until > now) continue;
+    sfxPending[i].end();
+    sfxPending.splice(i, 1);
+  }
+}
+
+// 게이트 순서가 곧 명세다.
+//   ① 컨텍스트·음소거 → ② 쿨다운 → ③ 보이스 상한 → ④ 계수 → ⑤ 재생
+//
+// **상한에 닿으면 드롭한다.** 2.6 의 파티클이 "막지 말고 덮어쓴다"인 것과 정반대인데,
+// 이유가 정반대라서 그렇다 — 파편은 안 보이면 정보가 사라지지만 소리는 겹칠수록
+// 나빠지므로 드롭이 곧 개선이다.
+function sfx(name) {
+  if (!actx || sfxDead || !soundEnabled) return false;
+  const cue = SFX[name];
+  const now = actx.currentTime;
+  sfxReap(now);
+  if (now < sfxNextAt[name]) { sfxDropped[name]++; return false; }
+  if (voices >= SFX_VOICE_CAP) { sfxDropped[name]++; return false; }
+
+  sfxNextAt[name] = now + cue.cd;
+  sfxPlayed[name]++;
+  // 등급 마스킹. 정예 처치 순간에 잡몹 처치음이 얹히면 2.8 이 흔들림으로 갈라 놓은
+  // 등급이 귀에서 도로 뭉친다. 판당 15회뿐이라 비용이 없다.
+  if (name === 'killBig') sfxNextAt.kill = now + SFX_MASK_KILL;
+
+  voices++;
+  let done = false;
+  const end = () => { if (done) return; done = true; voices--; };
+  try {
+    const node = cue.play(now, 1 + (sfxRand() * 2 - 1) * cue.spread);
+    if (node) node.onended = end;
+  } catch { end(); return false; }
+  sfxPending.push({ until: now + cue.len + SFX_REAP_SLACK, end });
+  return true;
+}
+
+// 끄면 master.gain 을 램프로 내린다. 이후 sfx() 는 ①번 게이트에서 조기 반환하므로
+// 노드를 아예 안 만든다 — 게인만 0 이면 안 들리는 소리를 계속 만들게 된다.
+function setSoundEnabled(v) {
+  soundEnabled = !!v;
+  if (actx && master) {
+    const now = actx.currentTime;
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(master.gain.value, now);
+    master.gain.linearRampToValueAtTime(soundEnabled ? SFX_MASTER : 0, now + SFX_MUTE_RAMP);
+  }
+  try { localStorage.setItem('cant-hold-sound', soundEnabled ? '1' : '0'); } catch { /* 저장 못 해도 됨 */ }
+}
+function toggleSound() { setSoundEnabled(!soundEnabled); }
+
+// 헤드리스 검사 창(tools/sim.js EXPOSE). 2.6 의 draws 와 같은 취지지만 오디오에는
+// 프록시 로그를 걸 자리가 없어서, 게임 코드 안의 큐별 카운터로 대신한다 —
+// 2.8 이 hitstopState() 게터를 게임 코드에 둔 것과 같은 전례다.
+function sfxStats() {
+  return { played: { ...sfxPlayed }, dropped: { ...sfxDropped }, voices, open: !!actx, enabled: soundEnabled };
 }
 
 function update(dt) {
@@ -4397,6 +4630,7 @@ function pausePlan(sections, panelW, s) {
   // 버린다" 로직에 걸려서 하필 작은 화면 — 흔들림이 제일 거슬리는 기기 — 에서 사라진다.
   // 높이 예산에도 반드시 들어가야 한다. 안 넣으면 마지막 절이 화면 밖으로 밀린다.
   items.push({ t: 'shake', y: h, f: 12 * s }); h += Math.round(27 * s);
+  items.push({ t: 'sound', y: h, f: 12 * s }); h += Math.round(27 * s);
 
   for (let i = 0; i < sections.length; i++) {
     if (i) h += Math.round(13 * s);
@@ -4456,22 +4690,28 @@ function drawPause() {
       ctx.fillStyle = '#6e7681';
       ctx.font = `${it.f}px system-ui, sans-serif`;
       ctx.fillText('멈춰 있는 동안에는 배치도 합성도 되지 않습니다', pad, y);
-    } else if (it.t === 'shake') {
+    } else if (it.t === 'shake' || it.t === 'sound') {
       // 이 화면의 유일한 조작이다. 다른 곳은 전부 읽기 전용이라, 눌리는 줄이라는 게
       // 보이도록 배경을 깔고 값을 강조색으로 낸다.
+      // 두 토글이 한 분기인 것은 의도다 — 따로 그리면 한쪽만 고쳐서 같은 줄인데
+      // 색·간격이 다른 화면이 나온다.
+      const on = it.t === 'shake' ? shakeEnabled : soundEnabled;
+      const label = it.t === 'shake' ? '화면 흔들림' : '소리';
       const rh = Math.round(23 * plan.s);
-      shakeToggleRect = { x: pad - 8, y: y - Math.round(5 * plan.s), w: panelW + 16, h: rh };
+      const rect = { x: pad - 8, y: y - Math.round(5 * plan.s), w: panelW + 16, h: rh };
+      if (it.t === 'shake') shakeToggleRect = rect; else soundToggleRect = rect;
       ctx.fillStyle = '#161b22';
-      ctx.fillRect(shakeToggleRect.x, shakeToggleRect.y, shakeToggleRect.w, shakeToggleRect.h);
-      // 이 줄만 라벨이 길어서(다른 줄은 두세 글자다) 절의 labelW 를 못 쓴다.
-      // 재서 붙이지 않으면 축소 배율에서 값이 라벨에 겹쳐 "화면 흔들림켜짐"이 된다.
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      // 이 줄들만 라벨 길이가 제각각이라(다른 줄은 두세 글자로 맞춰져 있다) 절의
+      // labelW 를 못 쓴다. 재서 붙이지 않으면 축소 배율에서 값이 라벨에 겹쳐
+      // "화면 흔들림켜짐"이 된다.
       const gap = Math.round(12 * plan.s);
       ctx.fillStyle = '#c9d1d9';
       ctx.font = `700 ${it.f}px system-ui, sans-serif`;
-      ctx.fillText('화면 흔들림', pad, y);
-      const vx = pad + ctx.measureText('화면 흔들림').width + gap;
-      const val = shakeEnabled ? '켜짐' : '꺼짐';
-      ctx.fillStyle = shakeEnabled ? '#58a6ff' : '#6e7681';
+      ctx.fillText(label, pad, y);
+      const vx = pad + ctx.measureText(label).width + gap;
+      const val = on ? '켜짐' : '꺼짐';
+      ctx.fillStyle = on ? '#58a6ff' : '#6e7681';
       ctx.fillText(val, vx, y);
       const hx = vx + ctx.measureText(val).width + gap;
       ctx.fillStyle = '#484f58';

@@ -1956,6 +1956,253 @@ function ok(name, cond, detail) {
     `fillRect ${noLeak} → ${withLeak} (차이 ${withLeak - noLeak})`);
 }
 
+// ── 사운드 ────────────────────────────────────────────────────
+// 2.9. 소리는 헤드리스에서 못 들으므로 여기서 보는 것은 **언제 나고 언제 안 나는가**
+// 하나다. 음색은 DESIGN.md 의 표가 정본이고 눈으로 확인할 방법이 없다.
+// 제일 위험한 곳은 소리가 안 나는 게 아니라 **소리가 밸런스를 건드리는 것**이다 —
+// 사운드 전용 난수 스트림을 안 쓰면 소리를 낸 판과 안 낸 판에서 fxSeed 가 갈리고,
+// 그건 seedcheck 가 아니라 verify:build 의 두 페이지가 갈리는 것으로 나타난다.
+{
+  console.log('사운드');
+  const sum = o => Object.values(o).reduce((a, b) => a + b, 0);
+
+  // ① 지연 개방. 로드만으로 AudioContext 를 만들면 브라우저가 제스처 전 컨텍스트를
+  // suspended 로 태우고, 그 상태로 굳으면 그 판은 영영 소리가 안 난다.
+  {
+    const g = load();
+    ok('로드만으로는 오디오가 안 열린다', g.sfxStats().open === false, JSON.stringify(g.sfxStats()));
+    // sfxUnlock 을 안 부른 채 한 판을 완주한다. 예외도 안 나고 큐도 전부 0 이어야 한다 —
+    // 밸런스 경로(greedy/tune/seedcheck)가 도는 조건이 정확히 이것이다.
+    const res = greedy(g, { stage: 0, deck: ['mortar', 'marksman', 'frost'] });
+    const st = g.sfxStats();
+    ok('미개방 판은 한 판을 완주해도 소리를 안 낸다',
+      st.open === false && sum(st.played) === 0 && sum(st.dropped) === 0 && st.voices === 0,
+      res.result + ' w' + res.wave + ' / ' + JSON.stringify(st.played));
+  }
+
+  // ② 쿨다운은 **오디오 시계**로 잰다. 게임 dt 로 재면 배속 x4 에서 쿨다운도 4배
+  // 빨리 풀리고, 히트스톱 프레임에는 dt 누적이 통째로 멈춘다.
+  {
+    const g = load();
+    g.sfxUnlock();
+    ok('pointerdown 이 부르면 열린다', g.sfxStats().open === true);
+    g.sfxUnlock();
+    ok('  멱등이다 (탭 복귀마다 불린다)', g.sfxStats().open === true);
+
+    for (let i = 0; i < 100; i++) g.sfx('shot');
+    ok('시계가 멈춰 있으면 첫 발만 통과',
+      g.sfxStats().played.shot === 1 && g.sfxStats().dropped.shot === 99,
+      JSON.stringify(g.sfxStats().played) + ' / ' + JSON.stringify(g.sfxStats().dropped));
+
+    let pass = 0;
+    for (let i = 0; i < 10; i++) { g.audio.advance(g.SFX.shot.cd); if (g.sfx('shot')) pass++; }
+    ok('  쿨다운만큼 감으면 매번 통과', pass === 10, pass + '/10');
+
+    // 게임 시간을 아무리 흘려도 오디오 시계가 안 가면 큐는 안 열린다.
+    const before = g.sfxStats().played.shot;
+    for (let i = 0; i < 60; i++) g.update(1 / 30);
+    g.sfx('shot');
+    ok('  게임 dt 로는 쿨다운이 안 풀린다', g.sfxStats().played.shot === before,
+      before + ' → ' + g.sfxStats().played.shot);
+
+    // 길이가 쿨다운보다 길면 자기 꼬리와 겹쳐서 그 자체로 하나의 톤이 된다.
+    // 예외가 둘 있고 둘 다 이유가 다르다(DESIGN §2.9 의 표):
+    //   blast   — 자체 쿨다운이 없다. 게이트가 shakeCd(0.25)라 실효 듀티는 72% 다
+    //   killBig — 판당 15회뿐이라 자기 꼬리와 겹칠 일이 사실상 없다. 그래서 cd 를
+    //             밀도 제한이 아니라 "정예가 연달아 죽을 때의 최소 간격"으로 쓴다
+    const REPEATING = ['shot', 'kill', 'leak'];
+    const duty = REPEATING.map(k => k + ' ' + Math.round(g.SFX[k].len / g.SFX[k].cd * 100) + '%');
+    ok('  반복 큐는 길이가 쿨다운보다 짧다 (듀티 <= 72%)',
+      REPEATING.every(k => g.SFX[k].len / g.SFX[k].cd <= 0.72), duty.join(' · '));
+    ok('  blast 는 자체 쿨다운이 없다 (게이트는 shakeCd)',
+      g.SFX.blast.cd === 0 && g.SFX.blast.len < g.BLAST_SHAKE_CD,
+      g.SFX.blast.len + ' < ' + g.BLAST_SHAKE_CD);
+    // 경고음은 매번 같아야 경고로 읽힌다.
+    ok('  leak 만 피치 스프레드가 0',
+      g.SFX.leak.spread === 0 && Object.entries(g.SFX).every(([k, c]) => k === 'leak' || c.spread > 0),
+      Object.entries(g.SFX).map(([k, c]) => k + ' ' + c.spread).join(' · '));
+  }
+
+  // ③ 보이스 상한. 2.6 의 파티클이 "막지 말고 덮어쓴다"인 것과 정반대로 **드롭**이다 —
+  // 파편은 안 보이면 정보가 사라지지만 소리는 겹칠수록 나빠진다.
+  {
+    const g = load();
+    g.sfxUnlock();
+    const names = ['shot', 'blast', 'kill', 'killBig', 'leak'];
+    for (let i = 0; i < 100; i++) g.sfx(names[i % names.length]);
+    const st = g.sfxStats();
+    ok('시계 고정 + 큐 100회 → 상한을 안 넘는다', st.voices <= g.SFX_VOICE_CAP,
+      st.voices + '/' + g.SFX_VOICE_CAP);
+    ok('  통과한 수가 곧 상한이다', sum(st.played) === g.SFX_VOICE_CAP,
+      JSON.stringify(st.played));
+    ok('  초과분은 전부 드롭이다', sum(st.played) + sum(st.dropped) === 100,
+      sum(st.played) + ' + ' + sum(st.dropped));
+    // onended 가 안 오는 환경(여기가 그렇다)에서도 보이스는 회수돼야 한다.
+    // 안 그러면 상한에 막혀 그 판의 소리가 통째로 죽는다.
+    g.audio.advance(1);
+    ok('  시간이 지나면 보이스가 회수된다', g.sfx('blast') === true && g.sfxStats().voices < g.SFX_VOICE_CAP,
+      String(g.sfxStats().voices));
+  }
+
+  // ④ 등급 마스킹. 정예 처치 순간에 잡몹 처치음이 얹히면 2.8 이 흔들림으로 갈라 놓은
+  // 등급이 귀에서 도로 뭉친다.
+  {
+    const g = load();
+    g.sfxUnlock();
+    g.sfx('killBig');
+    g.sfx('kill');
+    ok('정예 처치음이 잡몹 처치음을 가린다', g.sfxStats().played.kill === 0,
+      JSON.stringify(g.sfxStats().played));
+    g.audio.advance(0.30);
+    ok('  0.30초 뒤에는 다시 난다', g.sfx('kill') === true && g.sfxStats().played.kill === 1,
+      JSON.stringify(g.sfxStats().played));
+  }
+
+  // ④-2 사운드 난수는 **별개 스트림**이다. fxRand() 를 한 칸이라도 밀면 소리를 낸 판과
+  // 안 낸 판(음소거·미개방)에서 파티클 각도가 갈리고, 그건 게임 상태에 아무 흔적을
+  // 안 남긴 채 verify:build 의 두 페이지 그림 차이로만 나타난다. 그런데 verify:build 는
+  // pointerdown 을 한 번도 안 보내서 오디오를 안 연다 — 어느 하네스도 못 잡는다.
+  // 그래서 여기서 fxSeed 를 직접 잰다.
+  {
+    const g = load();
+    g.sfxUnlock();
+    const seedBefore = g.fxState();
+    const names = ['shot', 'blast', 'kill', 'killBig', 'leak'];
+    for (let i = 0; i < 50; i++) { g.audio.advance(0.4); g.sfx(names[i % names.length]); }
+    ok('사운드는 fxSeed 를 한 칸도 안 민다', g.fxState() === seedBefore,
+      seedBefore + ' → ' + g.fxState() + ' (통과 ' + sum(g.sfxStats().played) + '회)');
+  }
+
+  // ⑤ 훅 위치. 발사음의 유일한 자리가 muzzle() 이라, 2.7 이 화염에서 구조로 잠근
+  // 제외 목록(서리탑·조폐소·오라·장판·tick 딜)이 소리에 그대로 물려진다.
+  const board = (deck, use) => {
+    const h = load();
+    h.sfxUnlock();
+    h.pickStage(0);
+    deck.forEach(k => h.toggleDeckPick(k));
+    h.startRun();
+    h.state.gold = 99999;
+    for (let i = 0; i < 12; i++) h.summon(use[i % use.length]);
+    h.state.wave = 5;
+    h.rushWave();
+    // 오디오 시계는 실시간이다. 게임 시간과 같이 흘려야 쿨다운이 실제처럼 열린다.
+    // 600스텝(=20초)인 이유는 적이 스폰 지점에서 타워 사거리까지 걸어와야 하기
+    // 때문이다. 200스텝이면 사거리가 제일 긴 관측소·마력로만 쏘고 나머지는 0 이라,
+    // "훅이 빠졌다"와 "아직 적이 안 왔다"가 구분되지 않는다.
+    for (let i = 0; i < 600; i++) { h.update(1 / 30); h.audio.advance(1 / 30); }
+    return h;
+  };
+  {
+    const quiet = board(['frost', 'mint', 'marksman'], ['frost', 'mint']);
+    ok('서리탑·조폐소만 있는 판은 발사음이 0', quiet.sfxStats().played.shot === 0,
+      JSON.stringify(quiet.sfxStats().played));
+    for (const k of ['shredder', 'eroder', 'marksman', 'arc', 'mortar']) {
+      const loud = board([k, 'frost', 'mint'], [k]);
+      ok('  ' + k + ' 는 발사음을 낸다', loud.sfxStats().played.shot > 0,
+        JSON.stringify(loud.sfxStats().played));
+    }
+  }
+
+  // ⑥ 나머지 훅. 큐마다 한 줄씩이라 지워도 게임이 그대로 돌아간다 —
+  // 실제로 소리가 그 사건에서 나는지를 직접 센다.
+  {
+    const g = load();
+    const { state } = g;
+    g.sfxUnlock();
+    g.pickStage(0);
+    ['mortar', 'marksman', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5;
+    state.phase = 'wave';
+    state.spawnQueue.length = 0;
+    const put = (kind) => {
+      g.spawnEnemy(kind);
+      const e = state.enemies[state.enemies.length - 1];
+      e.x = 3; e.y = 4;
+      return e;
+    };
+
+    g.killEnemy(put('grunt'), null, 'physical');
+    ok('일반 처치는 kill 을 낸다', g.sfxStats().played.kill === 1, JSON.stringify(g.sfxStats().played));
+    g.audio.advance(1);
+    g.killEnemy(put('elite'), null, 'physical');
+    const kb = g.sfxStats().played;
+    ok('정예 처치는 killBig 만 낸다', kb.killBig === 1 && kb.kill === 1, JSON.stringify(kb));
+
+    // 착탄음은 shakeCd 게이트를 흔들림과 **공유**한다. 소리만 나고 안 흔들리는
+    // 프레임이 원리적으로 없어야 한다.
+    g.audio.advance(1);
+    g.resetImpact();
+    g.summon('mortar');
+    const mortar = state.towers[state.towers.length - 1];
+    const boom = () => {
+      state.enemies.length = 0;
+      state.shells.length = 0;
+      for (const t of state.towers) t.cd = 99;
+      put('grunt').x = 0;                       // 웨이브가 안 끝나게 붙잡아 둔다
+      state.enemies[0].y = 0;
+      state.shells.push({ x: 1, y: 1, tx: 3.5, ty: 4.5, t: 0.5, tt: 0.5, tower: mortar.id, dmg: 1, radius: 1.5 });
+      g.update(1 / 30);
+    };
+    const b0 = g.sfxStats().played.blast;
+    boom();
+    ok('박격포 착탄은 blast 를 낸다',
+      g.sfxStats().played.blast === b0 + 1 && g.shake.amp === g.BLAST_SHAKE_AMP,
+      JSON.stringify(g.sfxStats().played));
+    // shakeCd 가 아직 살아 있다. 흔들림이 안 되살아나면 소리도 안 나야 한다.
+    g.audio.advance(1);
+    boom();
+    ok('  흔들림과 1:1 이다 (쿨다운 안에서는 둘 다 없다)',
+      g.sfxStats().played.blast === b0 + 1, JSON.stringify(g.sfxStats().played));
+
+    // 누수. 2.6 이 금지한 것은 보드 층(파편·셀 좌표·killEnemy)이고 소리는 그 셋을 안 쓴다.
+    g.audio.advance(1);
+    state.towers.length = 0;              // 타워가 대신 죽여버리면 검사가 무의미하다
+    state.enemies.length = 0;
+    g.resetParticles();
+    const killsBefore = g.sfxStats().played.kill;
+    const leaker = put('grunt');
+    leaker.dist = g.laneLen(leaker.lane);
+    g.update(1 / 30);
+    ok('누수는 leak 를 낸다', g.sfxStats().played.leak === 1, JSON.stringify(g.sfxStats().played));
+    ok('  누수에는 처치음도 파편도 안 난다',
+      g.sfxStats().played.kill === killsBefore && g.aliveParticles() === 0,
+      JSON.stringify(g.sfxStats().played) + ' / 파편 ' + g.aliveParticles());
+  }
+
+  // ⑦ 음소거. 흔들림 토글과 같은 형태다 — 단독 키, 세이브 번들·SAVE_VERSION 불변.
+  {
+    const g = board(['marksman', 'frost', 'mint'], ['marksman']);
+    const before = JSON.stringify(g.sfxStats().played);
+    const droppedBefore = JSON.stringify(g.sfxStats().dropped);
+    ok('음소거 전에는 소리가 났다', g.sfxStats().played.shot > 0, before);
+    const snapBefore = JSON.stringify(g.snapshotRun());
+    const bundleBefore = JSON.stringify(g.saveBundle());
+
+    g.setSoundEnabled(false);
+    for (let i = 0; i < 200; i++) { g.update(1 / 30); g.audio.advance(1 / 30); }
+    ok('음소거하면 어떤 큐도 안 는다', JSON.stringify(g.sfxStats().played) === before,
+      before + ' → ' + JSON.stringify(g.sfxStats().played));
+    // 1번 게이트에서 조기 반환하므로 드롭으로도 안 샌다. 여기서 드롭이 늘면
+    // 음소거가 게인만 0 으로 만들고 노드는 계속 만들고 있다는 뜻이다.
+    ok('  드롭으로도 안 샌다 (1번 게이트에서 조기 반환)',
+      JSON.stringify(g.sfxStats().dropped) === droppedBefore,
+      droppedBefore + ' → ' + JSON.stringify(g.sfxStats().dropped));
+    ok('  단독 키에 저장된다', g.storage.getItem('cant-hold-sound') === '0',
+      String(g.storage.getItem('cant-hold-sound')));
+    ok('  세이브 번들에는 안 들어간다', !bundleBefore.includes('sound')
+      && JSON.parse(bundleBefore).v === JSON.parse(JSON.stringify(g.saveBundle())).v,
+      bundleBefore.slice(0, 60));
+    ok('  스냅샷 문자열이 안 변한다', JSON.stringify(g.snapshotRun()) === snapBefore);
+
+    g.setSoundEnabled(true);
+    ok('  다시 켜면 저장값도 돌아온다', g.storage.getItem('cant-hold-sound') === '1',
+      String(g.storage.getItem('cant-hold-sound')));
+    g.toggleSound();
+    ok('  토글은 반대로 뒤집는다', g.sfxStats().enabled === false, String(g.sfxStats().enabled));
+  }
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {
