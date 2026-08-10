@@ -904,6 +904,136 @@ function ok(name, cond, detail) {
   ok('이어할 판은 더 나아간 쪽', merged.run.stage === 1, 'stage ' + merged.run.stage);
 }
 
+// ── 관측소 표적 유지 ──────────────────────────────────────────
+// 매 발 HP 최고를 다시 고르면 관측소는 연속타격을 원리적으로 못 쌓는다. 자기가 방금
+// 깎은 놈이 그만큼 내려가 다음 발에는 다른 놈이 1위가 되기 때문이다. 실측 평균
+// streak 1.21(최대 5) — 속사 딜 보너스가 설계 +40% 인데 +9.7% 로만 나왔고 표식(A1)의
+// 5연타는 시간의 3% 만 켜졌다. 이 회귀는 시뮬 사망 웨이브에도 잘 안 드러나서
+// (기여도 −1.51 이 유일한 신호였다) **streak 이 쌓이는지 자체를 여기서 잠근다.**
+{
+  console.log('관측소 표적 유지');
+  const g = load();
+  const { state } = g;
+  g.pickStage(0);
+  ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.wave = 5;
+
+  const tower = (o = {}) => {
+    const t = { id: 800, gx: 2, gy: 8, kind: 'marksman', star: 5, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0, ...o };
+    state.towers.length = 0; state.towers.push(t);
+    return t;
+  };
+  // 죽지 않을 만큼 두꺼운 적을 타워 발밑에 세운다. 표적 선택만 보는 시험이라
+  // 이동·사망이 끼면 무엇 때문에 표적이 갈렸는지가 안 갈린다.
+  const enemy = (hp, gx = 2, gy = 8) => {
+    g.spawnEnemy('grunt');
+    const e = state.enemies[state.enemies.length - 1];
+    e.hp = e.maxHp = hp; e.x = gx; e.y = gy;
+    return e;
+  };
+  const fire = (t) => { t.cd = 0; g.fireTower(t, 0); };
+
+  let t = tower();
+  const big = enemy(1e9), small = enemy(9e8);
+  fire(t);
+  ok('처음에는 HP 최고를 고른다', t.lastTarget === big.id, String(t.lastTarget));
+  const firstHp = big.hp;
+  ok('실제로 그놈을 때린다', firstHp < 1e9);
+
+  // 한 발 맞은 big 이 small 보다 낮아지도록 손으로 눌러 둔다. 옛 코드(매 발 HP 정렬)는
+  // 여기서 반드시 small 로 갈아탔고 streak 이 1 로 리셋됐다.
+  big.hp = small.hp - 1;
+  for (let i = 0; i < 5; i++) fire(t);
+  ok('HP 1위가 바뀌어도 표적을 안 바꾼다', t.lastTarget === big.id, String(t.lastTarget));
+  ok('연속타격이 그만큼 쌓인다', t.streak === 6, String(t.streak));
+  ok('5연타 표식이 켜진다', big.markT > 0, String(big.markT));
+
+  // 죽으면 놓는다 — 그 다음 표적은 다시 HP 최고다
+  big.dead = true;
+  fire(t);
+  ok('표적이 죽으면 다시 고른다', t.lastTarget === small.id, String(t.lastTarget));
+  ok('새 표적이면 연속타격은 1 부터', t.streak === 1, String(t.streak));
+
+  // 사거리를 벗어나도 놓는다
+  const far = enemy(5e8, 2, 8);
+  small.x = 20; small.y = 20;
+  fire(t);
+  ok('사거리를 벗어나면 다시 고른다', t.lastTarget === far.id, String(t.lastTarget));
+
+  // 사거리에 아무도 없으면 0 으로 리셋된다(옛 동작 유지)
+  far.x = 20; far.y = 20;
+  fire(t);
+  ok('사거리가 비면 연속타격이 끊긴다', t.streak === 0, String(t.streak));
+
+  // 관통사격(B2)은 겨눈 놈이 피해 목록의 첫 칸이라야 한다. HP 정렬 상위 4개를 그대로
+  // 쓰면 표적을 유지하는 동안 main 이 5위 밖으로 밀려 "겨냥한 놈만 안 맞는" 그림이 된다.
+  state.enemies.length = 0;
+  t = tower({ b3: 'B', b5: 'B2' });
+  const held = enemy(1e9);
+  fire(t);
+  ok('B2 도 표적을 잡는다', t.lastTarget === held.id, String(t.lastTarget));
+  for (let i = 0; i < 5; i++) enemy(2e9);              // 전부 held 보다 HP 가 높다
+  const hpBefore = held.hp;
+  fire(t);
+  ok('B2 는 유지 표적을 반드시 관통 목록에 넣는다', held.hp < hpBefore,
+    '깎인 딜 ' + Math.round(hpBefore - held.hp));
+  state.enemies.length = 0;
+}
+
+// ── 파쇄자 물리 취약 ──────────────────────────────────────────
+// 적 8종의 방어력은 5/40/5/0/8/12/0/25 로 **절반이 0~5 다.** 파쇄자가 방깎만 쌓던
+// 시절에는 그 절반에게 오라가 사실상 아무 일도 안 했고, 그게 기여도 −2.7(7종 최하위)
+// 로만 보였다. 침식자는 같은 구멍을 이미 마법 취약으로 메워 놨는데(fireTower 주석)
+// 파쇄자만 그 짝이 없었다. 대칭이 다시 깨지면 여기서 잡는다.
+{
+  console.log('파쇄자 물리 취약');
+  const g = load();
+  const { state } = g;
+  g.pickStage(0);
+  ['shredder', 'marksman', 'mint'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.wave = 5;
+
+  const t = { id: 700, gx: 2, gy: 8, kind: 'shredder', star: 5, b3: 'A', b5: null, t7: null,
+    cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 };
+  state.towers.push(t);
+
+  const put = (kind) => {
+    g.spawnEnemy(kind);
+    const e = state.enemies[state.enemies.length - 1];
+    e.x = 2; e.y = 8; e.hp = e.maxHp = 1e7;
+    return e;
+  };
+
+  const e = put('swift');
+  ok('질주몹은 방어력이 0 이다', g.ENEMY.swift.armor === 0, String(g.ENEMY.swift.armor));
+  const plain = g.damage(e, 1000, 'physical', null);
+
+  g.fireTower(t, 1);                                   // 오라 1초치
+  ok('오라가 물리 취약을 남긴다', e.physVuln > 0, e.physVuln.toFixed(3));
+  ok('방깎은 여전히 아무 일도 못 한다', g.effArmor(e) === 0, String(g.effArmor(e)));
+
+  const amped = g.damage(e, 1000, 'physical', null);
+  ok('방어력 0 인 적에게도 오라가 값을 한다', amped > plain,
+    plain.toFixed(1) + ' → ' + amped.toFixed(1));
+  // §6.1 증폭 가산 규칙. 곱으로 새면 3중첩에서 터진다 — 값까지 박아 둔다.
+  ok('취약은 가산으로 한 번만 곱해진다', Math.abs(amped - plain * (1 + e.physVuln)) < 1e-6,
+    (amped / plain).toFixed(4) + ' vs ' + (1 + e.physVuln).toFixed(4));
+
+  // 마법딜에는 안 붙는다 — 물리 취약은 마법 취약(ampMagic)의 짝이지 그 자신이 아니다
+  const mBefore = g.damage(e, 1000, 'magic', null);
+  e.physVuln = 0.9;
+  ok('마법딜은 물리 취약을 안 탄다', Math.abs(g.damage(e, 1000, 'magic', null) - mBefore) < 1e-6);
+
+  // 면역몹에는 안 걸린다(debuffScale). 침식자 쪽과 같은 규칙이다
+  const im = put('immune');
+  g.fireTower(t, 1);
+  ok('면역몹에는 안 걸린다', !im.physVuln, String(im.physVuln));
+  state.enemies.length = 0; state.towers.length = 0;
+}
+
 // ── 타워 대등성 ───────────────────────────────────────────────
 // 한 타워가 정답이거나 함정이면 덱과 합성 선택이 의미를 잃는다.
 // 전체 측정은 npm run parity, 여기서는 가벼운 한 분기만 본다.

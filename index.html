@@ -54,6 +54,12 @@ const CFG = {
   HP_GROWTH: 1.16,     // 웨이브당 적 HP 증가율
   GOLD_BASE: 70,       // 웨이브 클리어 골드
   GOLD_GROWTH: 1.11,   // 웨이브당 클리어 골드 증가율
+
+  // 파쇄자 물리 취약의 세기. 1.0 = 침식자 마법 취약과 같은 계수(0.03 + 0.02*성급).
+  // 손으로 맞춘 값이 아니라 tools/parity.js 로 0/1/2/3/4 를 재고 |기여도| 가 0 에
+  // 가장 가까워지는 값을 고른 것이다. CFG 에 두는 이유는 그 스윕을 다시 돌릴 수
+  // 있어야 하기 때문이다(tools/sim.js 의 patch 는 CFG 키만 덮어쓴다).
+  SHRED_VULN: 3,
   MINT_BASE: 12,       // 조폐소 웨이브 수입 (x 성급 계수)
   FROST_FIELD: 1.2,    // 서리탑 장판 총 딜 계수 (범위 안 인원수로 나눠 들어간다)   // 서리탑 장판 딜 계수 (단일 DPS 대비)
 };
@@ -1374,6 +1380,12 @@ function ampAll(e) {
   return a;
 }
 function ampMagic(e) { return (e.magicVuln || 0) + (e.inDeepAura ? 0.15 : 0); }
+// 물리 취약은 마법 취약(ampMagic)의 짝이다. 파쇄자가 방깎만 쌓던 시절에는 방어력이
+// 0~5 인 적(질주 0 · 군집 0 · 보병 5 · 마갑 5 — 8종 중 4종)에게 오라가 사실상
+// 아무 일도 안 했다. 침식자가 같은 구멍을 이미 이렇게 메웠다(fireTower 주석 참고).
+// **속성 상성이 아니다**(§7) — 새 축을 만든 게 아니라 이미 있는 마법 취약의 대칭을
+// 채운 것이고, 타입은 여전히 물리/마법/순수 3종뿐이다.
+function ampPhys(e) { return e.physVuln || 0; }
 
 // tick = 매 프레임 들어가는 지속딜. 피격 플래시를 내지 않는다.
 // 안 그러면 장판 안의 적이 계속 흰색이라 다른 상태 표시가 전부 묻힌다.
@@ -1387,6 +1399,7 @@ function damage(e, raw, type, src, tick) {
       if (ENEMY[e.kind].elite) d *= 1.4;
     }
     d = applyArmor(d, armor);
+    d *= 1 + ampPhys(e);
   } else if (type === 'magic') {
     d *= 1 - effMres(e);
     d *= 1 + ampMagic(e);
@@ -1460,6 +1473,14 @@ function applyStacks(e, n, per, src) {
   e.armorCap = Math.max(e.armorCap || 0, cap);
   e.armorStacks = Math.min(cap, e.armorStacks + n * s);
   e.armorFed = true;   // 이번 프레임에 오라가 닿았다
+
+  // 방깎만으로는 방어력 0~5 인 적(8종 중 4종)에게 아무 일도 안 일어난다.
+  // 침식자가 마방에서 겪은 것과 같은 구멍이고, 답도 같다 — 감소는 중갑·정예
+  // 카운터로 남기고 범용 가치는 취약으로 따로 준다. 계수 모양(0.03 + 0.02*성급)을
+  // 침식자와 같게 두는 것은 두 오라가 한 규칙을 쓴다는 뜻이다. 분기 배수는 안 붙인다
+  // — 분기는 스택당 방깎·상한·범위에서 이미 갈리고, 여기는 그 분기와 무관하게
+  // "절반의 적에게 무효"를 메우는 자리다.
+  e.physVuln = Math.max(e.physVuln || 0, (0.03 + 0.02 * src.star) * CFG.SHRED_VULN * s);
 
   // 파열: 상한 도달 시 스택을 태워 폭발
   if (src.b5 === 'A1' && e.armorStacks >= cap) {
@@ -1583,7 +1604,18 @@ function fireTower(t, dt) {
 
   if (t.kind === 'marksman') {
     targets.sort((a, b) => b.hp - a.hp);
-    const main = targets[0];
+    // HP 최고를 **매 발** 다시 고르면 관측소는 연속타격을 원리적으로 못 쌓는다.
+    // 자기가 방금 깎은 놈이 그만큼 HP 가 내려가 다음 발에는 다른 놈이 1위가 되므로,
+    // 표적이 계속 갈리고 streak 이 1 로 리셋된다. 실측 평균 1.21(최대 5) — 설계 최대
+    // +40% 인 속사 딜 보너스가 +9.7% 로만 나오고, 표식(A1)의 「5연타 시 전체 딜 +20%」는
+    // 시간의 3% 만 켜졌다. 그래서 A 계열 기여도가 −1.51 로 혼자 음수였다.
+    // 수치(streak 계수 8%)로 메우면 3% 확률로 터지는 5연타만 4배가 되어 분산만 커진다.
+    // 고칠 것은 계수가 아니라 조건이다 — **직전 표적이 아직 사거리 안에 살아 있으면
+    // 그놈을 계속 노린다.** 사거리 이탈·사망은 targets(= enemiesInRange, !dead)에서
+    // 빠지므로 find 가 undefined 를 내고 자동으로 재조준된다. 새로 고를 때의 규칙은
+    // 그대로 HP 최고다 — 바뀐 것은 "고르는 기준"이 아니라 "언제 다시 고르는가"다.
+    const held = targets.find(e => e.id === t.lastTarget);
+    const main = held || targets[0];
     muzzle(t, main.x + 0.5, main.y + 0.5);
     t.streak = (t.lastTarget === main.id) ? (t.streak || 0) + 1 : 1;
     t.lastTarget = main.id;
@@ -1591,7 +1623,10 @@ function fireTower(t, dt) {
     let d = towerDmg(t);
     if (t.b3 === 'B' && Math.random() < 0.25) d *= 2;
 
-    const hits = t.b5 === 'B2' ? targets.slice(0, 4) : [main];
+    // 관통사격(B2)은 main 이 반드시 첫 칸이라야 한다. HP 정렬 상위 4개를 그대로
+    // 쓰면 표적을 유지하는 동안 main 이 5위 밖으로 내려가는 순간 총구·빔이 겨눈 적이
+    // 피해 목록에서 빠진다 — 겨냥한 놈만 안 맞는 그림이 된다.
+    const hits = t.b5 === 'B2' ? [main, ...targets.filter(e => e !== main)].slice(0, 4) : [main];
     for (const e of hits) {
       // 즉사 2경로도 빔은 그린다. 안 그리면 총구 화염만 나고 선이 없는 채로
       // 적이 터져서 "무엇이 죽였는지"가 화면에서 끊긴다.
@@ -1766,6 +1801,7 @@ function updateCombat(dt) {
     e.armorFed = false;
     e.mresCut = e.plagueT > 0 ? e.plagueCut : 0;
     e.magicVuln = e.plagueT > 0 ? e.plagueVuln : 0;
+    e.physVuln = 0;                 // 역병 같은 잔류 경로가 없어 조건 없이 0 이다
     e.healCut = 0;
     e.inDeepAura = false;
     e.slowNext = 0;
@@ -2784,7 +2820,7 @@ function spawnEnemy(kind) {
     lane, dist: 0, x: start.x, y: start.y,
     hitFlash: 0, dead: false,
     armorStacks: 0, armorPer: 2, armorCap: 0, armorFed: false,
-    mresCut: 0, magicVuln: 0, arcResonance: 0, plagueT: 0, plagueCut: 0, plagueVuln: 0,
+    mresCut: 0, magicVuln: 0, physVuln: 0, arcResonance: 0, plagueT: 0, plagueCut: 0, plagueVuln: 0,
     healCut: 0, inDeepAura: false,
     slowAmt: 0, slowNext: 0, frostStacks: 0,
     frozen: 0, stun: 0, pendingVuln: false, vulnT: 0, markT: 0,
