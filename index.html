@@ -314,7 +314,10 @@ const state = {
   corpses: [],         // 처치 잔상(squash). 파편과 같은 규칙이지만 별도 목록이다 — spawnCorpse 참고
   hasHanpa: false,     // 한파 타워 존재 여부 (프레임마다 갱신)
   selected: null,      // 선택된 타워 id
-  picker: null,        // {gx, gy} — 빈 칸에 뭘 소환할지 고르는 중
+  // mode 'summon'      {mode, gx, gy, kind} — 빈 칸에 뭘 소환할지 고르는 중
+  // mode 'mergePlace'  {mode, aId, bId, size, star, spots, sel} — 2x2 합성 결과를 어디에 놓을지
+  // 두 모드가 한 필드를 쓰는 이유는 beginMergePlace 주석에 있다(정리 경로가 넷이다).
+  picker: null,
   paused: false,       // 일시정지 (버튼 또는 ESC)
   speed: 1,            // 시뮬 배속 (1·2·4). 웨이브 사이 정지가 없어진 뒤로
                        //   느긋한 구간을 건너뛰고 싶어 하는 사람들이 있어 넣었다.
@@ -518,14 +521,39 @@ function mergeSpot(a, b, size) {
   return null;
 }
 
-function mergeTowers(a, b) {
+// 놓을 수 있는 자리 **전부**. mergeSpot 이 "하나를 고르는" 함수라면 이건 "무엇을
+// 고를 수 있었는지" 를 낸다 — 2x2 결과에서 자리를 플레이어에게 묻기 위한 목록이다.
+//
+// mergeSpot 을 이걸로 갈아끼우지 않는다. 그쪽의 b→a→좌상단 우선순위는 1x1 합성이
+// 손을 뗀 자리에 생긴다는 규칙 그 자체이고, 배치 모드의 기본 선택(sel)도 그 값이다.
+// 여기서 순서는 gy↑ → gx↑ 하나뿐이다. 화면에 후보를 그리는 순서와 같아야 하고,
+// 난수를 쓰면 같은 판이 두 번 다르게 보인다(2.6 의 연출 난수 규칙과 같은 이유).
+//
+// 불변식: mergeSpot(a,b,s) !== null ⟺ mergeSpots(a,b,s).length > 0.
+// 두 함수가 같은 occupancy(a,b 제외) 와 같은 canPlace 를 보기 때문에 성립한다 —
+// mergeSpot 의 b/a 오프셋 검사가 찾는 자리는 전부 이 전체 스캔에도 걸린다.
+function mergeSpots(a, b, size) {
+  const occ = occupancy(new Set([a.id, b.id]));
+  const out = [];
+  for (let gy = firstOpenRow(); gy < CFG.BOARD_H; gy++)
+    for (let gx = 0; gx < CFG.BOARD_W; gx++)
+      if (canPlace(gx, gy, size, occ)) out.push({ gx, gy });
+  return out;
+}
+
+// at 을 주면 그 자리에 놓는다(배치 모드). 생략하면 지금까지처럼 mergeSpot 이 고른다.
+// at 이 와도 canPlace 로 다시 본다 — 호출부를 믿으면 모드를 열어 둔 사이에 판이
+// 바뀐 경우(행 개방, 다른 타워 배치)에 겹쳐 놓인 타워가 조용히 생긴다.
+function mergeTowers(a, b, at) {
   if (!canMerge(a, b)) return null;
   const cost = mergeIsFree() ? 0 : mergeCost(a.star);
   if (state.gold < cost) { toast('합성 비용 부족'); return null; }
 
   const star = a.star + 1;
   const size = mergeResultSize(a);
-  const spot = mergeSpot(a, b, size);
+  const spot = at
+    ? (canPlace(at.gx, at.gy, size, occupancy(new Set([a.id, b.id]))) ? { gx: at.gx, gy: at.gy } : null)
+    : mergeSpot(a, b, size);
   // 성급만 말하면 왜 막혔는지 안 읽힌다. 몇 칸이 필요한지까지 붙인다.
   if (!spot) { toast(size > 1 ? `${star}성은 2x2 — 빈 자리가 없다` : '자리 없음'); return null; }
 
@@ -561,6 +589,79 @@ function mergeTowers(a, b) {
 
 // 분기 줄기를 한 문자열로. 두 부모가 같은 빌드인지 비교하는 데만 쓴다.
 function branchChain(t) { return (t.b3 || '-') + '/' + (t.b5 || '-'); }
+
+// ── 2x2 결과 자리 고르기 ─────────────────────────────────────
+// 5성부터는 결과가 2x2 인데, 그 자리를 mergeSpot 이 혼자 정하고 있었다. 놓은 쪽에
+// 안 들어가면 보드를 좌상단부터 훑어 처음 걸리는 칸에 박히므로, 판에서 제일 중요한
+// 타워가 플레이어가 안 고른 자리 — 대개 사거리가 제일 안 닿는 구석 — 에 생겼다.
+//
+// **아무것도 커밋하지 않는다.** 골드도 안 깎고 부모 둘도 그대로 두고 id 두 개만
+// 들고 있는다. 취소가 곧 무동작이라 세이브·일시정지·ESC 어느 쪽으로 빠져나가도
+// 되돌릴 것이 없다. "먼저 합쳐 놓고 자리를 물은 뒤 취소하면 되돌린다" 로 만들면
+// 되돌리기가 pushChoice 큐·분기 물려받기까지 되감아야 해서 원상복구가 불가능하다.
+//
+// 형제 상태(state.mergePlace)를 새로 만들지 않고 state.picker 에 얹는 것도 같은
+// 이유다. picker 를 지우는 경로가 이미 넷(togglePause · restoreRun · restart · ESC)
+// 이고, 새 상태를 만들면 그 넷을 전부 다시 맞춰야 한다 — 하나만 빠뜨려도
+// "일시정지했다 풀면 놓은 적 없는 합성이 성사된다" 가 난다. 2.7 이 beam() 에서
+// 겪은 "규칙이 문법적으로 보이는 몇 줄에서만 지켜진다" 와 같은 함정이다.
+function beginMergePlace(a, b) {
+  // 배치를 다 시켜 놓고 마지막에 거절하는 경로가 없어야 한다. 막힐 이유는 전부 여기서 본다.
+  if (!canMerge(a, b)) return null;
+  const cost = mergeIsFree() ? 0 : mergeCost(a.star);
+  if (state.gold < cost) { toast('합성 비용 부족'); return null; }
+
+  const star = a.star + 1;
+  const size = mergeResultSize(a);
+  const spots = mergeSpots(a, b, size);
+  if (!spots.length) { toast(size > 1 ? `${star}성은 2x2 — 빈 자리가 없다` : '자리 없음'); return null; }
+
+  // 후보가 한 곳뿐이어도 연다. 어떨 땐 묻고 어떨 땐 안 묻으면 규칙이 안 읽히고,
+  // 하나뿐인 그 자리가 어디인지 보여주는 것 자체가 정보다.
+  // sel 기본값은 mergeSpot — 생각 없이 '배치' 를 누르면 오늘까지와 같은 결과가 된다.
+  state.picker = { mode: 'mergePlace', aId: a.id, bId: b.id, size, star, spots, sel: mergeSpot(a, b, size) };
+  return state.picker;
+}
+
+function mergePlaceOpen() { return !!state.picker && state.picker.mode === 'mergePlace'; }
+
+// 후보 목록에 있는 칸만 받는다. 밖을 눌러도 sel 은 안 움직이고 모드도 안 닫힌다 —
+// 배치 모드에서는 보드가 통째로 "바깥" 이라, 바깥 탭에 닫으면 빗나간 탭 한 번에
+// 합성이 날아간다. 취소는 버튼으로만.
+function mergePlaceSelect(gx, gy) {
+  if (!mergePlaceOpen()) return false;
+  const hit = state.picker.spots.find(s => s.gx === gx && s.gy === gy);
+  if (!hit) return false;
+  state.picker.sel = { gx: hit.gx, gy: hit.gy };
+  return true;
+}
+
+function mergePlaceCommit() {
+  if (!mergePlaceOpen()) return null;
+  const p = state.picker;
+  const a = state.towers.find(t => t.id === p.aId);
+  const b = state.towers.find(t => t.id === p.bId);
+  state.picker = null;
+  if (!a || !b) return null;
+  state.selected = null;
+  // 여기서 처음으로 골드가 나가고 부모가 사라진다. 자리 재검증도 mergeTowers 안이다.
+  return mergeTowers(a, b, p.sel);
+}
+
+function mergePlaceCancel() {
+  if (!mergePlaceOpen()) return false;
+  state.picker = null;
+  return true;
+}
+
+// 읽기용 게터. 2.8 의 hitstopState() 와 같은 형태다 — 핸들러에 로직을 남기면
+// 헤드리스가 원리적으로 못 보므로, 검사 창을 게임 코드 안에 둔다.
+function mergePlaceState() {
+  if (!mergePlaceOpen()) return { open: false, aId: null, bId: null, size: 0, sel: null, spots: [] };
+  const p = state.picker;
+  return { open: true, aId: p.aId, bId: p.bId, size: p.size,
+    sel: p.sel ? { ...p.sel } : null, spots: p.spots.map(s => ({ ...s })) };
+}
 
 // ── 선택 대기열 ──────────────────────────────────────────────
 // 합성 한 번이 선택을 둘 만들 수 있다 (물려받기 → 새 성급 분기). 그리고 뒤의
@@ -2386,6 +2487,17 @@ const PICKER_ACT_H = 44;
 
 function pickerLayout() {
   if (!state.picker) return null;
+  // 배치 모드는 카드가 없다(무엇을 놓을지는 이미 정해졌다). 액션 둘의 자리도 대상 칸을
+  // 안 따라간다 — sel 이 탭마다 움직이는데 버튼까지 따라 움직이면 다음 탭이 어긋난다.
+  if (state.picker.mode === 'mergePlace') {
+    const w = Math.min(300, view.w - 40), gap = 8;
+    const x = (view.w - w) / 2, bw = (w - gap) / 2;
+    const y = view.h - HUD_BOTTOM - PICKER_ACT_H - 12;
+    return { cards: [], actions: [
+      { act: 'cancel', x, y, w: bw, h: PICKER_ACT_H },
+      { act: 'place', x: x + bw + gap, y, w: bw, h: PICKER_ACT_H },
+    ] };
+  }
   const deck = state.deck.length ? state.deck : KIND_KEYS.slice(0, CFG.DECK_SIZE);
   // 카드 한 장에 세 줄(이름 / 뭐냐 / 어디에 놓냐)이 들어간다. 고르는 자리에서
   // 쓰는 법이 안 보이면 이름과 사거리만 보고 찍게 된다.
@@ -2427,10 +2539,90 @@ function pickerHit(px, py) {
   return L.actions.find(inside) || L.cards.find(inside) || null;
 }
 
+// 2x2 결과를 어디에 놓을지 고르는 화면. 소환 피커와 두 곳이 다르다.
+//   ① 딤이 보드 위에서 훨씬 옅다 — 고를 대상이 후보 칸 자체라, 소환의 0.78 을
+//      그대로 쓰면 골라야 할 것이 통째로 묻힌다. 보드 밖은 그대로 0.78 이다
+//   ② 카드가 없다. 무엇을 놓을지는 이미 정해졌고 남은 물음은 자리 하나뿐이다
+// 흔들림은 안 탄다 — 2.8 이 "클립 밖(소환 피커 포함)은 안 흔들린다" 로 정한 그대로다.
+// 합성은 준비 단계에서만 되므로(mergeAllowed) 흔들림원 자체가 사실상 없다.
+function drawMergePlacePicker(L) {
+  const p = state.picker;
+  const a = state.towers.find(t => t.id === p.aId);
+  const b = state.towers.find(t => t.id === p.bId);
+  if (!a || !b || !p.sel) return;
+
+  const { cell } = view;
+  const bx = view.ox, by = view.oy, bw = cell * CFG.BOARD_W, bh = cell * CFG.BOARD_H;
+  ctx.fillStyle = 'rgba(13,17,23,0.26)';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = 'rgba(13,17,23,0.78)';
+  ctx.fillRect(0, 0, view.w, by);
+  ctx.fillRect(0, by + bh, view.w, view.h - by - bh);
+  ctx.fillRect(0, by, bx, bh);
+  ctx.fillRect(bx + bw, by, view.w - bx - bw, bh);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bx, by, bw, bh);
+  ctx.clip();
+
+  // ③ 그 자리의 범위 원 하나. 부모 둘의 분기가 다르면 아직 확정이 아니므로
+  //    놓은 쪽(b)의 분기로 하나만 그린다 — 두 원을 겹쳐 그리면 3.1 이 말한 대로
+  //    어느 원이 누구 건지 안 읽힌다.
+  //    후보 칸보다 **먼저** 그린다. 관측소처럼 사거리가 넓은 종류는 범위 사각형이
+  //    보드 절반을 덮는데, 그 위에 후보 칸을 얹지 않으면 옅은 칸이 통째로 씻겨 나간다.
+  drawRange({ gx: p.sel.gx, gy: p.sel.gy, kind: a.kind, star: p.star, b3: b.b3, b5: b.b5, t7: b.t7 });
+
+  // ① 후보 칸 전부. 고를 수 있는 칸이 어디인지가 이 화면의 전부다.
+  for (const s of p.spots) {
+    const q = cellToPx(s.gx, s.gy);
+    ctx.fillStyle = 'rgba(126,231,135,0.22)';
+    ctx.fillRect(q.x + 2, q.y + 2, cell - 4, cell - 4);
+    ctx.strokeStyle = 'rgba(126,231,135,0.55)';
+    ctx.lineWidth = 1;
+    roundRect(q.x + 2.5, q.y + 2.5, cell - 5, cell - 5, 5);
+    ctx.stroke();
+  }
+  // ② sel 자리의 2x2 점선 + 십자선. 드래그 중 미리보기와 **같은 함수**다 —
+  //    놓기 전과 놓은 뒤가 다른 그림이면 미리보기가 거짓말이 된다.
+  drawMergeGhost(p.sel.gx, p.sel.gy, p.size);
+  ctx.restore();
+
+  const cost = mergeIsFree() ? 0 : mergeCost(p.star - 1);
+  const price = cost === 0 ? '무료' : `${cost}G`;
+  const q = cellToPx(p.sel.gx, p.sel.gy);
+  const w = cell * p.size;
+  previewLabel(`★${p.star} · ${p.size > 1 ? '2x2 · ' : ''}${price}`, q.x + w / 2, q.y - 6, '#7ee787');
+  if (branchChain(a) !== branchChain(b))
+    previewLabel('분기는 배치 뒤에 고른다', q.x + w / 2, q.y + w + 25, '#d29922');
+
+  for (const act of L.actions) {
+    const place = act.act === 'place';
+    ctx.fillStyle = place ? '#238636' : '#21262d';
+    ctx.strokeStyle = place ? '#3fb950' : '#30363d';
+    ctx.lineWidth = 1.5;
+    roundRect(act.x, act.y, act.w, act.h, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = place ? '#fff' : '#c9d1d9';
+    ctx.font = '600 14px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(place ? `여기에 배치  ${price}` : '취소', act.x + act.w / 2, act.y + act.h / 2);
+  }
+  // 보드를 눌러 자리를 옮긴다는 걸 어디서도 안 알려 주면 기본 자리로만 놓게 된다.
+  ctx.fillStyle = '#8b949e';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  fitText('놓을 칸을 눌러 자리를 고른다', view.w / 2, L.actions[0].y - 20, view.w - 24, 11.5);
+  ctx.textAlign = 'left';
+}
+
 function drawPicker() {
   if (!state.picker) return;
   const L = pickerLayout();
   if (!L) return;
+  if (state.picker.mode === 'mergePlace') { drawMergePlacePicker(L); return; }
   const { gx, gy, kind } = state.picker;
 
   ctx.fillStyle = 'rgba(13,17,23,0.78)';
@@ -2712,6 +2904,15 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
 
+  // 배치 모드는 보드가 통째로 "바깥" 이라 바깥 탭에 안 닫힌다. 취소는 버튼으로만.
+  if (mergePlaceOpen()) {
+    const hit = pickerHit(px, py);
+    if (hit) { hit.act === 'place' ? mergePlaceCommit() : mergePlaceCancel(); return; }
+    const cc = pxToCell(px, py);
+    if (cc) mergePlaceSelect(cc.gx, cc.gy);
+    return;
+  }
+
   if (state.picker) {
     const hit = pickerHit(px, py);
     if (!hit) { state.picker = null; return; }          // 바깥을 누르면 닫는다
@@ -2732,7 +2933,7 @@ canvas.addEventListener('pointerdown', e => {
   if (id === undefined) {
     state.selected = null;
     // 빈 칸을 누르면 거기에 뭘 놓을지 고른다
-    if (canPlace(c.gx, c.gy, 1, occupancy())) state.picker = { gx: c.gx, gy: c.gy, kind: null };
+    if (canPlace(c.gx, c.gy, 1, occupancy())) state.picker = { mode: 'summon', gx: c.gx, gy: c.gy, kind: null };
     return;
   }
   drag = { id, px, py, sx: px, sy: py, moved: false };
@@ -2762,7 +2963,14 @@ canvas.addEventListener('pointerup', e => {
   if (!from || overId === undefined || overId === d.id) return;
 
   const to = state.towers.find(t => t.id === overId);
-  if (canMerge(from, to)) { mergeTowers(from, to); state.selected = null; return; }
+  // 결과가 2x2 면 자리를 묻고(커밋은 그때), 1x1 이면 지금까지처럼 바로 합친다.
+  // 1x1 은 mergeSpot 의 첫 검사(놓은 칸 자체)가 늘 통과하므로 물을 것이 없다.
+  if (canMerge(from, to)) {
+    if (mergeResultSize(from) > 1) beginMergePlace(from, to);
+    else mergeTowers(from, to);
+    state.selected = null;
+    return;
+  }
   if (!mergeAllowed()) toast('웨이브 중엔 합성 불가');
   else if (from.kind !== to.kind) toast('종류가 다름');
   else if (from.star !== to.star) toast('성급이 다름');
@@ -2833,6 +3041,12 @@ function buildSpawnQueue(wave) {
 }
 
 function startWave() {
+  // 자리를 고르는 중에 웨이브가 시작되면 합성은 취소된다. 시계를 안 멈추는 게 이
+  // 모드의 전제라서(멈추면 열고 닫기만으로 준비 시간을 무한히 늘릴 수 있다) 웨이브가
+  // 그냥 온다. 커밋 전이라 잃는 것은 없다 — 골드도 부모 타워도 그대로다.
+  // 여기서 지우는 이유는 mergeAllowed 가 준비 단계 전용이기 때문이다. 모드를 웨이브로
+  // 끌고 가면 배치를 다 시켜 놓고 마지막에 거절하는 화면이 된다.
+  if (mergePlaceOpen()) { state.picker = null; toast('웨이브 시작 — 합성 취소'); }
   state.wave++;
   state.phase = 'wave';
   state.waveT = 0;
@@ -4256,7 +4470,8 @@ function drawMergePreview(from, to) {
   const spot = mergeSpot(from, to, size);
 
   const price = cost === 0 ? '무료' : `${cost}G`;
-  const tag = size > 1 ? `★${star} · 2x2 · ${price}` : `★${star} · ${price}`;
+  // 2x2 는 놓는 순간 자리를 묻는다. 놓기 전에 그걸 알려야 "왜 갑자기 창이 뜨지" 가 안 된다.
+  const tag = size > 1 ? `★${star} · 2x2 · 자리 고르기 · ${price}` : `★${star} · ${price}`;
 
   if (!spot) {
     // 자리가 없으면 합성 자체가 막힌다. 놓아 보고 토스트로 알기 전에 보여준다.
@@ -4274,29 +4489,39 @@ function drawMergePreview(from, to) {
   const p = cellToPx(spot.gx, spot.gy);
   const w = cell * size;
 
-  if (size > 1) {
-    ctx.save();
-    ctx.fillStyle = 'rgba(126,231,135,0.16)';
-    ctx.fillRect(p.x, p.y, w, w);
-    ctx.strokeStyle = '#7ee787';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    roundRect(p.x + 1, p.y + 1, w - 2, w - 2, 8);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    // 안쪽 십자선. 한 칸이 아니라 네 칸이라는 게 이걸로 읽힌다
-    ctx.strokeStyle = 'rgba(126,231,135,0.45)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(p.x + w / 2, p.y + 5); ctx.lineTo(p.x + w / 2, p.y + w - 5);
-    ctx.moveTo(p.x + 5, p.y + w / 2); ctx.lineTo(p.x + w - 5, p.y + w / 2);
-    ctx.stroke();
-    ctx.restore();
-  }
+  drawMergeGhost(spot.gx, spot.gy, size);
 
   // 골드가 모자라면 값을 붉게. 놓아 봐야 '합성 비용 부족' 을 듣는 건 늦다
   previewLabel(poor ? `${price} 부족` : tag, p.x + w / 2, p.y - 6,
     poor ? '#f85149' : '#7ee787');
+}
+
+// 결과가 놓일 자리의 유령. 드래그 중 미리보기와 배치 모드가 **같은 그림**을 써야 한다 —
+// 놓기 전에 본 네 칸과 놓은 뒤에 고르는 네 칸이 다르게 생기면 미리보기가 거짓말이 된다.
+// 1x1 은 안 그린다: 초록 테두리로 이미 충분하고, 같은 크기 사각형을 하나 더 겹치면
+// 뭐가 달라지는지 오히려 안 읽힌다.
+function drawMergeGhost(gx, gy, size) {
+  if (size <= 1) return;
+  const { cell } = view;
+  const p = cellToPx(gx, gy);
+  const w = cell * size;
+  ctx.save();
+  ctx.fillStyle = 'rgba(126,231,135,0.16)';
+  ctx.fillRect(p.x, p.y, w, w);
+  ctx.strokeStyle = '#7ee787';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  roundRect(p.x + 1, p.y + 1, w - 2, w - 2, 8);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // 안쪽 십자선. 한 칸이 아니라 네 칸이라는 게 이걸로 읽힌다
+  ctx.strokeStyle = 'rgba(126,231,135,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(p.x + w / 2, p.y + 5); ctx.lineTo(p.x + w / 2, p.y + w - 5);
+  ctx.moveTo(p.x + 5, p.y + w / 2); ctx.lineTo(p.x + w - 5, p.y + w / 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // 미리보기 딱지. 화면 밖으로 나가지 않게 좌우로만 밀어 넣는다.

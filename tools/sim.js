@@ -75,6 +75,10 @@ const EXPOSE = [
   'CFG', 'state', 'update', 'KINDS', 'KIND_KEYS', 'ENEMY', 'WAVES', 'STAR_MULT',
   'waveHp', 'summon', 'summonCost', 'canPlace', 'occupancy', 'firstOpenRow', 'nextUnlockWave',
   'canMerge', 'mergeAllowed', 'mergeTowers', 'mergeablePair', 'mergeResultSize', 'mergeSpot', 'drawMergePreview',
+  // 2x2 자리 고르기. 핸들러(pointerdown/pointerup)에 로직을 안 남기고 이 함수들만
+  // 부르므로, 헤드리스가 탭 없이 모드를 열고 고르고 커밋·취소까지 전부 밟을 수 있다.
+  // mergePlaceState 는 2.8 의 hitstopState() 와 같은 읽기용 게터다.
+  'mergeSpots', 'beginMergePlace', 'mergePlaceSelect', 'mergePlaceCommit', 'mergePlaceCancel', 'mergePlaceState',
   'cycleSpeed', 'togglePause', 'pauseHelp', 'wrapLines',
   'applyChoice', 'branchChain', 'choiceLabel', 'clearChoices', 'mergeCost', 'mergeIsFree',
   'rushWave', 'endWave', 'towerDmg', 'towerCd',
