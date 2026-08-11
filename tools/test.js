@@ -399,6 +399,209 @@ function ok(name, cond, detail) {
   ok('자리 없으면 합성이 실제로 막힌다', state.towers.length === before, String(state.towers.length));
 }
 
+// ── 2x2 자리 고르기 ───────────────────────────────────────────
+// 5성 이상 합성 결과가 놓일 자리를 플레이어가 고른다. 이 절이 잠그는 것은 두 가지다.
+//   ① 커밋 전까지 판이 한 톨도 안 변한다 — 취소가 곧 무동작이라야 세이브·정지·ESC
+//      어느 경로로 빠져나가도 되돌릴 것이 없다
+//   ② 고를 수 있는 칸이 mergeSpots() 와 정확히 같다 — 목록과 화면과 판정이 갈리면
+//      "눌리는데 안 놓이는 칸" 이 생긴다
+{
+  console.log('2x2 자리 고르기');
+  const g = load();
+  const { state, CFG } = g;
+  g.pickStage(0);
+  ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.gold = 999999;
+
+  let tid = 900;
+  const put = (kind, star, gx, gy) => {
+    const t = { id: tid++, gx, gy, kind, star, b3: null, b5: null, t7: null,
+      cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 };
+    state.towers.push(t);
+    return t;
+  };
+  const reset = () => { state.towers.length = 0; g.clearChoices(); state.picker = null; tid = 900; };
+  const snap = () => state.towers.map(t => `${t.id}:${t.gx},${t.gy},${t.star}`).sort().join(' ');
+
+  // 결과가 2x2 면 모드가 열리고, 그때까지 판은 한 톨도 안 변한다
+  reset();
+  const a = put('marksman', 4, 1, 8), b = put('marksman', 4, 3, 8);
+  const goldBefore = state.gold, snapBefore = snap();
+  g.beginMergePlace(a, b);
+  let m = g.mergePlaceState();
+  ok('2x2 결과는 자리를 묻는다', m.open === true);
+  ok('  묻는 동안 골드가 안 준다', state.gold === goldBefore, goldBefore + ' → ' + state.gold);
+  ok('  묻는 동안 부모 둘이 그대로', snap() === snapBefore, snap());
+  ok('  기본 선택은 mergeSpot 이 고른 자리', !!m.sel
+    && m.sel.gx === g.mergeSpot(a, b, 2).gx && m.sel.gy === g.mergeSpot(a, b, 2).gy);
+
+  // 후보 목록이 mergeSpots 와 글자까지 같다
+  const spots = g.mergeSpots(a, b, 2);
+  const key = l => l.map(s => s.gx + ',' + s.gy).join(' ');
+  ok('  후보가 mergeSpots 와 같다', key(m.spots) === key(spots), m.spots.length + '곳');
+
+  // 목록 밖 칸을 눌러도 아무 일이 없다 (sel 고정 · 모드 유지)
+  const outside = [];
+  for (let y = 0; y < CFG.BOARD_H; y++)
+    for (let x = 0; x < CFG.BOARD_W; x++)
+      if (!spots.some(s => s.gx === x && s.gy === y)) outside.push([x, y]);
+  const selBefore = `${m.sel.gx},${m.sel.gy}`;
+  let moved = 0, closed = 0;
+  for (const [x, y] of outside) {
+    if (g.mergePlaceSelect(x, y)) moved++;
+    if (!g.mergePlaceState().open) { closed++; break; }
+  }
+  ok('  목록 밖 칸은 안 먹는다', moved === 0, moved + '회 먹힘');
+  ok('  목록 밖 탭에 안 닫힌다', closed === 0 && g.mergePlaceState().open);
+  ok('  목록 밖 탭에 sel 이 안 움직인다',
+    `${g.mergePlaceState().sel.gx},${g.mergePlaceState().sel.gy}` === selBefore);
+
+  // 후보 칸은 전부 먹는다
+  const allTook = spots.every(s => g.mergePlaceSelect(s.gx, s.gy));
+  ok('  후보 칸은 전부 먹는다', allTook);
+
+  // 취소는 무동작이다
+  g.mergePlaceCancel();
+  ok('취소하면 모드가 닫힌다', g.mergePlaceState().open === false);
+  ok('  취소 뒤 골드가 그대로', state.gold === goldBefore, goldBefore + ' → ' + state.gold);
+  ok('  취소 뒤 타워 id·좌표가 그대로', snap() === snapBefore, snap());
+
+  // 커밋은 고른 자리에 정확히 놓는다
+  const target = spots[spots.length - 1];
+  g.beginMergePlace(a, b);
+  g.mergePlaceSelect(target.gx, target.gy);
+  const cost = g.mergeCost(a.star);
+  const gold0 = state.gold;
+  const t = g.mergePlaceCommit();
+  ok('커밋하면 고른 자리에 생긴다',
+    !!t && t.gx === target.gx && t.gy === target.gy, t ? `${t.gx},${t.gy}` : 'null');
+  ok('  커밋에서 비용이 나간다', gold0 - state.gold === cost, `${gold0}→${state.gold} (기대 -${cost})`);
+  ok('  커밋 뒤 부모 둘이 사라진다', !state.towers.some(x => x.id === a.id || x.id === b.id));
+  ok('  커밋 뒤 모드가 닫힌다', g.mergePlaceState().open === false);
+
+  // 분기 모달 순서 — 물려받기가 성급 분기보다 먼저다
+  reset();
+  const c1 = put('marksman', 4, 1, 8), c2 = put('marksman', 4, 3, 8);
+  c1.b3 = 'A'; c2.b3 = 'B';
+  g.beginMergePlace(c1, c2);
+  g.mergePlaceCommit();
+  ok('커밋 뒤 물려받기를 먼저 묻는다', !!state.choice && state.choice.mode === 'inherit',
+    state.choice ? String(state.choice.mode) : 'null');
+  g.applyChoice(0);
+  ok('  그 다음이 성급 분기', !!state.choice && state.choice.tier === 5,
+    state.choice ? 'tier ' + state.choice.tier : 'null');
+  g.clearChoices();
+
+  // 1x1 결과는 묻지 않는다 — 예전 자리에 그대로 생긴다
+  reset();
+  const d1 = put('marksman', 2, 1, 8), d2 = put('marksman', 2, 3, 8);
+  const want = g.mergeSpot(d1, d2, 1);
+  const small = g.mergeTowers(d1, d2);
+  ok('1x1 결과는 자리를 안 묻는다', g.mergePlaceState().open === false);
+  ok('  1x1 은 놓은 쪽 자리에 그대로', !!small && small.gx === want.gx && small.gy === want.gy);
+  g.clearChoices();
+
+  // 후보가 0 곳이면 모드를 안 연다 (드래그 미리보기가 놓기 전에 붉게 알려 준다)
+  reset();
+  const occ0 = g.occupancy();
+  const free = [];
+  for (let y = 0; y < CFG.BOARD_H; y++)
+    for (let x = 0; x < CFG.BOARD_W; x++)
+      if (g.canPlace(x, y, 1, occ0)) free.push([x, y]);
+  const p1 = put('marksman', 4, free[0][0], free[0][1]);
+  const p2 = put('marksman', 4, free[1][0], free[1][1]);
+  for (const [x, y] of free.slice(2)) put('frost', 1, x, y);
+  ok('자리 0 곳이면 모드를 안 연다',
+    g.beginMergePlace(p1, p2) === null && g.mergePlaceState().open === false);
+
+  // 후보가 1 곳뿐이어도 연다 — "어떨 땐 묻고 어떨 땐 안 묻는다" 가 제일 나쁘다
+  reset();
+  const q1 = put('marksman', 4, free[0][0], free[0][1]);
+  const q2 = put('marksman', 4, free[1][0], free[1][1]);
+  const rest = free.slice(2);
+  // 2x2 자리가 딱 하나 남을 때까지 1성으로 메운다
+  for (const [x, y] of rest) {
+    put('frost', 1, x, y);
+    if (g.mergeSpots(q1, q2, 2).length <= 1) break;
+  }
+  const one = g.mergeSpots(q1, q2, 2);
+  ok('  후보 1곳짜리 판을 만들었다', one.length === 1, one.length + '곳');
+  g.beginMergePlace(q1, q2);
+  ok('후보가 1 곳이어도 모드를 연다', g.mergePlaceState().open === true);
+  g.mergePlaceCancel();
+
+  // at 을 줘도 canPlace 로 다시 본다 — 호출부를 믿지 않는다
+  reset();
+  const r1 = put('marksman', 4, 1, 8), r2 = put('marksman', 4, 3, 8);
+  const bad = g.mergeTowers(r1, r2, { gx: 0, gy: 0 });   // 0,0 은 잠긴 행이라 못 놓는다
+  ok('잘못된 자리는 거절한다', bad === null && state.towers.length === 2, String(state.towers.length));
+  g.clearChoices();
+
+  // 웨이브가 시작되면 취소된다 (손실 없음). 웨이브 중에 모드가 살아 있는 프레임은 0.
+  reset();
+  const w1 = put('marksman', 4, 1, 8), w2 = put('marksman', 4, 3, 8);
+  const wGold = state.gold, wSnap = snap();
+  state.toast = null;
+  g.beginMergePlace(w1, w2);
+  ok('  웨이브 직전에 모드가 열려 있다', g.mergePlaceState().open === true);
+  state.wave = 3;          // 첫 웨이브는 눌러야 오므로 이미 굴러가는 판으로 둔다
+  state.timer = 0.05;
+  let leaked = 0;
+  for (let i = 0; i < 30; i++) {
+    g.update(1 / 30);
+    if (state.phase === 'wave' && g.mergePlaceState().open) leaked++;
+  }
+  ok('웨이브가 시작되면 모드가 닫힌다',
+    state.phase === 'wave' && g.mergePlaceState().open === false, state.phase);
+  ok('  웨이브 중 열려 있는 프레임 0', leaked === 0, String(leaked));
+  ok('  취소돼도 골드·타워가 그대로', state.gold === wGold && snap() === wSnap);
+  ok('  왜 취소됐는지 알려 준다', !!state.toast, state.toast ? state.toast.text : '없음');
+
+  // 불변식: mergeSpot !== null ⟺ mergeSpots.length > 0
+  // 이게 깨지면 "미리보기는 자리가 있다는데 모드가 안 열린다"(또는 그 반대)가 난다.
+  let seed = 20240815;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  let checked = 0, bad2 = 0;
+  for (let st = 0; st < g.STAGES.length; st++) {
+    for (let trial = 0; trial < 25; trial++) {
+      g.restart();
+      g.pickStage(st);
+      ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+      g.startRun();
+      state.openRows = CFG.OPEN_ROWS + 2 * ((rnd() * 3) | 0);
+      state.towers.length = 0;
+      tid = 900;
+      const oc = g.occupancy();
+      const cells = [];
+      for (let y = 0; y < CFG.BOARD_H; y++)
+        for (let x = 0; x < CFG.BOARD_W; x++)
+          if (g.canPlace(x, y, 1, oc)) cells.push([x, y]);
+      // 절반쯤 무작위로 메운다 — 자리가 남는 판과 꽉 찬 판이 섞여야 양쪽 방향이 잡힌다
+      const fillN = (rnd() * cells.length) | 0;
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = (rnd() * (i + 1)) | 0;
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+      const pair2 = cells.slice(0, 2);
+      if (pair2.length < 2) continue;
+      const A = put('marksman', 4, pair2[0][0], pair2[0][1]);
+      const B = put('marksman', 4, pair2[1][0], pair2[1][1]);
+      for (const [x, y] of cells.slice(2, 2 + fillN)) put('frost', 1, x, y);
+      for (const size of [1, 2]) {
+        checked++;
+        const one2 = g.mergeSpot(A, B, size);
+        const all = g.mergeSpots(A, B, size);
+        if ((one2 !== null) !== (all.length > 0)) bad2++;
+        // mergeSpot 이 고른 자리는 후보 목록 안에 있어야 한다 (배치 모드의 기본 선택이다)
+        if (one2 && !all.some(s => s.gx === one2.gx && s.gy === one2.gy)) bad2++;
+      }
+    }
+  }
+  ok('mergeSpot ⟺ mergeSpots (4스테이지 x 100판)', bad2 === 0 && checked === 200,
+    `${checked}회 검사 · 반례 ${bad2}`);
+}
+
 // ── 일시정지 ──────────────────────────────────────────────────
 // 웨이브가 자동으로 굴러가는 게임이라 멈출 수 있어야 하는데, 멈춘 채로
 // 배치·합성이 되면 시간 압박이 통째로 사라진다. 그래서 멈추면 화면을 덮고

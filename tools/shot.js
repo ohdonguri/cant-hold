@@ -333,6 +333,47 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 2x2 배치 모드 ──────────────────────────────────────────
+  // **맨 뒤에 둔다.** 중간에 끼우면 여기서 뽑는 난수만큼 뒤 컷의 fxRand 가 밀려서
+  // 아무 관계 없는 컷의 md5 가 통째로 갈린다.
+  //
+  // 이 컷에서 볼 것은 하나다: **후보 칸과 보드가 딤에 안 묻히는가.** 소환 피커의
+  // 0.78 을 그대로 쓰면 골라야 할 대상이 통째로 사라진다 — 헤드리스는 알파를 못 보므로
+  // 이건 눈으로만 잡힌다.
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    pickStage(1);                     // 2스테이지: 좋은 자리가 명확히 갈리는 판
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    // 4성 둘을 손으로 세운다. 합성으로 올리면 분기 모달이 끼어든다.
+    let id = 5000;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    put('marksman', 4, 1, 8);
+    put('marksman', 4, 3, 8);
+    // 4 개까지만 채운다. 더 채우면 2x2 후보가 한두 곳으로 줄어서
+    // "후보 칸이 딤에 묻히는가" 를 볼 수 있는 화면이 아니게 된다.
+    for (let i = 0; i < 4; i++) summon('frost');
+    state.gold = 99999;               // 소환값이 나간 뒤에 맞춘다 — 컷 판정이 "커밋 전 골드 불변" 이다
+    const [a, b] = state.towers;
+    beginMergePlace(a, b);
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('8-mergeplace', () => {
+    const m = mergePlaceState();
+    if (!m.open) return '배치 모드가 안 열렸다';
+    if (!m.spots.length) return '후보 칸이 없다';
+    if (!m.sel) return '기본 선택 자리가 없다';
+    if (state.gold !== 99999) return '아직 커밋 전인데 골드가 나갔다: ' + state.gold;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };
