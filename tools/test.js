@@ -1034,6 +1034,156 @@ function ok(name, cond, detail) {
   state.enemies.length = 0; state.towers.length = 0;
 }
 
+// ── 박격포 탄막(A1) ───────────────────────────────────────────
+// 탄막에는 「3발이 어디에 떨어지고 딜이 어떻게 나뉘는가」를 잠근 단언이 하나도
+// 없었다. 그래서 발당 `dmg / 3` 이라 3발을 다 맞혀도 총합이 무분기 1발과 똑같은
+// (= 5성을 찍을 이유가 없는) 상태가 조용히 유지됐다. 여기서 잠그는 것은 계수가
+// 아니라 **관계**다 — 총합이 1발보다 크고, 세 발이 경로 위에 흩어지고, 무분기는
+// 안 움직인다. 수치는 CFG 에서 읽는다(손으로 베끼면 값을 고쳤을 때 테스트만
+// 옛 값을 지키며 통과한다).
+{
+  console.log('박격포 탄막(A1)');
+  const g = load();
+  const { state, CFG } = g;
+
+  // 사거리 안 경로 위에 적을 세우고 fireTower 를 한 번만 돌린다.
+  // **경로 시작(dist 0) 근처에 세우면 안 된다** — posAt 이 d<0 을 0 으로 자르므로
+  // 뒤쪽 한 발이 경로 시작에 붙어 간격이 무너지고, 테스트가 그 잘림만 재게 된다.
+  // 그래서 사거리 안에 들어오는 **중간 지점**을 골라 dist 와 좌표를 같이 세운다
+  // (좌표만 세우면 updateEnemies 가 dist 로 되돌린다). 사거리는 정사각형이다.
+  const midDist = (t) => {
+    const s = g.towerFootprint(t), R = g.towerRange(t);
+    const cx = t.gx + s / 2, cy = t.gy + s / 2;
+    for (let d = CFG.BARRAGE_GAP; d <= g.laneLen(0); d += 0.05) {
+      const p = g.posAt(d, 0);
+      if (Math.max(Math.abs(p.x + 0.5 - cx), Math.abs(p.y + 0.5 - cy)) <= R) return d;
+    }
+    return null;
+  };
+
+  // 소환 자리는 난수로 정해진다(summon 의 spots 추첨). 볼리마다 타워가 다른 칸에
+  // 서면 겨냥 지점이 통째로 달라져 볼리끼리 비교가 성립하지 않는다 — 자리를 고정한다.
+  let ANCHOR = null;
+  const anchor = (t) => {
+    if (!ANCHOR) {
+      const s = g.towerFootprint(t);
+      for (let y = 0; y + s <= CFG.BOARD_H && !ANCHOR; y++)
+        for (let x = 0; x + s <= CFG.BOARD_W && !ANCHOR; x++) {
+          if (g.isPath(x, y)) continue;
+          t.gx = x; t.gy = y;
+          if (midDist(t) !== null) ANCHOR = { gx: x, gy: y };
+        }
+    }
+    t.gx = ANCHOR.gx; t.gy = ANCHOR.gy;
+  };
+
+  const volley = (opts, n) => {
+    g.restart();
+    g.pickStage(0);
+    ['mortar', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5;
+    state.phase = 'wave';
+    state.spawnQueue.length = 0;
+    state.towers.length = 0;
+    state.enemies.length = 0;
+    state.shells.length = 0;
+    state.gold = 999999;
+    g.summon('mortar');
+    const t = state.towers[0];
+    Object.assign(t, { star: 5, b3: 'A', b5: null, t7: null, cd: 0, flash: 0 }, opts || {});
+    anchor(t);
+    const d0 = midDist(t);
+    for (let i = 0; i < (n || 1); i++) {
+      g.spawnEnemy('grunt');
+      const e = state.enemies[state.enemies.length - 1];
+      // 적끼리 조금씩 떨어뜨려 세운다. 겹쳐 세우면 「적 수에 안 딸린다」가
+      // 겨냥이 targets[0] 로 고정돼서가 아니라 전부 같은 자리라서 통과한다.
+      const p = g.posAt(d0 + i * 0.4, e.lane || 0);
+      e.dist = d0 + i * 0.4; e.x = p.x; e.y = p.y;
+      e.maxHp = e.hp = 1e12;
+    }
+    g.fireTower(t, 1 / 30);
+    return { t, shells: state.shells.slice() };
+  };
+
+  const sum = a => a.reduce((x, y) => x + y, 0);
+
+  // 기준선은 **같은 3성 분기(A)에 5성만 안 찍은 것**이라야 한다. b3:null 과 비교하면
+  // A 의 딜 배수 0.55 가 섞여 들어가 「탄막이 5성으로서 값을 하는가」를 못 잰다.
+  const plain = volley({ b3: 'A', b5: null }, 3);
+  ok('5성 미선택은 1발', plain.shells.length === 1, String(plain.shells.length));
+  ok('5성 미선택 1발은 딜 전액', Math.abs(plain.shells[0].dmg - g.towerDmg(plain.t)) < 1e-9,
+    plain.shells[0].dmg.toFixed(2) + ' / towerDmg ' + g.towerDmg(plain.t).toFixed(2));
+  // 분기를 아예 안 고른 타워도 같은 1발 경로다(shots === 1).
+  const none = volley({ b3: null, b5: null }, 3);
+  ok('무분기도 1발 · 딜 전액',
+    none.shells.length === 1 && Math.abs(none.shells[0].dmg - g.towerDmg(none.t)) < 1e-9,
+    none.shells.length + '발 ' + none.shells[0].dmg.toFixed(1) + ' / ' + g.towerDmg(none.t).toFixed(1));
+
+  // 탄막은 3발이고, 발당 딜은 CFG.BARRAGE_SHARE 배다.
+  const bar = volley({ b3: 'A', b5: 'A1' }, 3);
+  ok('탄막은 3발', bar.shells.length === 3, String(bar.shells.length));
+  const per = g.towerDmg(bar.t) * CFG.BARRAGE_SHARE;
+  ok('탄막 발당 딜 = towerDmg x BARRAGE_SHARE',
+    bar.shells.every(s => Math.abs(s.dmg - per) < 1e-9),
+    bar.shells.map(s => s.dmg.toFixed(1)).join('/') + ' (기대 ' + per.toFixed(1) + ')');
+
+  // **버그의 핵심.** 예전에는 dmg/3 x 3 = 1.0 배라 「3발을 다 맞혀도 무분기와 동점」
+  // 이었다. 방어력이 곱연산이라 쪼개도 손해가 없는 대신 이득도 없어서, 탄막은
+  // 어떻게 뿌리든 무분기를 넘어설 수 없었다. 1.0 을 다시 넣으면 여기서 걸린다.
+  const ratio = sum(bar.shells.map(s => s.dmg)) / plain.shells[0].dmg;
+  ok('탄막 딜 총합이 5성 미선택 1발보다 크다', ratio > 1,
+    '총합 ' + ratio.toFixed(2) + '배 (예전 1.00 = 찍을 이유 없음)');
+  ok('총합 = 3 x BARRAGE_SHARE', Math.abs(ratio - 3 * CFG.BARRAGE_SHARE) < 1e-9,
+    ratio.toFixed(3) + ' / 기대 ' + (3 * CFG.BARRAGE_SHARE).toFixed(3));
+
+  // 세 발이 서로 다른 지점에 떨어진다. 한 점에 겹치면 반경만큼의 추가 커버가 없어
+  // 그냥 「딜 1.8배짜리 1발」이 되고, 「직선을 덮는다」는 정체성이 사라진다.
+  const pts = bar.shells.map(s => s.tx + ',' + s.ty);
+  ok('세 발이 서로 다른 지점', new Set(pts).size === 3, pts.join(' | '));
+
+  // 착탄점이 **경로 위** 정확히 -GAP / 0 / +GAP 이라야 줄지어 오는 적을 덮는다.
+  // 예전의 가로 ±0.6칸 지터는 경로를 벗어나므로 여기에 걸린다.
+  const e0 = state.enemies[0];
+  const lead0 = e0.dist + g.enemySpeed(e0) * 0.5;
+  const want = [-1, 0, 1].map(k => g.posAt(lead0 + k * CFG.BARRAGE_GAP, e0.lane || 0));
+  ok('세 발이 경로 위 -GAP / 0 / +GAP 에 떨어진다',
+    bar.shells.every((s, i) => Math.abs(s.tx - (want[i].x + 0.5)) < 1e-9 && Math.abs(s.ty - (want[i].y + 0.5)) < 1e-9),
+    pts.join(' | '));
+
+  // 경로가 꺾이면 같은 경로거리라도 직선거리는 줄어든다(모서리를 가로지르므로).
+  // 그래서 지름(1.28)이 아니라 반경 이상만 요구한다 — 세 폭발이 서로의 중심을
+  // 안 삼킬 만큼은 벌어져 있어야 「1발을 세 번 겹쳐 쏘기」가 아니게 된다.
+  const gaps = [0, 1].map(i =>
+    Math.hypot(bar.shells[i + 1].tx - bar.shells[i].tx, bar.shells[i + 1].ty - bar.shells[i].ty));
+  ok('착탄 간격이 폭발 반경 이상', gaps.every(d => d >= bar.shells[0].radius - 1e-9),
+    gaps.map(d => d.toFixed(2)).join('/') + ' (반경 ' + bar.shells[0].radius.toFixed(2) + ')');
+
+  // 세 발이 한 프레임에 착탄한다. BLAST_SHAKE_CD 의 듀티 근거(§2.6)가 이걸 전제로
+  // 「탄막 3발 → 흔들림 1회」를 계산한다. 시차를 주면 그 표가 먼저 틀린다.
+  ok('세 발이 같은 프레임에 착탄', new Set(bar.shells.map(s => s.tt)).size === 1,
+    bar.shells.map(s => s.tt).join('/'));
+
+  // 적이 1마리뿐이어도 3발이 나가고 배치가 같아야 한다 — 겨냥은 targets[0] 하나로
+  // 정해지고 적 수에 안 딸린다. 예전엔 targets[0]/[1]/[2] 를 따로 겨눠서 적 수에
+  // 따라 착탄점이 통째로 달라졌다.
+  const solo = volley({ b3: 'A', b5: 'A1' }, 1);
+  ok('적 1마리여도 3발', solo.shells.length === 3, String(solo.shells.length));
+  ok('착탄점이 적 수에 안 딸린다',
+    solo.shells.map(s => s.tx.toFixed(3) + ',' + s.ty.toFixed(3)).join('|')
+      === bar.shells.map(s => s.tx.toFixed(3) + ',' + s.ty.toFixed(3)).join('|'),
+    solo.shells.map(s => s.tx.toFixed(2) + ',' + s.ty.toFixed(2)).join(' | '));
+
+  // 다른 5성 분기는 1발 · 딜 전액 그대로다. 탄막만 만지는 변경이라는 잠금.
+  for (const b5 of ['A2', 'B1', 'B2']) {
+    const o = volley({ b3: b5[0], b5 }, 3);
+    ok(`${b5} 는 1발 · 딜 전액`,
+      o.shells.length === 1 && Math.abs(o.shells[0].dmg - g.towerDmg(o.t)) < 1e-9,
+      o.shells.length + '발 ' + o.shells[0].dmg.toFixed(1) + ' / ' + g.towerDmg(o.t).toFixed(1));
+  }
+}
+
 // ── 타워 대등성 ───────────────────────────────────────────────
 // 한 타워가 정답이거나 함정이면 덱과 합성 선택이 의미를 잃는다.
 // 전체 측정은 npm run parity, 여기서는 가벼운 한 분기만 본다.

@@ -78,7 +78,10 @@ const EXPOSE = [
   'cycleSpeed', 'togglePause', 'pauseHelp', 'wrapLines',
   'applyChoice', 'branchChain', 'choiceLabel', 'clearChoices', 'mergeCost', 'mergeIsFree',
   'rushWave', 'endWave', 'towerDmg', 'towerCd',
-  'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue',
+  // enemySpeed: 박격포 탄막 테스트가 착탄 지점을 posAt 으로 직접 재계산한다.
+  // 리드(착탄 지연 0.5초만큼 앞을 겨냥)를 손으로 베끼면 BASE_SPEED 를 고쳤을 때
+  // 테스트만 옛 값을 지키며 통과한다.
+  'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue', 'enemySpeed',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
