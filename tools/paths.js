@@ -223,18 +223,31 @@ function verdict(rows) {
   console.log('  * 길이 30 은 1레인 기준. 다레인은 ③ 갈래길(23)도 걸리므로 이 줄만으로 버리지 말 것');
 }
 
-const all = process.argv.includes('--all');
+// ── 실행부 ────────────────────────────────────────────────────
+// `require.main === module` 로 감싼 것은 **`RANGE` 를 밖으로 내주기 위해서**다.
+// `tools/sim.js` 의 커버 계산이 같은 사거리를 써야 하는데, 이 파일이 최상위에서
+// 바로 실행되면 `require` 할 때마다 표가 통째로 찍힌다. 상수를 양쪽에 하나씩 두면
+// **`RANGE` 만 고쳤을 때 아무것도 안 깨지고**, 그 순간 DESIGN §스테이지의 커버 편차
+// 표와 시뮬이 서로 다른 것을 재기 시작한다 — 조용히 갈리는 자리라 자를 하나로 묶었다.
+if (require.main === module) {
+  const all = process.argv.includes('--all');
 
-const stageRows = table('실제 스테이지 (기준선)', STAGES);
-const bigRows = table('큰 맵 후보 — 뱀(1레인) / 갈래(2레인)', BIG);
-if (all) verdict(table('7x10 초기 탐색 (결론 남음)', LEGACY));
+  const stageRows = table('실제 스테이지 (기준선)', STAGES);
+  const bigRows = table('큰 맵 후보 — 뱀(1레인) / 갈래(2레인)', BIG);
+  if (all) verdict(table('7x10 초기 탐색 (결론 남음)', LEGACY));
 
-verdict([...stageRows, ...bigRows]);
+  verdict([...stageRows, ...bigRows]);
 
-// 배치 칸이 늘어난 배수. 덱을 늘리려면 소환 횟수가 늘어야 하고(CFG.DECK_SIZE 주석:
-// 84소환/7종 = 종당 12개 < 5성에 필요한 16개), 그 상한 하나가 보드 넓이다.
-console.log('\n── 현행 대비 배치 칸 (덱 크기를 늘릴 여지) ' + '─'.repeat(20));
-const base = stageRows[1].free6;   // ② 이중 병목. 편차 1.87 로 현행 기준 맵
-console.log(`기준 ② 이중 병목 배치(시작) ${base}칸`);
-for (const r of bigRows)
-  console.log(' ', r.name.padEnd(14), `${r.free6}칸`.padStart(6), `x${(r.free6 / base).toFixed(2)}`.padStart(7));
+  // 배치 칸이 늘어난 배수. 덱을 늘리려면 소환 횟수가 늘어야 하고(CFG.DECK_SIZE 주석:
+  // 84소환/7종 = 종당 12개 < 5성에 필요한 16개), 그 상한 하나가 보드 넓이다.
+  console.log('\n── 현행 대비 배치 칸 (덱 크기를 늘릴 여지) ' + '─'.repeat(20));
+  const base = stageRows[1].free6;   // ② 이중 병목. 편차 1.87 로 현행 기준 맵
+  console.log(`기준 ② 이중 병목 배치(시작) ${base}칸`);
+  for (const r of bigRows)
+    console.log(' ', r.name.padEnd(14), `${r.free6}칸`.padStart(6), `x${(r.free6 / base).toFixed(2)}`.padStart(7));
+}
+
+// `RANGE` 는 커버의 정의 그 자체다. `cells` 는 경로 칸 걷기 — 게임은 자기 것
+// (`index.html laneCells`)을 쓰고 이 파일은 후보 맵을 재느라 STAGES 밖의 좌표도
+// 걸어야 해서 따로 있다. 둘이 같은 규칙인지는 `tools/test.js` 가 단언한다.
+module.exports = { RANGE, cells, evaluate, STAGES };
