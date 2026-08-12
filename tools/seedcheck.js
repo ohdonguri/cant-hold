@@ -103,24 +103,65 @@ function seedRandom() {
 //      박격포가 7 → 6 으로 내려간 만큼(계수 191 → 79.6) 딜이 줄었다. 판이 짧아져
 //      소환도 21회 덜 한다(149 → 128). **회귀가 아니라 3종을 실제로 짓게 된 결과**이며,
 //      난이도 재조정은 별도 티켓이다(index.html 은 이 티켓에서 한 줄도 안 고쳤다)
+// [2026-08 배치 정책 (#35)] **세 케이스를 전부 새로 떴다.** 여기서도 바뀐 것은
+// `index.html` 이 아니라 `tools/sim.js` 다 — 그리디가 소환 자리를 균등 난수로 고르던
+// 것을 **k-표본 최고**로 바꿨다(`SUMMON_SAMPLES = 2`: 후보 두 곳을 뽑아 커버가 큰
+// 쪽). 9x14 보드에서 초반 두세 대가 통째로 헛자리에 서서 판이 무너지던 꼬리를
+// 없애려는 것이고, DESIGN §꼬리를 재는 자에 근거가 있다.
+//
+// **이 티켓은 두 커밋이고, 앞 커밋은 이 표를 한 글자도 안 움직였다.** 자리 고르기를
+// sim 쪽으로 옮기기만 한 배관 커밋은 난수 소비 지점·횟수·인덱스가 전부 같아서
+// 205 / 131 / 595 가 그대로 나왔다. 아래 값이 달라진 것은 **정책 커밋 하나** 때문이다.
+//
+// 난수 호출 횟수가 세 줄 다 움직였다. 박격포·#31 건과 같은 방식으로 **호출 지점별로
+// 갈라서** 근거를 만들었다. 전역 Math.random 호출부는 여섯 곳이고(rollDeck ·
+// summon 종류 · summon 자리 · 7성 특성 롤 · 조폐 약탈 · 관측 치명), greedy 는 덱과
+// 소환 종류를 항상 명시로 넘기므로 앞의 둘은 세 케이스 전부 0 이다. **소환 자리는
+// 이제 index.html 이 아니라 sim.js 가 뽑는다**(index.html 의 무좌표 분기는 그대로
+// 남아 있고 shot.js·test.js 가 여전히 쓴다).
+//
+//   케이스   소환 자리        7성 특성 롤   관측 치명      합계        소환 횟수
+//     0      196 → 392        9 → 9        0 → 0        205 → 401    196 → 196
+//     1      128 → 302        3 → 3        0 → 0        131 → 305    128 → 151
+//     3      190 → 378        6 → 6      399 → 350      595 → 734    190 → 189
+//
+//   ① **늘어난 난수는 전부 「소환 자리」이고, 정확히 소환 횟수의 2배다.** 0번은
+//      392 = 2 x 196 으로 **소환 횟수가 한 번도 안 변했는데** 자리 난수만 정확히
+//      두 배가 됐다 — 소비 규칙이 `1 → k` 로 바뀐 것 말고는 아무것도 안 달라졌다는
+//      가장 깨끗한 증거다. 1·3번도 302 = 2 x 151, 378 = 2 x 189 로 전부 짝수다
+//   ② 7성 특성 롤은 세 줄 다 그대로다(9 / 3 / 6). 배치는 특성 롤 횟수를 안 건드린다
+//   ③ 3번의 관측 치명이 399 → 350 으로 **줄었다.** 관측소가 발당 한 번 뽑는
+//      자리라 발사 횟수에 비례하는데, 타워가 좋은 자리로 가면서 표적이 더 빨리 죽어
+//      같은 웨이브를 더 적은 발수로 넘긴다. 방향이 예측과 같다
+//   ④ 방향도 예측 안이다. 1번은 `over w23 → over w25` 로 **두 웨이브 더 버틴다**
+//      (박격포가 6성 하나에서 1/2/3/5/6 다섯 대로 흩어졌는데도 총딜이 늘었다).
+//      3번은 w28 로 같지만 남은 골드가 90 → 22 로 줄어 더 많이 지었다.
+//      0번은 20웨이브 클리어라 요약 여섯 칸이 이미 상한에 걸려 있어 life 가
+//      20 → 19 로 한 칸 움직인 게 전부다 — 파쇄자 건과 같은 이유로 **이 케이스는
+//      배치 개선을 거의 못 본다**
+//   ⑤ **「좋아졌으니 맞다」는 근거로 안 쓴다.** 난수 소비량이 `1 → k` 로 바뀌어
+//      첫 소환부터 스트림이 갈리므로 #31 의 「시드 10개 짝지어 부호 일치」는 여기서
+//      못 쓴다. 진짜 근거는 위 ①(퇴화값 `k=1` 이면 205/131/595 가 비트 단위로
+//      돌아온다 — `tools/test.js` 「배치 백분위」가 그 성질을 잠근다)과, 난이도와
+//      독립인 **백분위 지표**(`node tools/place.js`)다
 const CASES = [
   {
     name: '0 / 파쇄·관측·조폐',
     opts: { stage: 0, deck: ['shredder', 'marksman', 'mint'] },
-    expect: '{"result":"clear","wave":20,"life":20,"towers":["marksman7","mint7","shredder3","shredder7"],"maxStar":7,"gold":3120}',
-    rand: 205,
+    expect: '{"result":"clear","wave":20,"life":19,"towers":["marksman7","mint7","shredder3","shredder7"],"maxStar":7,"gold":3120}',
+    rand: 401,
   },
   {
     name: '1 / 서리·박격·마력',
     opts: { stage: 1, deck: ['frost', 'mortar', 'arc'] },
-    expect: '{"result":"over","wave":23,"life":0,"towers":["arc6","frost7","mortar6"],"maxStar":7,"gold":4}',
-    rand: 131,
+    expect: '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
+    rand: 305,
   },
   {
     name: '3 / 침식·마력·관측 (B,B1)',
     opts: { stage: 3, deck: ['eroder', 'arc', 'marksman'], branch3: 'B', branch5: 'B1' },
-    expect: '{"result":"over","wave":28,"life":0,"towers":["arc7","eroder7","marksman2","marksman3","marksman4","marksman5","marksman6"],"maxStar":7,"gold":90}',
-    rand: 595,
+    expect: '{"result":"over","wave":28,"life":0,"towers":["arc7","eroder7","marksman1","marksman3","marksman4","marksman5","marksman6"],"maxStar":7,"gold":22}',
+    rand: 734,
   },
 ];
 
@@ -146,6 +187,46 @@ for (const c of CASES) {
     console.log('    실제 ' + got);
   }
 }
+
+// ── 퇴화값 동일성 (#35) ──────────────────────────────────────
+// `SUMMON_SAMPLES = 1` 이면 k-표본 최고는 「후보에서 난수로 한 곳 뽑기」와 **같은
+// 식**이 된다. 그러면 난수 소비 지점·횟수·인덱스가 배치 정책을 붙이기 전과 전부
+// 같으므로 결과가 **비트 단위로 같아야** 한다.
+//
+// **이게 이 정책의 유일한 강한 근거다.** 난수 소비량이 `1 → k` 로 바뀌면 첫 소환부터
+// 스트림이 갈려서, #31 이 쓴 「시드 10개를 짝지어 부호가 일치하는가」를 여기서는 못
+// 쓴다(밀린 것과 좋아진 것을 못 가른다). 대신 **노브를 퇴화값으로 되돌리면 옛 값이
+// 정확히 돌아온다**는 것이 「바뀐 것은 정책 하나뿐」임을 보인다.
+//
+// 아래 값은 #35 이전(균등 난수)의 실측이고 이 파일이 오래 들고 있던 표 그대로다.
+// **위 CASES 를 새로 뜰 일이 있어도 이 세 줄은 안 바뀐다** — 바뀐다면 그건 배치
+// 정책 말고 다른 것이 같이 움직였다는 뜻이라 그때는 진짜 회귀다.
+const DEGENERATE = [
+  '{"result":"clear","wave":20,"life":20,"towers":["marksman7","mint7","shredder3","shredder7"],"maxStar":7,"gold":3120}',
+  '{"result":"over","wave":23,"life":0,"towers":["arc6","frost7","mortar6"],"maxStar":7,"gold":4}',
+  '{"result":"over","wave":28,"life":0,"towers":["arc7","eroder7","marksman2","marksman3","marksman4","marksman5","marksman6"],"maxStar":7,"gold":90}',
+];
+const DEGENERATE_RAND = [205, 131, 595];
+
+console.log('\n  ── 노브를 퇴화값(SUMMON_SAMPLES = 1)으로 두면 #35 이전과 같아야 한다 ──');
+CASES.forEach((c, i) => {
+  const rng = seedRandom();
+  let got, calls;
+  try {
+    got = JSON.stringify(greedy(load(), { ...c.opts, samples: 1 }));
+    calls = rng.calls();
+  } finally {
+    rng.restore();
+  }
+  const same = got === DEGENERATE[i] && calls === DEGENERATE_RAND[i];
+  if (!same) fail++;
+  console.log((same ? '  PASS ' : '  FAIL ') + c.name +
+    '   rand ' + calls + (calls === DEGENERATE_RAND[i] ? '' : ' (기대 ' + DEGENERATE_RAND[i] + ')'));
+  if (got !== DEGENERATE[i]) {
+    console.log('    기대 ' + DEGENERATE[i]);
+    console.log('    실제 ' + got);
+  }
+});
 
 console.log(fail ? `\n시드 회귀 실패 ${fail}건` : '\n시드 회귀 전부 통과');
 process.exit(fail ? 1 : 0);

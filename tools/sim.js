@@ -5,6 +5,48 @@ const path = require('path');
 
 const HTML = path.join(__dirname, '..', 'index.html');
 
+// ── 배치 정책 노브 (#35) ──────────────────────────────────────
+// 그리디가 소환 자리를 고를 때 **후보 칸에서 복원추출로 몇 칸을 보고** 그중 커버가
+// 가장 큰 칸에 놓는가. 「대충 한다」를 주의력의 한계로 옮긴 것이다 — 몇 군데만
+// 눈으로 보고 나은 데 놓는다.
+//
+// `1` 은 퇴화값이고 「아무 데나」와 **비트 단위로 같다**(난수 한 번 뽑아 그 인덱스).
+// 값을 고르는 규칙은 목적함수가 아니라 **제약 + 최소성**이다: S5 조기 전멸 꼬리가
+// `npm test` 를 흔들지 않을 만큼 얇아지고 기존 밸런스 게이트가 통과하는 `k` 중
+// **가장 작은 값**. 그 이상 잘하게 만들지 않는다.
+//
+// 기대 백분위가 `k/(k+1)` 로 해석적으로 정해지는 것이 이 규칙을 고른 이유다(순서
+// 통계량). 백분위는 손으로 고르는 값이 아니라 `k` 에서 따라 나오는 값이고,
+// `tools/place.js` 와 `tools/test.js` 의 게이트는 「실측이 `k/(k+1)` 과 맞는가」를 본다.
+//
+// **2 를 고른 근거는 최소성이다.** ⑤ 분수령 조기 전멸(`w<10`)을 `npm test` 의 밸런스
+// 덱(`shredder·arc·mint`)으로 **1000판씩** 재면 이렇다:
+//
+//   k    S5 w<10           8판 중 2판 이상이 무너질 확률(= 게이트가 걸린다)
+//   1    17/1000 (1.7%)    0.756%
+//   2     6/1000 (0.6%)    0.098%     ← 채택
+//   3     2/1000 (0.2%)    0.011%
+//
+// **꼬리는 0 이 아니다 — 얇아질 뿐이다.** 200판으로 재면 k=2 가 0/200 으로 나오는데
+// 그건 0.6% 를 200판으로 보는 것이라 30% 확률로 그렇게 나오는 것뿐이고, 「없앴다」로
+// 읽으면 안 된다. 2 를 고른 것은 **꼬리가 `npm test` 를 흔드는 것을 멈추는 데
+// 필요한 최소한**이기 때문이다 — 0.76% → 0.10% 면 이 스위트의 다른 무작위 요인보다
+// 한참 아래로 내려간다(PM 실측 무작위 실패율 약 3%). 3 으로 올려서 더 얻는 것은
+// 0.09%p 인데, 그 대가로 그리디가 더 잘 놓아 판이 쉬워지고 `tune` 실배포 행이
+// 목표 밴드에서 더 멀어진다. **「대충」의 정의는 꼬리를 재우는 데 필요한 최소한의
+// 실력이고 그 이상 잘하게 만들지 않는다.** 측정 표는 DESIGN §꼬리를 재는 자에 있다.
+const SUMMON_SAMPLES = 2;
+
+// 커버를 재는 사거리. **`tools/paths.js` 의 `RANGE` 와 같은 값이어야 한다.**
+// 자가 둘이면 DESIGN §스테이지의 커버 편차 표와 이 시뮬이 서로 다른 것을 재게 되고,
+// 그때는 「편차 1.79 인 판을 골랐다」와 「그리디가 그 편차를 쓰고 있다」가 말이 안 맞는다.
+//
+// **종류별 `KINDS[k].range`(2.0~4.5)를 안 쓴다.** 커버 표를 종류마다 따로 만들면
+// 위 표와 다른 것을 재게 되고, 게다가 `pickKind` 가 종류를 먼저 정하므로 종류별
+// 커버는 「이 종류를 어디에 놓나」만 바꾸지 「대충 한다」의 정의를 바꾸지 않는다.
+// 사람도 타워마다 사거리를 재고 놓지는 않는다 — 통로 옆인지만 본다.
+const COVER_RANGE = 2.2;
+
 // 그리기 호출을 기록할 수 있는 캔버스 스텁.
 // log 를 넘기면 호출한 메서드 이름이 순서대로 쌓인다. "무엇이 화면에 나왔나"를
 // 헤드리스에서 볼 수 있는 유일한 창이다 — 상태만 검사하면 drawXxx() 호출을
@@ -225,6 +267,66 @@ function summonSpots(g) {
   return spots;
 }
 
+// 커버 = 사거리 안에 들어오는 경로 칸 수. `tools/paths.js` 의 `spread()` 와 같은
+// 정의다. 경로 칸은 `g.pathCells`(게임이 `loadStage` 에서 만든 것)를 그대로 쓴다 —
+// 레인을 여기서 다시 펴면 걷는 규칙이 두 벌이 되고, 한쪽만 고쳤을 때 조용히 갈린다.
+// 보드 밖은 잘라낸다(레인 시작점이 `x = -1` 이라 실제로 섞여 있다).
+//
+// **캐시는 `g` 인스턴스마다다. 모듈 전역에 두면 안 된다** — `tune.js`·`test.js` 가
+// 한 프로세스에서 `load()` 를 수백 번 부르며 스테이지를 바꾸므로, 전역이면 스테이지
+// 1 의 커버로 스테이지 5 를 놓는다. 조용히 틀리고 아무 테스트도 안 걸린다.
+// `state.stage` 를 같이 들고 있는 것은 같은 `g` 로 판을 갈아탈 수 있어서다.
+//
+// 행 개방(w8/w15)은 **후보 목록만** 바꾸고 커버 값은 안 바꾸므로 판당 1회로 충분하다.
+// 커버를 후보 목록과 같이 캐시하면 개방 직후 새 행이 영영 안 뽑힌다.
+const coverCache = new WeakMap();
+
+function coverTable(g) {
+  const hit = coverCache.get(g);
+  if (hit && hit.stage === g.state.stage) return hit.cov;
+
+  const { BOARD_W, BOARD_H } = g.CFG;
+  const inBoard = [];
+  for (const key of g.pathCells) {
+    const [x, y] = key.split(',').map(Number);
+    if (x >= 0 && x < BOARD_W && y >= 0 && y < BOARD_H) inBoard.push([x, y]);
+  }
+  const table = new Int32Array(BOARD_W * BOARD_H);
+  for (let y = 0; y < BOARD_H; y++)
+    for (let x = 0; x < BOARD_W; x++) {
+      let n = 0;
+      for (const [px, py] of inBoard) if (Math.hypot(px - x, py - y) <= COVER_RANGE) n++;
+      table[y * BOARD_W + x] = n;
+    }
+
+  const cov = (x, y) => table[y * BOARD_W + x];
+  coverCache.set(g, { stage: g.state.stage, cov });
+  return cov;
+}
+
+// k-표본 최고. 후보에서 **복원추출로** `k` 칸을 뽑아 커버가 가장 큰 칸을 준다.
+//
+// 난수는 후보 수와 무관하게 **정확히 `k` 회**다. 후보가 1 개여도 `k` 회를 뽑는다 —
+// 회계가 단순해야 `seedcheck` 의 「호출 지점별로 갈라 세기」가 성립한다.
+// 후보가 0 개인 경우는 여기까지 오지 않는다(호출부가 먼저 걸러 낸다).
+//
+// 동점이면 **먼저 뽑힌 표본**이 이긴다(`>` 비교). `k = 1` 에서 뽑은 인덱스를 그대로
+// 쓰는 것과 같아야 퇴화값이 옛 동작과 비트 단위로 같다.
+//
+// 복원추출이라 「전역 최고 칸」으로 뭉치지 않는다. 항상 최고 칸을 고르게 하면(k→∞)
+// 최고 칸이 차고 그 옆이 다음 최고라 한 주머니에 겹겹이 쌓이고, 경로의 나머지가
+// 무방비가 된다 — PM 실측으로 그쪽이 오히려 나쁘다. 흩어짐이 남는 것이 이 규칙의
+// 성질이고, 최악 칸을 뽑을 확률이 `(1-q)^k` 로만 줄어드는 것도 같은 이야기다.
+function pickSpot(spots, cov, k) {
+  let bestIdx = 0, bestCov = -Infinity;
+  for (let i = 0; i < k; i++) {
+    const idx = (Math.random() * spots.length) | 0;
+    const c = cov(spots[idx][0], spots[idx][1]);
+    if (c > bestCov) { bestCov = c; bestIdx = idx; }
+  }
+  return spots[bestIdx];
+}
+
 // ── 그리디 플레이어 ──────────────────────────────────────────
 // 실력 좋은 플레이어가 아니라 "평균 이하로 대충 하는 플레이어"를 흉내낸다.
 // 이 플레이어가 클리어해버리면 게임이 너무 쉬운 것이고,
@@ -233,6 +335,11 @@ function greedy(g, opts = {}) {
   const { state, CFG } = g;
   const branch3 = opts.branch3 || 'A';
   const branch5 = opts.branch5 || 'A1';
+  // 배치 정책 노브. **계측 전용 통로다** — 출시 값은 위 `SUMMON_SAMPLES` 하나이고,
+  // `tools/place.js` 가 k 를 훑거나 `tools/test.js` 가 퇴화값(1)으로 옛 동작과의
+  // 동일성을 재는 데만 넘긴다. 밸런스 수치를 뜰 때 여기에 값을 넘기면 그 표는
+  // 출시되는 시뮬을 잰 게 아니다.
+  const samples = opts.samples || SUMMON_SAMPLES;
 
   // 스테이지/덱 선택 화면을 건너뛴다.
   if (state.phase === 'stage') {
@@ -292,7 +399,7 @@ function greedy(g, opts = {}) {
     if (state.gold < g.summonCost()) return;
     const spots = summonSpots(g);
     if (!spots.length) return;
-    const [gx, gy] = spots[(Math.random() * spots.length) | 0];
+    const [gx, gy] = pickSpot(spots, coverTable(g), samples);
     g.summon(pickKind(state.deck, state.towers), gx, gy);
   }
 
@@ -328,4 +435,4 @@ function greedy(g, opts = {}) {
   };
 }
 
-module.exports = { load, greedy, patch, pickKind, summonSpots };
+module.exports = { load, greedy, patch, pickKind, summonSpots, coverTable, pickSpot, SUMMON_SAMPLES };
