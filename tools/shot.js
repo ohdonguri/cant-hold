@@ -344,6 +344,11 @@ const capture = async (browser) => {
     __reseed();
     window.update = window.__update;
     restart();
+    // **pickStage 는 잠긴 판을 거절한다**(index.html: `i >= unlocked` 면 토스트만
+    // 내고 되돌아간다). SEED_SCRIPT 가 localStorage 를 비우고 시작하므로 unlocked
+    // 는 1 이고, 이 줄이 없으면 아래 pickStage(1) 이 통째로 no-op 이라 「2스테이지」
+    // 라고 적어 둔 컷이 사실은 1스테이지를 찍는다. 오래 그 상태였다.
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
     pickStage(1);                     // 2스테이지: 좋은 자리가 명확히 갈리는 판
     ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
     startRun();
@@ -371,6 +376,61 @@ const capture = async (browser) => {
     if (!m.spots.length) return '후보 칸이 없다';
     if (!m.sel) return '기본 선택 자리가 없다';
     if (state.gold !== 99999) return '아직 커밋 전인데 골드가 나갔다: ' + state.gold;
+    return null;
+  });
+
+  // ── 넓은 보드 (⑤ 분수령 9x14) ──────────────────────────────
+  // **8-mergeplace 와 같은 이유로 맨 뒤에 둔다.** 앞에 끼우면 여기서 뽑는 난수만큼
+  // 뒤 컷의 fxRand 가 밀려 md5 가 통째로 갈린다.
+  //
+  // 이 컷에서 볼 것은 넷이다. 전부 셀이 52.9px → 41.1px 로 줄어서 생기는 문제라
+  // 헤드리스로는 하나도 안 잡힌다.
+  //   ① ★배지(round(cell*0.26) = 10.7px)가 셀 밖으로 안 나가고 스프라이트와 안 겹치는가
+  //   ② 잠긴 구역 안내(고정 12px — 셀에 안 따라 줄어든다)가 안 잘리는가
+  //   ③ 5성 2x2(82px)가 보드 안에 들어가는가
+  //   ④ 9열이 화면 폭에 들어가는가 (가로가 병목이다 — 세로는 594/14 로 남는다)
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    pickStage(STAGES.length - 1);
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    // 성급을 손으로 깔아 ★배지를 1~5성까지 한 화면에 올린다. 합성으로 올리면
+    // 분기 모달이 끼어들고, 소환은 성급을 못 고른다.
+    let id = 7000;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 행 10 과 열 0·8 은 경로라 비워 둔다.
+    put('marksman', 5, 2, 6);         // 2x2. 열 2~3 x 행 6~7
+    put('shredder', 4, 5, 6);
+    put('frost',    3, 6, 6);
+    put('shredder', 2, 5, 7);
+    put('frost',    1, 6, 7);
+    put('marksman', 4, 1, 8);
+    put('shredder', 3, 2, 8);
+    put('frost',    2, 3, 8);
+    put('marksman', 1, 5, 8);
+    put('shredder', 5, 6, 8);         // 2x2. 열 6~7 x 행 8~9
+    put('frost',    3, 1, 11);
+    put('marksman', 2, 6, 11);
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('9-wideboard', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 9 || CFG.BOARD_H !== 14)
+      return '9x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (state.stage !== STAGES.length - 1) return '마지막 판이 아니다: ' + state.stage;
+    // 잠긴 행이 남아 있어야 안내가 그려진다
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (!state.towers.some(t => t.star >= 5)) return '5성(2x2)이 없다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });
 
