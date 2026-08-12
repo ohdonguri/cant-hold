@@ -166,6 +166,39 @@ function load(overrides) {
   return api;
 }
 
+// ── 소환할 종류 고르기 ────────────────────────────────────────
+// 종류를 고를 수 있게 된 뒤의 플레이를 흉내낸다.
+// 가장 낮은 성급에서 짝이 안 맞는 종류를 골라 바로 합성으로 잇는다.
+//
+// **아직 한 대도 없는 종류가 최우선이다.** 예전에는 「짝이 안 맞는 최저 성급」이
+// 없으면 무조건 Infinity 로 떨어뜨렸는데, 한 대도 없는 종류(own=[])가 정확히
+// 그 경우라 덱의 셋째 종류가 항상 꼴찌였다 — 「덱 3종」으로 재던 수치가 전부
+// 사실상 2종을 재고 있었다(#31). 갈라내는 것은 `own.length === 0` 하나뿐이고,
+// 타워는 있는데 짝이 다 맞는 종류(2x2 자리가 없어 5성 둘이 남은 경우 등)는
+// 그대로 Infinity 다 — 그건 더 지어도 이을 데가 없는 종류라 후순위가 맞다.
+//
+// 동점은 개수가 적은 쪽이 먹는다. 셋 다 0개일 때는 덱 순서대로 하나씩 착수하고,
+// 그 뒤로는 개수가 뒤처진 종류로 자연스럽게 돌아간다.
+//
+// greedy 클로저 밖에 둔 이유는 하나다 — 난수를 한 번도 안 뽑고 규칙만 단언할 수
+// 있어야 하기 때문이다(tools/test.js 「소환 종류 선택」).
+function pickKind(deck, towers) {
+  let best = null, bestStar = Infinity, bestCount = Infinity;
+  for (const k of deck) {
+    const own = towers.filter(t => t.kind === k);
+    const byStar = {};
+    for (const t of own) byStar[t.star] = (byStar[t.star] || 0) + 1;
+    const odd = Object.keys(byStar).map(Number)
+      .filter(s => byStar[s] % 2 === 1)
+      .sort((a, b) => a - b)[0];
+    const star = own.length === 0 ? -1 : (odd === undefined ? Infinity : odd);
+    if (star < bestStar || (star === bestStar && own.length < bestCount)) {
+      bestStar = star; bestCount = own.length; best = k;
+    }
+  }
+  return best || deck[0];
+}
+
 // ── 그리디 플레이어 ──────────────────────────────────────────
 // 실력 좋은 플레이어가 아니라 "평균 이하로 대충 하는 플레이어"를 흉내낸다.
 // 이 플레이어가 클리어해버리면 게임이 너무 쉬운 것이고,
@@ -220,30 +253,11 @@ function greedy(g, opts = {}) {
     }
   }
 
-  // 종류를 고를 수 있게 된 뒤의 플레이를 흉내낸다.
-  // 가장 낮은 성급에서 짝이 안 맞는 종류를 골라 바로 합성으로 잇는다.
-  function pickKind() {
-    let best = null, bestStar = Infinity, bestCount = Infinity;
-    for (const k of state.deck) {
-      const own = state.towers.filter(t => t.kind === k);
-      const byStar = {};
-      for (const t of own) byStar[t.star] = (byStar[t.star] || 0) + 1;
-      const odd = Object.keys(byStar).map(Number)
-        .filter(s => byStar[s] % 2 === 1)
-        .sort((a, b) => a - b)[0];
-      const star = odd === undefined ? Infinity : odd;
-      if (star < bestStar || (star === bestStar && own.length < bestCount)) {
-        bestStar = star; bestCount = own.length; best = k;
-      }
-    }
-    return best || state.deck[0];
-  }
-
   function buildPhase() {
     let guard = 0;
     while (guard++ < 400) {
       const before = state.towers.length;
-      if (state.gold >= g.summonCost()) g.summon(pickKind());
+      if (state.gold >= g.summonCost()) g.summon(pickKind(state.deck, state.towers));
       if (state.towers.length === before) break;
       mergeAll();
     }
@@ -271,4 +285,4 @@ function greedy(g, opts = {}) {
   };
 }
 
-module.exports = { load, greedy, patch };
+module.exports = { load, greedy, patch, pickKind };
