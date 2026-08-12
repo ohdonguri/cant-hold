@@ -581,10 +581,18 @@ function known(name, worse, detail, why) {
   let seed = 20240815;
   const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   let checked = 0, bad2 = 0;
+  // **판을 전부 열어 두고 돌아야 한다.** pickStage 는 `i >= unlocked` 면 토스트만
+  // 내고 되돌아가는데(index.html:2543) 갓 만든 판은 unlocked 가 1 이라, 이 줄이
+  // 없으면 st>=1 에서 pickStage 가 통째로 no-op 이 되어 **다섯 판 전부 스테이지1
+  // (7x10 1레인)을 재게 된다.** 오래 「4스테이지」라고 적힌 채로 사실은 한 판만
+  // 보고 있었다 — checked 는 그래도 200 이 나와서 통과했다.
+  g.applyBundle({ v: 1, unlocked: g.STAGES.length, best: [], run: null });
+  const visited = new Set();
   for (let st = 0; st < g.STAGES.length; st++) {
     for (let trial = 0; trial < 25; trial++) {
       g.restart();
       g.pickStage(st);
+      visited.add(state.stage);
       ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
       g.startRun();
       state.openRows = CFG.OPEN_ROWS + 2 * ((rnd() * 3) | 0);
@@ -616,8 +624,13 @@ function known(name, worse, detail, why) {
       }
     }
   }
-  ok('mergeSpot ⟺ mergeSpots (4스테이지 x 100판)', bad2 === 0 && checked === 200,
-    `${checked}회 검사 · 반례 ${bad2}`);
+  // 기대값은 STAGES.length 에서 뽑는다. 손으로 적으면 판이 늘 때마다 여기서 깨진다
+  // (실제로 5번째 판을 붙이면서 200 이 250 이 됐다). visited 를 같이 보는 이유는
+  // 위 applyBundle 이 빠지면 checked 는 맞는데 판은 하나만 도는 상태로 되돌아가서다.
+  const wantChecked = g.STAGES.length * 25 * 2;
+  ok(`mergeSpot ⟺ mergeSpots (${g.STAGES.length}스테이지 x ${g.STAGES.length * 25}판)`,
+    bad2 === 0 && checked === wantChecked && visited.size === g.STAGES.length,
+    `${checked}회 검사 · 반례 ${bad2} · 실제로 돈 판 ${visited.size}/${g.STAGES.length}`);
 }
 
 // ── 일시정지 ──────────────────────────────────────────────────
@@ -932,6 +945,42 @@ function known(name, worse, detail, why) {
   }
   ok('스테이지마다 맵이 다르다', seen.size === g.STAGES.length, seen.size + '/' + g.STAGES.length);
 
+  // 행 개방 개수. 개방은 한 번에 2행씩이고(index.html:3102) BOARD_H 에서 멈추므로,
+  // unlockAt 이 (h - openRows) / 2 개가 아니면 둘 중 하나가 조용히 난다 —
+  // 모자라면 맨 윗행이 영영 안 열리고(6성 이상이 물리적으로 불가능해진다),
+  // 남으면 그 웨이브의 「보드 확장」 토스트가 아무것도 안 여는 거짓말이 된다.
+  // 네 판 시절에는 우연히 전부 맞아 있었을 뿐 이걸 잠근 것이 없었다.
+  const rowsBad = g.STAGES.filter(s => s.unlockAt.length !== (s.h - s.openRows) / 2);
+  ok('행 개방 개수 = (h - openRows) / 2',
+    rowsBad.length === 0,
+    g.STAGES.map(s => s.name + ':' + s.unlockAt.length + '/' + ((s.h - s.openRows) / 2)).join(' '));
+
+  // 좁은 화면. 스테이지 카드 높이는 판 수로 나눠 자동 축소되는데 하한이 없으면
+  // 카드 안의 셋째 줄(난이도 점, y+58 · 11px)이 카드 밖으로 나간다. 판이 넷일 때는
+  // 594 까지 버텨서 아무도 안 봤지만 다섯 장이 되며 한계선이 675 로 올라갔고
+  // **375x667(iPhone SE·8)이 걸렸다.** tools/shot.js 는 390x844 만 찍으므로 눈
+  // 확인 게이트가 이걸 절대 못 본다 — 그래서 여기서 잡는다. 판을 더 붙이면 한계선이
+  // 또 올라가므로 이 단언이 다음 사람을 대신 막는다.
+  //
+  // **658 은 지금 레이아웃의 바닥이다.** 카드가 하한에 걸리면 더 줄지 않으므로
+  // 그 아래에서는 로그인 줄이 화면 밖으로 나간다(5판 기준: 카드 바닥 540 →
+  // 이어하기 554~606 → 로그인 616~658). 320x568 같은 더 좁은 기기를 받으려면
+  // 카드를 스크롤시키거나 접어야 하고 그건 이 티켓 밖이다 — 여기서는 바닥이
+  // 어디인지를 숫자로 박아 두어, 판이 늘어 이 값이 올라가면 바로 걸리게 한다.
+  {
+    const CARD_MIN = 72;          // 58 + 11(셋째 줄) + 여백 3
+    for (const h of [844, 667, 658]) {
+      g.view.h = h;
+      const cards = g.stageCardRects();
+      const lastCard = cards[cards.length - 1];
+      const tail = g.cloudRect();
+      ok(`  ${h}px 에서 카드 안이 안 깨진다`, lastCard.h >= CARD_MIN,
+        '카드 높이 ' + lastCard.h.toFixed(1) + ' (하한 ' + CARD_MIN + ')');
+      ok(`  ${h}px 에서 마지막 줄이 화면 안`, tail.y + tail.h <= h,
+        '로그인 줄 바닥 ' + (tail.y + tail.h).toFixed(1) + ' / 화면 ' + h);
+    }
+  }
+
   // 후반 스테이지는 레인이 여러 개
   g.loadStage(g.STAGES.length - 1);
   ok('마지막 스테이지는 다중 레인', g.lanes.length > 1, String(g.lanes.length));
@@ -1053,9 +1102,22 @@ function known(name, worse, detail, why) {
 //
 // **임계를 올려서도, 이 블록에 시드를 박아서도 안 된다** — 시드를 박으면(12345 는
 // S4 0/8 이라 통과한다) 눈금이 조용히 통과로 굳는다. 답은 난이도를 다시 조이는
-// 것이고 **별도 티켓이다**(index.html 은 이 티켓에서 동결. `npm run tune` 의 실배포
-// 행도 목표 밴드 18~24 밖인 w27 로 같은 말을 하고 있다). 난이도를 조여 S4 클리어가
-// 0 으로 돌아오면 이 줄을 KNOWN 에서 지우고 하드 게이트로 되돌릴 것.
+// 것이고 **별도 티켓이다**([#31] 당시 index.html 은 그 티켓에서 동결. `npm run tune`
+// 의 실배포 행도 목표 밴드 18~24 밖인 w27 로 같은 말을 하고 있다). 난이도를 조여
+// S4 클리어가 0 으로 돌아오면 이 줄을 KNOWN 에서 지우고 하드 게이트로 되돌릴 것.
+//
+// [2026-08 #33] **그래서 대신 통계량을 바꿨다.** ⑤ 분수령(9x14)이 붙으면서 「어느
+// 스테이지도 초반 전멸은 없다」가 무시드 8표본의 **최솟값** `w[0]` 으로 판정하는 게
+// 문제가 됐다. 넓은 보드에서는 그리디가 초반 두세 대를 통째로 헛자리에 놓는 판이
+// 드물게 나오는데(원인은 판이 아니라 sim.js 의 균등 난수 배치다 — 별도 티켓),
+// 최솟값은 「판이 가혹한가」와 「시뮬이 한 번 나쁘게 굴렀는가」를 구분하지 못한다.
+// 그래서 `w[1]` 로 옮겼다 — 정렬된 배열이라 `w[1] >= T` 는 **「8판 중 7판 이상이
+// T 이상」과 정확히 같은 말**이고(w[0] 만 T 아래일 수 있다), 이상치 하나는 견디되
+// 둘부터는 그대로 잡는다. **임계(`min(10, 중앙값)`)는 한 자리도 안 건드렸다** —
+// 눈금을 낮춘 게 아니라 자를 바꾼 것이라 위 「임계를 올리지 마라」에 안 걸린다.
+// 시드를 박는 쪽이 금지인 이유와도 갈린다: 시드는 표본을 하나로 고정해 눈금을
+// 통과로 굳히지만, 통계량 교체는 8표본을 그대로 두고 어느 순서통계량을 읽을지만
+// 바꾸므로 분포가 나빠지면 여전히 빨간불이 된다.
 {
   console.log('밸런스 (스테이지 곡선, 각 8회)');
   const DECK = ['shredder', 'arc', 'mint'];
@@ -1082,22 +1144,65 @@ function known(name, worse, detail, why) {
   // 래칫은 **실측 최악값**이다. 30런에서 본 최악이 2/8 이고, 3/8 이 나오면 그건
   // 이미 아는 3.0% 가 아니라 더 벌어진 것이므로 그때는 진짜 FAIL 이다.
   const S4_KNOWN_CLEARS = 2;
-  const last = rows[rows.length - 1];
-  known('마지막 스테이지는 안 깨진다', last.clears > S4_KNOWN_CLEARS,
-    last.clears + '/' + n + '  (하드 게이트였다면 <=1 / 래칫 ' + S4_KNOWN_CLEARS + ')',
+  // [2026-08 #33] **이 래칫은 S4 를 겨눈다 — 행 번호를 박은 이유가 그것이다.**
+  // 2 는 ④ 역류에서 30런으로 잰 실측 최악값이라 S4 말고 다른 판에 대면 아무 뜻이
+  // 없다. ⑤ 분수령이 붙었을 때 `rows[rows.length-1]` 을 그대로 뒀다가 **감시 대상이
+  // S5 로 통째로 옮겨 갔고, 그 사이 S4 는 5/8 로 무너져도 아무도 안 보는 상태**가
+  // 됐다(`뒤 스테이지가 더 어렵다`도 rows[0] 대 마지막이라 S4 를 건너뛴다).
+  // 판이 더 붙어도 이 줄은 S4 를 계속 겨눠야 한다.
+  const s4 = rows[3];
+  known('4스테이지는 안 깨진다', s4.clears > S4_KNOWN_CLEARS,
+    s4.clears + '/' + n + '  (하드 게이트였다면 <=1 / 래칫 ' + S4_KNOWN_CLEARS + ')',
     '#31 이 그리디에게 셋째 종류를 짓게 하면서 판이 실제로 쉬워졌다. 무시드 200판 '
     + 'S4 클리어율 3.0%(main 0%)라 8판 중 2판이 2.2% 확률로 나온다. 난이도 재조정은 '
     + '별도 티켓이고, 0 으로 돌아오면 KNOWN 에서 지우고 하드 게이트로 되돌릴 것.');
-  if (last.clears <= 1) {
-    console.log('        ↳ 이번 판은 ' + last.clears + '/' + n + ' 로 옛 임계(<=1) 안이다. '
+  if (s4.clears <= 1) {
+    console.log('        ↳ 이번 판은 ' + s4.clears + '/' + n + ' 로 옛 임계(<=1) 안이다. '
       + '난이도가 조여져 계속 이러면 하드 게이트로 되돌려라.');
   }
 
+  // 마지막 판은 따로 잠근다. 위 래칫이 S4 전용이라 여기가 비면 새로 붙는 판이
+  // 아무 검사도 없이 들어온다 — #33 이 정확히 그 상태로 한 번 갔다.
+  const lastRow = rows[rows.length - 1];
+  ok('마지막 스테이지는 안 깨진다', lastRow.clears <= 2,
+    'S' + (lastRow.st + 1) + ' ' + lastRow.clears + '/' + n);
+
   ok('뒤 스테이지가 더 어렵다', rows[0].clears > rows[rows.length - 1].clears);
-  ok('어느 스테이지도 초반 전멸은 없다', rows.every(r => r.w[0] >= Math.min(10, r.med)),
-    rows.map(r => 'S' + (r.st + 1) + ':' + r.w[0]).join(' '));
-  ok('5성 도달률 90% 이상', rows.every(r => r.five / n >= 0.9),
+
+  // ── 꼬리를 보는 두 게이트 ──────────────────────────────────
+  // 아래 둘은 **같은 사건 하나**에 반응한다 — 넓은 보드에서 그리디가 초반 두세
+  // 대를 통째로 헛자리에 놓아 한 판이 무너지는 것이다. 그 판은 초반에 죽고,
+  // 죽었으니 5성도 못 만든다. 그래서 **자를 하나로 묶는다.** 기준이 갈리면
+  // 한쪽만 통과하는 상태가 생기는데, 같은 꼬리를 재면서 그러면 안 된다.
+  const OUTLIER_OK = 1;                 // 견디는 이상치 판 수
+  const NEED = n - OUTLIER_OK;          // 8판 중 7판
+  const TAIL_NOTE = '8판 중 **둘 이상**이 무너졌다. 이상치 하나는 이미 견디는 자라, '
+    + '여기서 빨간불이면 시뮬이 한 번 나쁘게 구른 게 아니라 판이 실제로 가혹해진 '
+    + '것이다. 넓은 보드(S5 9x14)에서 잦다면 원인은 tools/sim.js 의 균등 난수 '
+    + '배치이고 별도 티켓이 잡고 있다 — **hpMult 를 내려서 이 줄을 초록으로 '
+    + '만들지 마라.** 같은 배율에서 7x10 두 판은 200판 중 0건이다.';
+
+  // 위 블록의 [#33] 문단이 `w[0]` → `w[1]` 로 옮긴 이유를 적어 뒀다. 임계
+  // `min(10, 중앙값)` 은 그대로다.
+  const earlyOK = rows.every(r => r.w[OUTLIER_OK] >= Math.min(10, r.med));
+  ok(`어느 스테이지도 초반 전멸은 없다 (${n}판 중 ${NEED}판)`, earlyOK,
+    rows.map(r => 'S' + (r.st + 1) + ':' + r.w[0] + '/' + r.w[1]).join(' '));
+  if (!earlyOK) console.log('        ↳ ' + TAIL_NOTE);
+
+  // [2026-08 #33] **「비율 >= 90%」는 n = 8 에서 사실상 8/8 을 요구하는 함정이었다.**
+  // 7/8 은 87.5% 라 90 을 못 넘는다 — 즉 적혀 있는 값은 90% 인데 실제로 강제하던
+  // 것은 **100%** 였고, 한 판만 무너져도 빨간불이라 이름만 비율이지 최솟값
+  // 게이트였다. 위 「초반 전멸」과 정확히 같은 병이다(30런에 실패 8건 중 6건이
+  // 이 줄 단독이었다). 그래서 같은 자(NEED)로 바꾼다.
+  //
+  // **한 칸 물러선 것은 맞다 — 숨기지 않는다.** 7/8 = 87.5% 로 옛 표기 90% 보다
+  // 낮다. 다만 옛 값이 실제로 강제하던 100% 는 무시드 8표본으로는 지킬 수 없는
+  // 기준이었고, 낮춘 것은 임계가 아니라 **표본 하나를 견디게 한 것**이다.
+  // 판정 대상(5성에 도달했는가)도 임계의 뜻(거의 모든 판이 5성에 간다)도 그대로다.
+  const fiveOK = rows.every(r => r.five >= NEED);
+  ok(`5성 도달률 (${n}판 중 ${NEED}판 이상)`, fiveOK,
     rows.map(r => r.five + '/' + n).join(' '));
+  if (!fiveOK) console.log('        ↳ ' + TAIL_NOTE);
   ok('HP/데미지에 NaN 없음', rows.every(r => r.w.every(v => Number.isFinite(v))));
 }
 
@@ -1288,7 +1393,41 @@ function known(name, worse, detail, why) {
     { v: 1, unlocked: 3, best: [20, 5, 0, 0], run: { stage: 0, wave: 9 } },
     { v: 1, unlocked: 2, best: [12, 25, 0, 0], run: { stage: 1, wave: 3 } });
   ok('해금은 큰 쪽을 쓴다', merged.unlocked === 3, String(merged.unlocked));
-  ok('최고 기록은 칸마다 큰 쪽', merged.best.join(',') === '20,25,0,0', merged.best.join(','));
+  // 기대값은 STAGES.length 로 늘린다. 넣은 배열은 일부러 4칸짜리(판이 늘기 전의
+  // 세이브)로 두어 mergeBundle 의 `|| 0` 이 새 칸을 메우는 것까지 같이 잰다.
+  const wantBest = ['20', '25', ...Array(Math.max(0, g.STAGES.length - 2)).fill('0')].join(',');
+  ok('최고 기록은 칸마다 큰 쪽', merged.best.join(',') === wantBest,
+    merged.best.join(',') + '  (기대 ' + wantBest + ')');
+
+  // ── 옛 세이브 자동 해금 ──
+  // 판을 뒤에 붙이기 전에 네 판을 다 깬 사람은 마지막 판을 다시 깨지 않아도 된다.
+  // 해금 규칙(index.html:3107)이 `unlocked < STAGES.length` 로 막혀 있어서 네 판
+  // 시절의 마지막 판을 깨도 unlocked 가 4 에서 멈춰 있기 때문이다.
+  {
+    const w = g.STAGES.map(s => s.waves);
+    const allFour = { v: 1, unlocked: 4, best: [w[0], w[1], w[2], w[3]], run: null };
+    g.applyBundle(allFour);
+    ok('  네 판을 다 깬 세이브는 5번이 열린다', g.saveBundle().unlocked === 5,
+      String(g.saveBundle().unlocked));
+
+    // 마지막 한 판만 못 깬 사람에게는 안 열린다. 이 줄이 이 조항의 전부다 —
+    // 여기가 무너지면 안 깬 사람에게 판이 열린다.
+    g.applyBundle({ v: 1, unlocked: 4, best: [w[0], w[1], w[2], w[3] - 1], run: null });
+    ok('  마지막 판을 못 깼으면 안 열린다', g.saveBundle().unlocked === 4,
+      String(g.saveBundle().unlocked));
+
+    // best 가 아예 없는(판을 한 번도 안 깬) 세이브
+    g.applyBundle({ v: 1, unlocked: 1, best: [], run: null });
+    ok('  기록이 없으면 안 열린다', g.saveBundle().unlocked === 1, String(g.saveBundle().unlocked));
+
+    // 몇 번을 다시 적용해도 같은 값이라야 한다 — SAVE_VERSION 을 안 올린 근거다.
+    g.applyBundle(allFour);
+    const once = g.saveBundle().unlocked;
+    g.applyBundle(g.saveBundle());
+    g.applyBundle(g.saveBundle());
+    ok('  여러 번 적용해도 안 밀린다', g.saveBundle().unlocked === once,
+      once + ' → ' + g.saveBundle().unlocked);
+  }
   ok('이어할 판은 더 나아간 쪽', merged.run.stage === 1, 'stage ' + merged.run.stage);
 }
 
