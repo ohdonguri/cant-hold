@@ -15,6 +15,13 @@
 // 사거리는 `tools/sim.js` 의 `coverTable` 을 그대로 쓴다 — 여기서 다시 구현하면
 // 자가 둘이 되고, 재는 쪽과 놓는 쪽이 갈리면 이 지표는 아무것도 안 잠근다.
 //
+// **`npm test` 의 게이트도 이 파일의 `probe`/`meanPct` 를 부른다.** 백분위 계산을
+// 두 벌 두었더니 이미 경계에서 갈려 있었다 — 이쪽은 후보가 1칸인 강제 선택을
+// 백분위 0(최악)으로 세고 게이트는 건너뛰었다. 실측으로 소환 9882회 중 38회(0.4%)라
+// 차이가 ~0.003 이었지만, **찍는 수와 잠그는 수가 같은 정의가 아니면** 위 문단이
+// 커버에 대해 적어 둔 말이 백분위 자에도 그대로 걸린다. 규칙은 하나로 통일했다:
+// **강제 선택(후보 1칸)은 정책에 대한 정보가 0 이므로 제외한다.**
+//
 // 종류별 줄을 따로 찍는 것은 **조폐소 때문**이다. 조폐소는 공격을 안 하는데 커버로
 // 자리를 고르면 통로 옆 좋은 칸을 먹는다(사람은 안 그런다). 이 티켓은 종류 구분
 // 없이 한 규칙으로 갔으므로, 다음 사람이 그 대가를 눈으로 볼 수 있어야 한다.
@@ -44,13 +51,15 @@ function probe(stage, samples) {
     const spots = summonSpots(g);               // 놓기 직전의 후보 칸 전부
     const before = g.state.towers.length;
     const r = orig.call(g, kind, atX, atY);
-    if (g.state.towers.length > before && spots.length) {
+    // 후보가 1칸이면 **정책이 고른 게 아니라 강제된 것**이라 백분위에 정보가 0 이다.
+    // 세면 늘 0(최악)으로 들어가 지표를 아래로 끌어당긴다. 게이트와 같은 규칙이다.
+    if (g.state.towers.length > before && spots.length > 1) {
       const t = g.state.towers[g.state.towers.length - 1];
       const covs = spots.map(([x, y]) => cover(x, y)).sort((a, b) => a - b);
       const mine = cover(t.gx, t.gy);
       const below = covs.filter(v => v < mine).length;
       const tied = covs.filter(v => v === mine).length - 1;   // 나를 뺀 동률
-      const n1 = Math.max(1, spots.length - 1);
+      const n1 = spots.length - 1;
       picks.push({
         kind: t.kind,
         mine, best: covs[covs.length - 1], med: covs[covs.length >> 1],
@@ -83,37 +92,61 @@ function probe(stage, samples) {
 // 센 값이라(④ 역류는 두 레인이 서로의 역순이라 2.57배로 부풀었다) `tools/paths.js`
 // 의 `spread()` 와 다른 자다. 동률 처리도 달랐다(위 `pct` 주석). 두 자를 섞어
 // 비교하면 개선폭을 잘못 읽는다.
+// **판마다 하나씩이고 판 수보다 짧을 수 있다.** 여섯 번째 판이 붙으면 그 줄은
+// 기준선 없이 `—` 로 찍힌다 — 없는 값을 지어내느니 비워 두는 게 맞다.
 const BASELINE = [0.513, 0.498, 0.482, 0.478, 0.510];
 
-const KS = process.argv.slice(2).map(Number).filter(n => n > 0);
-const RUNS = KS.length ? KS : [SUMMON_SAMPLES];
+// 한 판의 평균 백분위. **게이트(`tools/test.js`)와 이 표가 같이 부르는 함수다.**
+function meanPct(picks) {
+  if (!picks.length) return null;
+  return picks.reduce((s, p) => s + p.pct, 0) / picks.length;
+}
 
-for (const k of RUNS) {
-  console.log(`\n── k = ${k}  (기대 백분위 ${(k / (k + 1)).toFixed(2)}) · 시드 ${SEED} · ${TRIALS}시행 ──`);
-  console.log('스테이지'.padEnd(10), '소환수', '고른커버', '최고커버', '중앙커버', '백분위', 'k=1', '  strict', '  종류별 백분위');
-  for (const st of [0, 1, 2, 3, 4]) {
-    const picks = seeded(() => {
-      const out = [];
-      for (let i = 0; i < TRIALS; i++) out.push(...probe(st, k));
-      return out;
-    });
-    if (!picks.length) { console.log(`스테이지${st + 1} 소환 없음`); continue; }
-    const avg = (rows, f) => rows.reduce((s, p) => s + f(p), 0) / rows.length;
-    const byKind = [...new Set(picks.map(p => p.kind))].sort()
-      .map(kd => kd + ' ' + avg(picks.filter(p => p.kind === kd), p => p.pct).toFixed(2))
-      .join(' · ');
-    console.log(
-      `스테이지${st + 1}`.padEnd(10),
-      String(Math.round(picks.length / TRIALS)).padStart(6),
-      avg(picks, p => p.mine).toFixed(2).padStart(8),
-      avg(picks, p => p.best).toFixed(2).padStart(8),
-      avg(picks, p => p.med).toFixed(2).padStart(8),
-      avg(picks, p => p.pct).toFixed(3).padStart(7),
-      BASELINE[st].toFixed(3).padStart(5),
-      avg(picks, p => p.strict).toFixed(3).padStart(8),
-      '  ' + byKind);
+function report(ks) {
+  const { STAGES } = load();
+  for (const k of ks) {
+    console.log(`\n── k = ${k}  (기대 백분위 ${(k / (k + 1)).toFixed(2)}) · 시드 ${SEED} · ${TRIALS}시행 ──`);
+    console.log('스테이지'.padEnd(10), '소환수', '고른커버', '최고커버', '중앙커버', '백분위', 'k=1', '  strict', '  종류별 백분위');
+    // 판 목록을 하드코딩하지 않는다. 박아 두면 판이 늘었을 때 **조용히 안 잰다.**
+    for (let st = 0; st < STAGES.length; st++) {
+      const picks = seeded(() => {
+        const out = [];
+        for (let i = 0; i < TRIALS; i++) out.push(...probe(st, k));
+        return out;
+      });
+      if (!picks.length) { console.log(`스테이지${st + 1} 소환 없음`); continue; }
+      const avg = (rows, f) => rows.reduce((s, p) => s + f(p), 0) / rows.length;
+      const byKind = [...new Set(picks.map(p => p.kind))].sort()
+        .map(kd => kd + ' ' + avg(picks.filter(p => p.kind === kd), p => p.pct).toFixed(2))
+        .join(' · ');
+      console.log(
+        `스테이지${st + 1}`.padEnd(10),
+        String(Math.round(picks.length / TRIALS)).padStart(6),
+        avg(picks, p => p.mine).toFixed(2).padStart(8),
+        avg(picks, p => p.best).toFixed(2).padStart(8),
+        avg(picks, p => p.med).toFixed(2).padStart(8),
+        meanPct(picks).toFixed(3).padStart(7),
+        (BASELINE[st] === undefined ? '—' : BASELINE[st].toFixed(3)).padStart(5),
+        avg(picks, p => p.strict).toFixed(3).padStart(8),
+        '  ' + byKind);
+    }
   }
 }
 
-console.log('\n기준선은 #35 착수 시점(균등 난수)의 실측이다. 백분위 0.5 근처면 균등 난수라는 뜻이고,');
-console.log('k-표본 최고라면 k/(k+1) 근처여야 한다 — 그보다 훨씬 높으면 자리를 너무 잘 고르는 것이다.');
+if (require.main === module) {
+  // k 는 정수 1 이상만 받는다. `greedy` 가 어차피 던지지만, 여기서 걸러야
+  // 「k=0 행」 같은 거짓 헤더가 안 찍힌다.
+  const ks = process.argv.slice(2).map(Number);
+  const bad = ks.filter(n => !Number.isInteger(n) || n < 1);
+  if (bad.length) {
+    console.error('k 는 1 이상의 정수라야 한다: ' + bad.join(', '));
+    process.exit(1);
+  }
+  report(ks.length ? ks : [SUMMON_SAMPLES]);
+  console.log('\n기준선은 #35 착수 시점(균등 난수)의 실측이다. 백분위 0.5 근처면 균등 난수라는 뜻이고,');
+  console.log('k-표본 최고라면 k/(k+1) 근처여야 한다 — 그보다 훨씬 높으면 자리를 너무 잘 고르는 것이다.');
+}
+
+// `tools/test.js` 의 배치 백분위 게이트가 이 둘을 부른다. 계측과 게이트가 같은 자를
+// 쓰게 하는 것이 목적이라 **여기 규칙을 고치면 게이트도 같이 움직여야 정상**이다.
+module.exports = { probe, meanPct };

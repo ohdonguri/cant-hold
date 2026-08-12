@@ -1,5 +1,7 @@
 // 회귀 테스트. 렌더는 검증하지 않고 규칙과 밸런스만 본다.
-const { load, greedy, pickKind, coverTable, summonSpots, SUMMON_SAMPLES } = require('./sim.js');
+const { load, greedy, pickKind, coverTable, pickSpot, SUMMON_SAMPLES } = require('./sim.js');
+// 배치 백분위 게이트는 **계측 도구와 같은 함수**를 쓴다(tools/place.js 헤더 참고).
+const { probe, meanPct } = require('./place.js');
 
 let fail = 0;
 function ok(name, cond, detail) {
@@ -1103,7 +1105,8 @@ function known(name, worse, detail, why) {
 // **임계를 올려서도, 이 블록에 시드를 박아서도 안 된다** — 시드를 박으면(12345 는
 // S4 0/8 이라 통과한다) 눈금이 조용히 통과로 굳는다. 답은 난이도를 다시 조이는
 // 것이고 **별도 티켓이다**([#31] 당시 index.html 은 그 티켓에서 동결. `npm run tune`
-// 의 실배포 행도 목표 밴드 18~24 밖인 w27 로 같은 말을 하고 있다). 난이도를 조여
+// 의 실배포 행도 목표 밴드 18~24 밖인 w29 로 같은 말을 하고 있다 — 스테이지3 ·
+// 시드 12345 · 5시행. #35 의 배치 정책 뒤 w27 에서 더 멀어졌다). 난이도를 조여
 // S4 클리어가 0 으로 돌아오면 이 줄을 KNOWN 에서 지우고 하드 게이트로 되돌릴 것.
 //
 // [2026-08 #33] **그래서 대신 통계량을 바꿨다.** ⑤ 분수령(9x14)이 붙으면서 「어느
@@ -1226,19 +1229,30 @@ function known(name, worse, detail, why) {
 // 배치 규칙이 조용히 죽어도 사망 웨이브만 봐서는 못 잡는다. #31 의 「지은 종류
 // 평균」이 정확히 이 자리였고, 그때 지표가 없어서 두 종류만 짓는 상태로 오래 갔다.
 //
-// **상·하한 양쪽으로 잠근다.** 방향이 반대인 두 회귀를 각각 잡는다.
-//   하한 — 정책이 통째로 빠지는 것(`SUMMON_SAMPLES` 가 1 로 돌아가거나 커버 표가
-//          엉뚱한 스테이지 것이 되면 0.5 로 내려앉는다). 이 티켓의 개선을 잠근다.
-//   상한 — **최적으로 가지 마라.** 그리디는 「대충 하는 플레이어」이고 자리를 잘
-//          고를수록 판이 쉬워져 난이도 눈금이 무너진다. 커버를 목적함수로 삼아
-//          argmax 쪽으로 미는 변경이 여기 걸린다(PM 실측: argmax 는 한 주머니에
-//          뭉쳐 오히려 나쁘다. DESIGN §꼬리를 재는 자).
+// **세 겹이다. ③ 만으로는 규칙을 못 잡는다 — 순환이기 때문이다.**
+//   ① 규칙   `pickSpot` 을 난수 스텁으로 직접 단언한다(k회 소비 · 뽑힌 것 중 최대 ·
+//            동점은 먼저). 실패 메시지가 곧 진단이 된다
+//   ② 정의   커버가 `tools/paths.js` 의 `RANGE`·`cells` 와 칸마다 같은가.
+//            ① 은 `cov` 를 인자로 받으므로 사거리 변조를 못 잡는다
+//   ③ 증상   실판 백분위 상·하한. 방향이 반대인 두 회귀를 각각 잡는다
+//     하한 — 정책이 통째로 빠지는 것(`SUMMON_SAMPLES` 가 1 로 돌아가거나 커버 표가
+//            엉뚱한 스테이지 것이 되면 0.5 로 내려앉는다). 이 티켓의 개선을 잠근다
+//     상한 — **최적으로 가지 마라.** 그리디는 「대충 하는 플레이어」이고 자리를 잘
+//            고를수록 판이 쉬워져 난이도 눈금이 무너진다(PM 실측: argmax 는 한
+//            주머니에 뭉쳐 오히려 나쁘다. DESIGN §꼬리를 재는 자)
 //
-// 임계는 **채택 k=2 의 실측 + 여유**다. 이 블록을 그대로 **32런** 돌려
-// 스테이지별 평균 0.624 / 0.671 / 0.665 / 0.672 / 0.664,
-// **전체 최소 0.596(S1) · 최대 0.689(S4)** 였다(런 x 판 = 160 표본).
-//   하한 0.55  실측 최소 0.596 아래로 0.046 여유. 균등 난수 0.50 과는 확실히 갈린다
-//   상한 0.72  실측 최대 0.689 위로 0.031 여유
+// **③ 이 왜 혼자서는 모자란지**: 고르는 쪽(`pickSpot`)이 최대화하는 바로 그
+// `coverTable` 로 백분위를 재므로, 커버 정의를 바꾸든 「상위 N% 균등」으로 갈든
+// 백분위는 높게 나온다. 변조 둘이 ③ 을 통과했고(사거리 4.5 · 상위 60% 균등),
+// 그때 규칙을 잡아 준 것은 seedcheck 의 값 지문뿐이었다 — 지문은 **무엇이
+// 뚫렸는지 말해 주지 않는다.** ①② 를 붙인 뒤 둘 다 이름 있는 줄에서 걸린다.
+//
+// 임계는 **채택 k=2 의 실측 + 여유**다. 이 블록을 그대로 **16런** 돌려 스테이지별
+// 평균 0.624 / 0.672 / 0.662 / 0.672 / 0.664, **최소 0.607(S1) · 최대 0.686(S2)**
+// 였다(런 x 판 = 80 표본). 단발 실행에서 S1 0.599 를 한 번 더 봤으므로 하한 여유는
+// 그쪽에 맞춰 잡는다.
+//   하한 0.55  실측 최소 0.599 아래로 0.049 여유. 균등 난수 0.50 과는 확실히 갈린다
+//   상한 0.72  실측 최대 0.686 위로 0.034 여유
 // ① 외곽 도로만 0.60 대로 낮은 것은 그 판의 커버 편차가 0.82 라 동률이 많아서다
 // (DESIGN §스테이지 — 의도된 성질이다). 그래서 하한은 다섯 판 공통으로 두되 S1 을
 // 기준으로 잡았다. `k` 를 3 으로 올리면 나머지 네 판이 0.745~0.755 로 **상한에
@@ -1254,32 +1268,112 @@ function known(name, worse, detail, why) {
   const LO = 0.55, HI = 0.72;
   const want = SUMMON_SAMPLES / (SUMMON_SAMPLES + 1);
 
-  const pcts = [];
-  for (let st = 0; st < load().STAGES.length; st++) {
-    let sum = 0, n = 0;
-    for (let i = 0; i < TRIALS; i++) {
+  // ── ① 규칙을 직접 잠근다 ──────────────────────────────────
+  // **아래 백분위 세 줄만으로는 규칙을 못 잡는다 — 순환이기 때문이다.**
+  // 고르는 쪽(`pickSpot`)이 최대화하는 바로 그 `coverTable` 로 백분위를 재므로,
+  // 「커버를 어떻게 정의하든」·「상위 몇 %에서 균등하게 뽑든」 백분위는 높게 나온다.
+  // 실제로 변조 둘이 네 줄을 전부 통과했다:
+  //   ① 사거리 2.2 → 4.5      백분위 0.678 0.690 0.683 0.677 0.667 로 PASS
+  //   ② 커버 상위 60% 균등     백분위 0.630 0.696 0.688 0.693 0.705 로 PASS
+  // 그때 규칙을 잡아 주는 것은 seedcheck 의 값 지문뿐인데, 지문은 **무엇이 뚫렸는지
+  // 말해 주지 않는다**(이 리포가 두 번 밟은 자리). 그래서 규칙 자체를 단언한다.
+  //
+  // `pickSpot` 은 순수 함수라 게임을 안 돌리고 난수만 스텁하면 전부 검사된다.
+  {
+    // 인덱스 i 를 뽑게 하는 난수값. `(r * n) | 0 === i` 가 되게 중앙을 준다.
+    const idxAt = (i, n) => (i + 0.5) / n;
+    const withSeq = (vals, fn) => {
+      const orig = Math.random;
+      let i = 0, n = 0;
+      Math.random = () => { n++; return vals[i++]; };
+      try { return { out: fn(), draws: n }; } finally { Math.random = orig; }
+    };
+    // 커버가 곧 x 좌표인 후보 넷 — 커버 0 / 1 / 2 / 3
+    const spots4 = [[0, 0], [1, 0], [2, 0], [3, 0]];
+    const covX = (x) => x;
+
+    // (a) 후보 수와 무관하게 **정확히 k 회**. 후보가 1칸이어도 k 회다
+    //     (회계가 단순해야 seedcheck 의 「호출 지점별로 갈라 세기」가 성립한다).
+    for (const k of [1, 2, 3, 5]) {
+      const { draws } = withSeq(Array(k).fill(0.5), () => pickSpot(spots4, covX, k));
+      ok(`  난수를 정확히 k회 소비한다 (k=${k})`, draws === k, draws + '회');
+    }
+    {
+      const { draws } = withSeq([0.5, 0.5, 0.5], () => pickSpot([[7, 7]], covX, 3));
+      ok('  후보가 1칸이어도 k회 뽑는다', draws === 3, draws + '회');
+    }
+
+    // (b) **뽑힌 표본 중 커버 최대**를 돌려준다. 「상위 N% 균등」·「가중 추첨」류
+    //     변조가 여기서 걸린다 — 뽑힌 셋이 커버 1/3/0 이면 답은 반드시 3 이다.
+    {
+      const { out } = withSeq([idxAt(1, 4), idxAt(3, 4), idxAt(0, 4)],
+        () => pickSpot(spots4, covX, 3));
+      ok('  뽑힌 표본 중 커버 최대를 고른다', out[0] === 3, '커버 ' + out[0]);
+    }
+    {
+      // 최대가 **마지막에** 뽑혀도 골라야 한다(비교 방향이 뒤집히면 걸린다).
+      const { out } = withSeq([idxAt(0, 4), idxAt(1, 4), idxAt(3, 4)],
+        () => pickSpot(spots4, covX, 3));
+      ok('    최대가 마지막에 뽑혀도 고른다', out[0] === 3, '커버 ' + out[0]);
+    }
+    {
+      // 안 뽑힌 칸은 못 고른다. argmax(전역 최대)로 바뀌면 여기서 걸린다 —
+      // 3 을 한 번도 안 뽑았는데 3 이 나오면 복원추출이 아니다.
+      const { out } = withSeq([idxAt(0, 4), idxAt(1, 4)], () => pickSpot(spots4, covX, 2));
+      ok('    안 뽑힌 칸은 안 고른다 (전역 argmax 가 아니다)', out[0] === 1, '커버 ' + out[0]);
+    }
+
+    // (c) 동점이면 **먼저 뽑힌 쪽**. 이게 k=1 퇴화 동일성의 근거다 —
+    //     `>` 가 `>=` 로 바뀌면 뒤에 뽑힌 쪽이 이겨 옛 스트림과 안 맞는다.
+    {
+      const flat = () => 5;
+      const { out } = withSeq([idxAt(2, 4), idxAt(0, 4), idxAt(1, 4)],
+        () => pickSpot(spots4, flat, 3));
+      ok('  동점이면 먼저 뽑힌 쪽이 이긴다', out[0] === 2, 'x=' + out[0]);
+    }
+    {
+      // k=1 은 「뽑은 인덱스를 그대로」와 같아야 한다(퇴화 동일성의 뿌리).
+      const { out, draws } = withSeq([idxAt(2, 4)], () => pickSpot(spots4, covX, 1));
+      ok('  k=1 은 뽑은 인덱스를 그대로 쓴다', out[0] === 2 && draws === 1, 'x=' + out[0]);
+    }
+  }
+
+  // ── ② 커버의 정의가 paths.js 와 같은가 ────────────────────
+  // 위 (b)(c) 는 `cov` 를 인자로 받으므로 **사거리를 바꾸는 변조는 못 잡는다.**
+  // 그건 여기서 잡는다 — `tools/paths.js` 의 `RANGE`·`cells` 로 커버를 독립으로
+  // 계산해 `sim.js` 의 `coverTable` 과 **칸 하나까지** 대조한다.
+  {
+    const { RANGE, cells } = require('./paths.js');
+    // DESIGN §스테이지의 커버 편차 표를 이 값으로 떴다. 고치려면 그 표를 다시 뜰 것.
+    ok('  커버 사거리가 DESIGN 표와 같다 (2.2)', RANGE === 2.2, String(RANGE));
+
+    let mismatch = null;
+    for (const st of [0, 4]) {
       const g = load();
       g.loadStage(st);
-      const cover = coverTable(g);
-      const orig = g.summon;
-      g.summon = function (kind, atX, atY) {
-        // 놓기 **직전**의 후보를 떠 둔다. 놓고 나면 그 칸이 차서 분포가 달라진다.
-        const spots = summonSpots(g);
-        const before = g.state.towers.length;
-        const r = orig.call(g, kind, atX, atY);
-        if (g.state.towers.length > before && spots.length > 1) {
-          const t = g.state.towers[g.state.towers.length - 1];
-          const covs = spots.map(([x, y]) => cover(x, y));
-          const mine = cover(t.gx, t.gy);
-          const below = covs.filter(v => v < mine).length;
-          const tied = covs.filter(v => v === mine).length - 1;
-          sum += (below + tied / 2) / (spots.length - 1); n++;
+      const cov = coverTable(g);
+      const { BOARD_W, BOARD_H } = g.CFG;
+      const P = [...cells(g.lanes.map(l => l.points))]
+        .map(k => k.split(',').map(Number))
+        .filter(([x, y]) => x >= 0 && x < BOARD_W && y >= 0 && y < BOARD_H);
+      for (let y = 0; y < BOARD_H && !mismatch; y++)
+        for (let x = 0; x < BOARD_W && !mismatch; x++) {
+          const want2 = P.filter(([px, py]) => Math.hypot(px - x, py - y) <= RANGE).length;
+          if (cov(x, y) !== want2) mismatch = `S${st + 1} (${x},${y}) ${cov(x, y)} != ${want2}`;
         }
-        return r;
-      };
-      greedy(g, { stage: st });
     }
-    pcts.push(n ? sum / n : 0);
+    ok('  sim 의 커버 표가 paths.js 정의와 칸마다 같다', !mismatch, mismatch || 'S1·S5 전 칸 일치');
+  }
+
+  // ── ③ 실판 백분위 (증상) ──────────────────────────────────
+  // **계측(`tools/place.js`)과 같은 함수를 쓴다.** 두 벌로 두었더니 경계 규칙이
+  // 이미 갈려 있었다(강제 선택 처리). 찍는 수와 잠그는 수가 다르면 이 게이트는
+  // place.js 가 보여 주는 것을 안 잠근다.
+  const pcts = [];
+  for (let st = 0; st < load().STAGES.length; st++) {
+    const picks = [];
+    for (let i = 0; i < TRIALS; i++) picks.push(...probe(st));
+    pcts.push(meanPct(picks) ?? 0);
   }
 
   const fmt = pcts.map(p => p.toFixed(3)).join(' ');
