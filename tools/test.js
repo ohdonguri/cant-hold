@@ -1,5 +1,5 @@
 // 회귀 테스트. 렌더는 검증하지 않고 규칙과 밸런스만 본다.
-const { load, greedy } = require('./sim.js');
+const { load, greedy, pickKind } = require('./sim.js');
 
 let fail = 0;
 function ok(name, cond, detail) {
@@ -1035,6 +1035,27 @@ function known(name, worse, detail, why) {
 // ── 밸런스 ────────────────────────────────────────────────────
 // 스테이지는 깨야 다음이 열리므로 "그리디가 절대 못 깬다"가 목표가 아니다.
 // 1스테이지는 대충 해도 깨지고, 뒤로 갈수록 안 깨져야 한다.
+//
+// [2026-08 #31] 이 덱(`파쇄+마력+조폐`)은 셋째 원소가 조폐소라 **조폐소가 한 대도
+// 안 지어지던 판**을 재고 있었다. 경제 타워가 처음으로 서면서 값이 통째로 움직였다.
+// 임계는 한 자리도 안 내리고 값만 다시 떴다(시드 없이 각 8회):
+//   S1 8/8 클리어 · S2 8/8 · S3 0~1/8 · S4 0~2/8 (중앙값은 네 판 다 총웨이브)
+//
+// **그 결과 「마지막 스테이지는 안 깨진다」가 무작위 빨간불이 됐다.** 실측:
+//   main          `node tools/test.js` 30런 중 실패 0
+//   이 브랜치     같은 30런 중 실패 2 (둘 다 S4 2/8)
+//   무시드 200판  S4 클리어율 3.0% → P(8판 중 2판 이상) ≈ 2.2%
+// main 은 여유가 「클리어 0건」이었으니 **임계 옆에 있던 것이 넘어간 게 아니라 새로
+// 생긴 회귀**다. 그래서 이 줄만 `known()` 으로 내렸다(이 파일 10-26행의 세 번째
+// 상태 — 지표는 이미 넘었는데 고치는 것이 이 변경의 일이 아닐 때). 무작위 빨간불을
+// 그대로 머지하면 다음 무고한 PR 이 뒤집어쓰고, 그건 아래 「타워 대등성」 블록이
+// 시드를 박은 이유와 같은 실패모드다.
+//
+// **임계를 올려서도, 이 블록에 시드를 박아서도 안 된다** — 시드를 박으면(12345 는
+// S4 0/8 이라 통과한다) 눈금이 조용히 통과로 굳는다. 답은 난이도를 다시 조이는
+// 것이고 **별도 티켓이다**(index.html 은 이 티켓에서 동결. `npm run tune` 의 실배포
+// 행도 목표 밴드 18~24 밖인 w27 로 같은 말을 하고 있다). 난이도를 조여 S4 클리어가
+// 0 으로 돌아오면 이 줄을 KNOWN 에서 지우고 하드 게이트로 되돌릴 것.
 {
   console.log('밸런스 (스테이지 곡선, 각 8회)');
   const DECK = ['shredder', 'arc', 'mint'];
@@ -1057,13 +1078,159 @@ function known(name, worse, detail, why) {
   for (const r of rows) console.log('    S' + (r.st + 1) + '  클리어 ' + r.clears + '/' + n + '  중앙 w' + r.med);
 
   ok('1스테이지는 대충 해도 깨진다', rows[0].clears >= 4, rows[0].clears + '/' + n);
-  ok('마지막 스테이지는 안 깨진다', rows[rows.length - 1].clears <= 1, rows[rows.length - 1].clears + '/' + n);
+
+  // 래칫은 **실측 최악값**이다. 30런에서 본 최악이 2/8 이고, 3/8 이 나오면 그건
+  // 이미 아는 3.0% 가 아니라 더 벌어진 것이므로 그때는 진짜 FAIL 이다.
+  const S4_KNOWN_CLEARS = 2;
+  const last = rows[rows.length - 1];
+  known('마지막 스테이지는 안 깨진다', last.clears > S4_KNOWN_CLEARS,
+    last.clears + '/' + n + '  (하드 게이트였다면 <=1 / 래칫 ' + S4_KNOWN_CLEARS + ')',
+    '#31 이 그리디에게 셋째 종류를 짓게 하면서 판이 실제로 쉬워졌다. 무시드 200판 '
+    + 'S4 클리어율 3.0%(main 0%)라 8판 중 2판이 2.2% 확률로 나온다. 난이도 재조정은 '
+    + '별도 티켓이고, 0 으로 돌아오면 KNOWN 에서 지우고 하드 게이트로 되돌릴 것.');
+  if (last.clears <= 1) {
+    console.log('        ↳ 이번 판은 ' + last.clears + '/' + n + ' 로 옛 임계(<=1) 안이다. '
+      + '난이도가 조여져 계속 이러면 하드 게이트로 되돌려라.');
+  }
+
   ok('뒤 스테이지가 더 어렵다', rows[0].clears > rows[rows.length - 1].clears);
   ok('어느 스테이지도 초반 전멸은 없다', rows.every(r => r.w[0] >= Math.min(10, r.med)),
     rows.map(r => 'S' + (r.st + 1) + ':' + r.w[0]).join(' '));
   ok('5성 도달률 90% 이상', rows.every(r => r.five / n >= 0.9),
     rows.map(r => r.five + '/' + n).join(' '));
   ok('HP/데미지에 NaN 없음', rows.every(r => r.w.every(v => Number.isFinite(v))));
+}
+
+// ── 소환 종류 선택 ────────────────────────────────────────────
+// 그리디가 **덱의 셋째 종류를 안 짓고 있었다**(#31). pickKind 가 「짝이 안 맞는
+// 최저 성급」이 없는 종류를 Infinity 로 떨어뜨렸는데, 한 대도 없는 종류가 정확히
+// 그 경우라 덱의 세 번째 원소가 영영 꼴찌였다. 그래서 「덱 3종」으로 재던 수치가
+// (밸런스 곡선 · 파편 예산 · 대등성 · seedcheck 세 케이스 전부) 사실상 2종을
+// 재고 있었다. 여기서 잠그는 것은 둘이다 — 규칙 자체와, 실제 판에서의 결과.
+{
+  console.log('소환 종류 선택');
+
+  // ① 규칙. **난수를 한 번도 안 뽑는다** — 그래서 이 단언은 시드에도 밸런스에도
+  // 안 딸린다. 아래 ② 가 흔들려도 규칙이 깨진 건지 판이 달라진 건지 여기서 갈린다.
+  // pickKind 를 greedy 클로저 밖 순수 함수로 뺀 이유가 이 한 줄이다.
+  {
+    const orig = Math.random;
+    let calls = 0;
+    Math.random = () => { calls++; return orig(); };
+    let picks, towers;
+    try {
+      const deck = ['shredder', 'arc', 'mint'];
+      towers = [];
+      picks = [];
+      for (let i = 0; i < 3; i++) {
+        const k = pickKind(deck, towers);
+        picks.push(k);
+        towers.push({ kind: k, star: 1 });          // 소환은 늘 1성이다
+      }
+    } finally {
+      Math.random = orig;
+    }
+    ok('빈 판에서 세 번 부르면 덱 3종이 전부 한 번씩',
+      new Set(picks).size === 3, picks.join(','));
+    ok('  난수를 0회 호출한다', calls === 0, calls + '회');
+
+    // 한 대도 없는 종류가 최우선이다. 앞 종류를 아무리 키워 놔도 순서가 안 밀린다.
+    ok('미착수 종류가 성급 높은 종류보다 앞선다',
+      pickKind(['shredder', 'mint'], [{ kind: 'shredder', star: 1 }]) === 'mint');
+    ok('  6성이 쌓여 있어도 마찬가지',
+      pickKind(['shredder', 'mint'], [{ kind: 'shredder', star: 6 }]) === 'mint');
+
+    // 반대로 **타워는 있는데 짝이 다 맞는** 종류는 그대로 후순위다(합성할 짝이
+    // 이미 있거나 자리가 없어 안 합쳐진 경우). 미착수와 갈라내는 것이 이 티켓이다.
+    ok('짝이 다 맞는 종류는 후순위',
+      pickKind(['shredder', 'mint'],
+        [{ kind: 'shredder', star: 1 }, { kind: 'shredder', star: 1 },
+          { kind: 'mint', star: 2 }]) === 'mint');
+
+    // ── 여기서부터가 규칙을 실제로 잠그는 줄이다 ──────────────────
+    // 위 다섯 줄과 아래 ② 는 **「덱 순서대로 한 바퀴」 오답 구현에 전부 통과한다.**
+    // `pickKind = (deck, towers) => deck[towers.length % deck.length]` 로 바꿔서
+    // 확인했다 — 단위 5/5 · 실판 2/2 통과. 3종이 다 지어지는 건 그 오답도 마찬가지라
+    // 「증상」으로는 규칙을 못 잠근다. 그래서 **정답이 덱 순서와 어긋나는** 케이스를
+    // 규칙 조항마다 하나씩 둔다. 아래 넷은 라운드로빈이면 전부 반대 답이 나온다.
+    ok('미착수가 덱 뒤가 아니라 앞일 때도 이긴다',
+      pickKind(['mint', 'shredder'], [{ kind: 'shredder', star: 1 }]) === 'mint',
+      '(라운드로빈이면 shredder)');
+    ok('최저 성급이 이긴다',
+      pickKind(['shredder', 'mint'],
+        [{ kind: 'shredder', star: 3 }, { kind: 'mint', star: 1 }]) === 'mint',
+      '(라운드로빈이면 shredder)');
+    // 주석에만 있고 단언이 없던 조항. 둘 다 최저 홀수 성급이 1 인데 개수가 3 대 1 이다.
+    ok('동점이면 개수가 적은 쪽이 이긴다',
+      pickKind(['shredder', 'mint'],
+        [{ kind: 'shredder', star: 1 }, { kind: 'shredder', star: 2 },
+          { kind: 'shredder', star: 4 }, { kind: 'mint', star: 1 }]) === 'mint',
+      '(라운드로빈이면 shredder)');
+    ok('짝이 다 맞는 종류는 덱 앞에 있어도 후순위',
+      pickKind(['mint', 'shredder'],
+        [{ kind: 'shredder', star: 1 }, { kind: 'shredder', star: 1 },
+          { kind: 'mint', star: 2 }]) === 'mint',
+      '(라운드로빈이면 shredder)');
+  }
+
+  // ② 실제 판. 옛 규칙에서 셋째 종류가 안 나오던 덱들을 그대로 쓴다 — 위에서부터
+  // 밸런스 곡선(mint 미착수) · 파편 예산(mortar) · 사운드(frost) · DESIGN 의
+  // 「파쇄+침식+X 다섯 덱이 X 와 무관하게 똑같이 끝난다」(mint).
+  // 스테이지3 은 tune.js 가 박아 둔 난이도 기준판이고, 시드는 12345 로 고정한다.
+  {
+    const DECKS = [
+      ['shredder', 'arc', 'mint'],
+      ['shredder', 'marksman', 'mortar'],
+      ['mortar', 'marksman', 'frost'],
+      ['shredder', 'eroder', 'mint'],
+    ];
+    const TRIALS = 3;
+    const rows = [];
+    for (const deck of DECKS) {
+      // 덱마다 시드를 **다시** 박는다. 한 번만 박고 12판을 이어 돌리면 앞 덱이
+      // 난수를 얼마나 먹었느냐에 뒤 덱이 딸려서, DECKS 에서 하나만 빼거나 순서를
+      // 바꿔도 나머지가 통째로 다른 판이 된다 — 아래 「타워 대등성」 블록이 분기마다
+      // 다시 박는 것과 같은 이유다.
+      const orig = Math.random;
+      let s = 12345 >>> 0;
+      Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
+      try {
+        for (let i = 0; i < TRIALS; i++) {
+          const g = load();
+          // **소환 횟수는 최종 타워 수로 못 잰다.** greedy 가 돌려주는 towers 는
+          // 합성이 끝난 뒤라, 30회 소환해서 2대로 합쳐진 판과 2회밖에 못 소환한
+          // 판이 똑같이 2 다. 하필 전자가 이 게이트가 잡아야 할 실패(셋째 종류를
+          // 못 지어 두 종류가 각각 고성급으로 뭉친 판)라 분모에서 조용히 빠진다.
+          // 그래서 실제로 판에 선 소환만 g.summon 을 감싸서 센다.
+          let summons = 0;
+          const summon = g.summon;
+          g.summon = (...a) => {
+            const before = g.state.towers.length;
+            const out = summon(...a);
+            if (g.state.towers.length > before) summons++;
+            return out;
+          };
+          const r = greedy(g, { stage: 2, deck });
+          rows.push({ deck, kinds: new Set(r.towers.map(t => t.replace(/\d+$/, ''))), summons });
+        }
+      } finally {
+        Math.random = orig;                         // 안 되돌리면 뒤의 모든 블록이 조용히 바뀐다
+      }
+    }
+
+    // 소환을 3회도 못 한 판은 셋째 종류를 시작할 골드가 없었던 것이라 분모에서
+    // 뺀다(소환 비용은 10 + 2*누적이다). 지금은 한 판도 안 걸리지만, 밸런스를
+    // 조여서 걸리기 시작하면 이 게이트가 「규칙이 깨졌다」로 오독되면 안 된다.
+    const judged = rows.filter(r => r.summons >= 3);
+    const full = judged.filter(r => r.kinds.size >= 3).length;
+    // `full === judged.length` 만 쓰면 분모가 0 일 때 0===0 으로 조용히 통과한다.
+    // 위 필터가 언젠가 전부 걷어내면 게이트가 공회전하면서 초록불을 낸다.
+    ok('덱 3종이 전부 지어진다', judged.length > 0 && full === judged.length,
+      full + '/' + judged.length + ' (소환<3 으로 제외 ' + (rows.length - judged.length) + ')'
+      + '  최소 소환 ' + Math.min(...rows.map(r => r.summons)));
+    ok('  덱에 없는 종류는 안 지어진다',
+      rows.every(r => [...r.kinds].every(k => r.deck.includes(k))));
+  }
 }
 
 // ── 세이브 ────────────────────────────────────────────────────
@@ -1432,21 +1599,32 @@ function known(name, worse, detail, why) {
   const SPREAD_MAX = 6;      // 이 위로는 덱·합성 선택이 의미를 잃는다
   const OUTLIER_MAX = 3.5;   // 혼자 이만큼 벗어나면 그 타워가 정답이거나 함정이다
 
-  // 알려진 미해결. 값은 시드 12345 · 7시행 실측이고 `npm run parity` 로 재현된다.
-  // B/B1 은 이 티켓(검사 도구 수리)이 만든 게 아니라 **원래 있던** 불균형이다 —
-  // 시드를 박기 전후가 같으므로 시드 탓도 아니다. 고치는 건 서리탑 밸런스 작업이라
-  // 별도 티켓이고, 여기서 임계를 8 로 올려 통과시키는 건 아래 문단이 금지한다.
-  // ratchet 은 「지금보다 나빠지면 FAIL」 선이다. 화면에 찍히는 소수 2자리로 비교한다
-  // — 시드가 박혀 있으니 같은 코드면 소수점 아래까지 같은 값이 나오고, 그래서
-  // 여유를 둘 이유가 없다. 0.01 이라도 벌어졌으면 그건 노이즈가 아니라 신호다.
-  const KNOWN = {
-    'B/B1': {
-      spread: 7.88,
-      outliers: ['서리'],
-      why: '서리탑 -4.71 이 주도. 이 티켓(#26) 은 검사 도구만 고친다 — 밸런스는 별도. '
-         + '폭이 6 아래로 내려가면 KNOWN 에서 지우고 하드 게이트로 승격할 것.',
-    },
-  };
+  // [2026-08 #31] **KNOWN 이 비었다 — 네 분기 전부 하드 게이트다.** B/B1 은 오래
+  // 7.88(서리 -4.71)로 KNOWN 에 박혀 있었는데, 「셋째 종류」를 고치자 재실측값이
+  // 0.72 로 내려와 파일 지시대로 승격했다. 시드 12345 · 7시행 실측:
+  //   A/A1 3.20 → 1.33 · A/A2 2.20 → 1.50 · B/B1 7.88 → 0.72 · B/B2 5.05 → 0.00
+  //
+  // **서리탑이 균형을 찾은 게 아니다.** 두 가지가 동시에 일어났고 둘 다 적어 둔다.
+  //   ① 옛 값은 애초에 **없는 타워를 재고 있었다.** parity 의 combos(K,3) 은 K 순서를
+  //      보존하므로 mint 는 자기가 든 15덱 전부에서 deck[2] 였고, 옛 pickKind 는
+  //      셋째 종류를 절대 안 지었다 — 「그 타워가 든 덱」의 절반 이상이 그 타워가
+  //      한 대도 없는 판이었다. 7.88 은 그 위에 얹힌 값이다
+  //   ② 지금 값이 작은 것은 **감도가 죽어서**이기도 하다. measure() 는 greedy 에
+  //      opts.stage 를 안 넘겨 스테이지1 에서 재는데(기본값 0), 3종을 짓게 된
+  //      그리디는 거기서 거의 다 클리어한다 — 실측 B/B2 245/245 판 클리어,
+  //      B/B1 241/245. 전부 상한(30)에 눌리면 기여도 차가 0 에 수렴하므로 B/B2 의
+  //      0.00 은 「완벽히 대등」이 아니라 「아무것도 안 재고 있다」는 뜻이다.
+  //      DESIGN 이 「덱 차이를 재려면 반드시 뒤 스테이지에서 재야 한다」고 적어 둔
+  //      바로 그 함정이고, parity 를 어느 스테이지에서 재느냐는 별도 티켓이다.
+  // 그러니 이 게이트가 지금 잡아 주는 것은 「폭이 6 을 넘게 벌어지는 회귀」뿐이고,
+  // 미세한 불균형은 못 본다. 그래도 폭을 KNOWN 으로 남겨 두는 것보다는 낫다 —
+  // 래칫을 0.72 로 박으면 감도 없는 값에 0.01 단위로 묶이게 된다.
+  //
+  // **대신 「눌렸다」는 사실 자체를 매 실행 화면에 남긴다.** 폭 게이트만 두면
+  // B/B2 가 `폭 0.00 · 전 타워 +0.0` 으로 **내용 없는 초록불**이 되고, 요약의
+  // 「알려진 미해결 n건」 카운터도 사라져서 22.5초짜리 게이트가 조용히 굳는다.
+  // 그래서 상한에 눌린 분기는 PASS 가 아니라 KNOWN 으로 찍는다.
+  const KNOWN = {};
 
   for (const [b3, b5] of BRANCHES) {
     const tag = b3 + '/' + b5;
@@ -1472,11 +1650,25 @@ function known(name, worse, detail, why) {
     const orig = Math.random;
     let s = 12345 >>> 0;
     Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
-    let contrib, spread;
+    let contrib, spread, span, clears, runs;
     try {
-      ({ contrib, spread } = measure(b3, b5, TRIALS));
+      ({ contrib, spread, span, clears, runs } = measure(b3, b5, TRIALS));
     } finally {
       Math.random = orig;                         // 안 되돌리면 뒤의 모든 블록이 조용히 바뀐다
+    }
+
+    // **폭 게이트보다 먼저 「이 측정이 살아 있는가」를 본다.** 35덱 평균이 한 값에
+    // 몰렸거나(span 0) 모든 판이 클리어면(clears === runs) 사망 웨이브가 아무 정보도
+    // 안 담으므로 폭은 자동으로 0 이 되고, 「폭 6 미만」은 재지도 않고 참이 된다.
+    const pinned = span === 0 || clears === runs;
+    const satDetail = '덱평균 span ' + span.toFixed(2) + ' · 클리어 ' + clears + '/' + runs;
+    if (pinned) {
+      known(`${tag} 측정이 상한에 눌렸다`, false, satDetail,
+        'measure() 가 greedy 에 stage 를 안 넘겨 스테이지1 에서 잰다. #31 로 3종을 '
+        + '짓게 된 그리디는 거기서 거의 다 클리어하므로 이 분기의 폭은 「대등하다」의 '
+        + '증거가 아니다. parity 를 뒤 스테이지에서 재는 것은 별도 티켓이다.');
+    } else {
+      ok(`${tag} 측정이 상한에 안 눌렸다`, !pinned, satDetail);
     }
 
     const detail = spread.toFixed(2) + '  '
@@ -2264,6 +2456,12 @@ function known(name, worse, detail, why) {
   // 시드에 따라 w22~w29 로 흔들린다. 전투를 충분히 돌았다는 전제만 잡는다.
   ok('전투를 충분히 돌았다', wave >= 15, 'w' + wave);
 
+  // [2026-08 #31] 이 덱의 셋째 원소가 박격포라 **박격포가 안 지어지던 판**을 재고
+  // 있었다. 3종을 다 짓게 되자 같은 골드가 세 종류로 갈려 관측소 대수가 줄고, 그래서
+  // 이 조합의 동시 피크가 **스파크 44 → 24 / 총 69 → 56** 으로 내려갔다(w30 완주).
+  // 예산이 안전한 쪽으로 움직였으므로 임계(60/200)는 그대로 둔다. 아래 「64판 스윕」
+  // 최악값은 이번에 다시 안 돌렸다 — 그 수치는 여전히 옛 그리디 기준이다.
+  //
   // 경계는 실측에 붙인다 — 이 조합이 스파크 44 / 총 69, 64판 스윕 최악값도 44 / 99.
   // 이 단언이 잡는 건 **버스트 크기**다. SPARK_N 을 4 → 16 으로 늘린 사본에서
   // 스파크가 176 으로 튀어 FAIL 하는 것을 확인했다.

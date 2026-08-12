@@ -71,24 +71,56 @@ function seedRandom() {
 //   ④ 계수 0.6 은 이 케이스를 통과시키려고 고른 값이 아니다. 스테이지4 · 12판에서
 //      0.45/0.5/0.6 을 재고 고른 뒤 홀드아웃 시드 24판으로 순위를 확인했으며,
 //      그 측정이 tools/test.js 「박격포 탄막」에 단언으로 박혀 있다
+//
+// [2026-08 셋째 종류 (#31)] **세 케이스를 전부 새로 떴다.** 바뀐 것은 index.html 이
+// 아니라 `tools/sim.js` 의 `pickKind` 다 — 한 대도 없는 종류가 `Infinity` 폴백으로
+// 항상 꼴찌가 되어 그리디가 덱의 셋째 종류를 아예 안 짓고 있었다. 여기 세 케이스도
+// 전부 덱 3종 중 2종만 등장했었다(0번 mint 없음 · 1번 arc 없음 · 3번 marksman 없음).
+// **이제 세 케이스 다 towers 에 덱 3종이 전부 나온다** — 그게 이 티켓의 직접 지표다.
+//
+// 난수 호출 횟수가 세 줄 다 움직였다. 위 박격포 건과 같은 방식으로 **호출 지점별로
+// 갈라서** 근거를 만들었다. 전역 Math.random 호출부는 여섯 곳뿐이고(rollDeck ·
+// summon 종류 · summon 자리 · 7성 특성 롤 · 조폐 약탈 · 관측 치명), greedy 는 덱과
+// 소환 종류를 항상 명시로 넘기므로 앞의 둘은 세 케이스 전부 0 이다.
+//
+//   케이스   소환 자리      7성 특성 롤   관측 치명     합계
+//     0      99 → 196       3 → 9        0 → 0        102 → 205
+//     1     149 → 128       6 → 3        0 → 0        155 → 131
+//     3     138 → 190       6 → 6        0 → 399      144 → 595
+//
+//   ① 0번: mint(조폐소)가 처음으로 지어진다. 경제 타워라 골드가 575 → 3120 으로
+//      늘고 그만큼 소환을 더 한다(+97). 방향이 예측과 같다 — 딜이 늘어 관문이 덜
+//      샜다(life 14 → 20). 여기서 늘어난 난수는 전부 **소환 자리와 특성 롤**이고,
+//      조폐 약탈(25%)은 b5 === 'B2' 조건이라 greedy 기본 분기(A/A1)에서 안 돈다
+//   ② 3번: marksman(관측소)이 처음으로 지어지고 이 케이스만 분기가 B 다. 관측 치명
+//      (`t.b3 === 'B' && Math.random() < 0.25`)이 **발당 한 번** 도는 자리라 0 → 399
+//      가 전부 거기서 나왔다. 즉 스트림이 밀린 건 난수 소비 규칙이 바뀌어서가 아니라
+//      **난수를 쓰는 타워가 처음으로 판에 존재하게 되어서**다. 방향도 예측과 같다
+//      (딜이 늘어 w24 → w28 로 더 버텼다)
+//   ③ 1번은 **나빠졌다**(clear w25 → over w23). 이것도 예측 안이다 — 같은 골드를
+//      세 종류로 나누면 종류당 개수가 줄어 성급이 늦게 오른다. 실제로 타워가
+//      frost1/3/5/7 + mortar7 (5대) 에서 frost7 + mortar6 + arc6 (3대)로 바뀌었고,
+//      박격포가 7 → 6 으로 내려간 만큼(계수 191 → 79.6) 딜이 줄었다. 판이 짧아져
+//      소환도 21회 덜 한다(149 → 128). **회귀가 아니라 3종을 실제로 짓게 된 결과**이며,
+//      난이도 재조정은 별도 티켓이다(index.html 은 이 티켓에서 한 줄도 안 고쳤다)
 const CASES = [
   {
     name: '0 / 파쇄·관측·조폐',
     opts: { stage: 0, deck: ['shredder', 'marksman', 'mint'] },
-    expect: '{"result":"clear","wave":20,"life":14,"towers":["marksman7","shredder1","shredder2","shredder6"],"maxStar":7,"gold":575}',
-    rand: 102,
+    expect: '{"result":"clear","wave":20,"life":20,"towers":["marksman7","mint7","shredder3","shredder7"],"maxStar":7,"gold":3120}',
+    rand: 205,
   },
   {
     name: '1 / 서리·박격·마력',
     opts: { stage: 1, deck: ['frost', 'mortar', 'arc'] },
-    expect: '{"result":"clear","wave":25,"life":6,"towers":["frost1","frost3","frost5","frost7","mortar7"],"maxStar":7,"gold":1018}',
-    rand: 155,
+    expect: '{"result":"over","wave":23,"life":0,"towers":["arc6","frost7","mortar6"],"maxStar":7,"gold":4}',
+    rand: 131,
   },
   {
     name: '3 / 침식·마력·관측 (B,B1)',
     opts: { stage: 3, deck: ['eroder', 'arc', 'marksman'], branch3: 'B', branch5: 'B1' },
-    expect: '{"result":"over","wave":24,"life":0,"towers":["arc7","eroder2","eroder4","eroder7"],"maxStar":7,"gold":14}',
-    rand: 144,
+    expect: '{"result":"over","wave":28,"life":0,"towers":["arc7","eroder7","marksman2","marksman3","marksman4","marksman5","marksman6"],"maxStar":7,"gold":90}',
+    rand: 595,
   },
 ];
 
