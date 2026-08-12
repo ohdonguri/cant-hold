@@ -203,6 +203,28 @@ function pickKind(deck, towers) {
   return best || deck[0];
 }
 
+// ── 소환할 자리 고르기 ────────────────────────────────────────
+// 놓을 수 있는 칸을 전부 센다. **index.html `summon()` 의 무좌표 분기(:492-495)와
+// 순서도 술어도 같아야 한다** — 어긋나면 두 방향으로 조용히 틀린다. 게임이 못
+// 놓는 칸을 고르면 `summon` 의 `canPlace` 재검증에 걸려 토스트만 내고 소환이 통째로
+// 빠지고(그리디는 `towers.length` 가 안 늘어 그 웨이브의 배치를 거기서 그만둔다),
+// 반대로 좁게 세면 놓을 수 있는 칸을 영영 안 쓴다.
+//
+// `firstOpenRow()`(= `CFG.BOARD_H - state.openRows`)를 베끼지 않고 그대로 부른다.
+// 개방 행 계산이 두 곳에 있으면 한쪽만 고쳤을 때 이 함수가 말없이 어긋난다.
+//
+// greedy 클로저 밖에 둔 이유는 `pickKind` 와 같다 — 난수를 한 번도 안 뽑고 규칙만
+// 단언할 수 있어야 하기 때문이다.
+function summonSpots(g) {
+  const { state, CFG } = g;
+  const occ = g.occupancy();
+  const spots = [];
+  for (let y = g.firstOpenRow(); y < CFG.BOARD_H; y++)
+    for (let x = 0; x < CFG.BOARD_W; x++)
+      if (g.canPlace(x, y, 1, occ)) spots.push([x, y]);
+  return spots;
+}
+
 // ── 그리디 플레이어 ──────────────────────────────────────────
 // 실력 좋은 플레이어가 아니라 "평균 이하로 대충 하는 플레이어"를 흉내낸다.
 // 이 플레이어가 클리어해버리면 게임이 너무 쉬운 것이고,
@@ -257,11 +279,28 @@ function greedy(g, opts = {}) {
     }
   }
 
+  // 자리를 sim 쪽에서 고른다. **동작은 안 바뀐다** — 후보 열거도 뽑는 식도
+  // index.html 의 무좌표 분기와 같으므로 난수 소비 지점·횟수·인덱스가 전부 그대로다
+  // (`tools/seedcheck.js` 세 케이스가 `expect`·`rand` 한 글자도 안 움직이는 것이
+  // 그 증거다). 여기로 옮기는 것 자체가 목적이다 — 배치 규칙은 **밸런스 시뮬의
+  // 성질**이지 게임의 성질이 아니고, `index.html` 은 이 티켓에서 한 줄도 안 고친다.
+  //
+  // 후보가 0 개면 `summon` 을 **아예 안 부른다.** 현행도 그 경우 난수를 안 뽑고
+  // 「빈 칸 없음」 토스트만 내므로 등가이고, 뒤에 붙을 정책(표본 k 회)이 없는
+  // 후보에서 난수를 뽑아 스트림을 밀지 않게 하는 자리이기도 하다.
+  function summonOne() {
+    if (state.gold < g.summonCost()) return;
+    const spots = summonSpots(g);
+    if (!spots.length) return;
+    const [gx, gy] = spots[(Math.random() * spots.length) | 0];
+    g.summon(pickKind(state.deck, state.towers), gx, gy);
+  }
+
   function buildPhase() {
     let guard = 0;
     while (guard++ < 400) {
       const before = state.towers.length;
-      if (state.gold >= g.summonCost()) g.summon(pickKind(state.deck, state.towers));
+      summonOne();
       if (state.towers.length === before) break;
       mergeAll();
     }
@@ -289,4 +328,4 @@ function greedy(g, opts = {}) {
   };
 }
 
-module.exports = { load, greedy, patch, pickKind };
+module.exports = { load, greedy, patch, pickKind, summonSpots };
