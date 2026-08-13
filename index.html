@@ -231,7 +231,9 @@ const curveStages = () => STAGES.filter(isCurveStage);
 // CFG.STAR_MAX 를 제자리에서 갈아끼우기 때문이다 — 리터럴 7 을 loadStage 에 또
 // 적으면 CFG 를 고쳤을 때 둘이 갈린다(tools/sim.js 의 patch 도 CFG 만 덮어쓴다).
 const STAR_MAX_BASE = CFG.STAR_MAX;
-const stageStarMax = def => def.starMax || STAR_MAX_BASE;
+// `??` 다. `||` 면 starMax: 0 을 조용히 7 로 되돌린다 — 0 은 잘못된 값이지만
+// 조용히 기본값이 되면 「왜 7성이 되지」로 한참 헤맨다.
+const stageStarMax = def => def.starMax ?? STAR_MAX_BASE;
 
 // 현재 스테이지의 런타임 데이터. loadStage() 가 제자리에서 갈아끼운다.
 // 재할당하면 밖에서 잡은 참조가 끊기므로 항상 같은 객체를 유지한다.
@@ -584,9 +586,22 @@ function summon(kind, atX, atY) {
 function mergeCost(star) { return 8 * star; }
 function mergeIsFree() { return state.towers.some(t => t.kind === 'mint' && t.b5 === 'A2'); }
 
-// 합성은 준비 단계에서만 된다. 웨이브 중에 합치면 결과 타워가 자리를 옮기고,
-// 그러면 오라 범위와 마력로 조준선이 한복판에서 통째로 흔들린다.
-function mergeAllowed() { return state.phase === 'build'; }
+// 합성은 준비 단계와 웨이브 중에 된다. 판이 끝난 뒤(over·clear)와 화면 밖
+// (stage·deck)에서는 안 된다 — 거기서는 보드가 판정을 마친 상태다.
+//
+// **오래 준비 단계 전용이었다.** 근거는 「웨이브 중에 합치면 결과 타워가 자리를
+// 옮기고, 그러면 오라 범위와 마력로 조준선이 한복판에서 통째로 흔들린다」였다.
+// 그 현상 자체는 지금도 맞다. 뒤집은 이유는 둘이다.
+//
+// ① **소환은 웨이브 중에 이미 됐다.** `summon()` 에 단계 검사가 없다(실측:
+//    웨이브 중 소환하면 타워가 늘어난다). 새 타워가 한복판에 생기는 것은
+//    오라 범위와 조준선을 똑같이 바꾼다. 즉 「전투 중에 판이 흔들린다」는
+//    이미 이 게임의 규칙이었고, 합성만 유일한 예외였다.
+// ② 자리 이동은 2x2 결과에서만 난다. 1x1 은 `mergeSpot` 이 부모 자리 중
+//    하나를 고른다(`occ` 가 부모 둘을 빼므로 항상 통과한다). 그리고 2x2 는
+//    #24 이후 플레이어가 자리를 직접 고르므로, 흔들리는 자리를 **본인이**
+//    정한다. 「모르는 새 옮겨진다」가 아니다.
+function mergeAllowed() { return state.phase === 'build' || state.phase === 'wave'; }
 
 function canMerge(a, b) {
   return mergeAllowed() && !!a && !!b && a.id !== b.id && a.kind === b.kind
@@ -2188,7 +2203,12 @@ function hitButton(px, py) {
 // 세이브
 //
 // 판 스냅샷은 웨이브 사이에만 찍는다. 웨이브 도중에 찍으려면 적·발사체·장판까지
-// 다 넣어야 하는데, 어차피 합성도 준비 단계에서만 되므로 이어하기의 의미가 없다.
+// 다 넣어야 하는데, 그러면 저장 형식이 통째로 커지고 복원이 프레임 단위로 정확해야
+// 한다. 웨이브 사이는 그 셋이 전부 비어 있는 유일한 지점이다.
+//
+// (#40 으로 합성이 웨이브 중에도 된다. 예전에는 「어차피 합성도 준비 단계에서만
+//  되므로 이어하기의 의미가 없다」가 근거였는데 그 절반이 사라졌다. 그래도 결론은
+//  같다 — 근거는 이제 저장 형식의 크기와 복원 정확도이지 합성 시점이 아니다.)
 //
 // 저장은 로컬이 먼저다. 로그인은 기기를 옮길 때 쓰는 것이지 없으면 못 하는 게 아니다.
 // ═════════════════════════════════════════════════════════════
@@ -2319,7 +2339,11 @@ function stageUnlocked(i) {
   const def = STAGES[i];
   if (!def) return false;
   if (isCurveStage(def)) return i < unlocked;
+  // 도전 판은 `unlockAfter` 가 필수다. 없으면 STAGES[undefined].waves 로 터지는데,
+  // drawStageSelect 가 카드마다 이걸 부르므로 **스테이지 화면이 통째로 죽는다.**
+  // 조용히 false 로 떨어뜨리지 않는다 — 판을 붙인 사람이 바로 알아야 한다.
   const a = def.unlockAfter;
+  if (!STAGES[a]) throw new Error(`도전 판 "${def.name}" 에 unlockAfter 가 없다`);
   return (best[a] || 0) >= STAGES[a].waves;
 }
 
@@ -2346,7 +2370,13 @@ function mergeBundle(a, b) {
   const pick = (x, y) => {
     if (!x) return y;
     if (!y) return x;
-    // 더 뒤 스테이지, 같으면 더 뒤 웨이브
+    // **계단 밖의 판은 「더 뒤」가 아니다.** 도전 판은 배열 뒤에 붙지만 진행도가
+    // 아니다. 그냥 인덱스로 비교하면 **막 시작한 도전 판(웨이브 1)이 클라우드의
+    // 본편 마지막 판(웨이브 29)을 이겨서** 진행 중이던 판이 날아간다. 기기 두 대를
+    // 오갈 때만 나므로 로컬 검사로는 안 걸린다.
+    // 본편이 언제나 우선이고, 둘 다 도전이면 그 안에서 인덱스로 가른다.
+    const xc = isCurveStage(STAGES[x.stage]), yc = isCurveStage(STAGES[y.stage]);
+    if (xc !== yc) return xc ? x : y;
     if (x.stage !== y.stage) return x.stage > y.stage ? x : y;
     return (x.wave || 0) >= (y.wave || 0) ? x : y;
   };
@@ -2777,7 +2807,12 @@ function pickerHit(px, py) {
 //      그대로 쓰면 골라야 할 것이 통째로 묻힌다. 보드 밖은 그대로 0.78 이다
 //   ② 카드가 없다. 무엇을 놓을지는 이미 정해졌고 남은 물음은 자리 하나뿐이다
 // 흔들림은 안 탄다 — 2.8 이 "클립 밖(소환 피커 포함)은 안 흔들린다" 로 정한 그대로다.
-// 합성은 준비 단계에서만 되므로(mergeAllowed) 흔들림원 자체가 사실상 없다.
+// **웨이브 중에도 이 화면이 열린다**(mergeAllowed 가 wave 를 허용한다). 그래서 이제
+// 흔들림원이 실제로 있다 — 뒤에서 적이 터지고 화면이 흔들리는 동안 자리를 고른다.
+// 그래도 규칙은 안 바꾼다: 이 화면은 클립 밖이라 안 흔들리고, 흔들리는 것은 그 뒤의
+// 보드다. 고를 대상(후보 칸)이 보드 위에 있으므로 **딤이 옅은 것이 여기서 값을 한다** —
+// 흔들리는 판 위에서도 후보 칸이 읽혀야 한다.
+
 function drawMergePlacePicker(L) {
   const p = state.picker;
   const a = state.towers.find(t => t.id === p.aId);
@@ -3208,8 +3243,7 @@ canvas.addEventListener('pointerup', e => {
     state.selected = null;
     return;
   }
-  if (!mergeAllowed()) toast('웨이브 중엔 합성 불가');
-  else if (from.kind !== to.kind) toast('종류가 다름');
+  if (from.kind !== to.kind) toast('종류가 다름');
   else if (from.star !== to.star) toast('성급이 다름');
   else toast('7성이 최대');
 });
@@ -3278,12 +3312,14 @@ function buildSpawnQueue(wave) {
 }
 
 function startWave() {
-  // 자리를 고르는 중에 웨이브가 시작되면 합성은 취소된다. 시계를 안 멈추는 게 이
-  // 모드의 전제라서(멈추면 열고 닫기만으로 준비 시간을 무한히 늘릴 수 있다) 웨이브가
-  // 그냥 온다. 커밋 전이라 잃는 것은 없다 — 골드도 부모 타워도 그대로다.
-  // 여기서 지우는 이유는 mergeAllowed 가 준비 단계 전용이기 때문이다. 모드를 웨이브로
-  // 끌고 가면 배치를 다 시켜 놓고 마지막에 거절하는 화면이 된다.
-  if (mergePlaceOpen()) { state.picker = null; toast('웨이브 시작 — 합성 취소'); }
+  // **자리를 고르는 중에 웨이브가 시작돼도 모드를 그대로 둔다.** 예전에는 여기서
+  // 지웠는데, 이유가 「mergeAllowed 가 준비 단계 전용이라 배치를 다 시켜 놓고
+  // 마지막에 거절하는 화면이 된다」였다. 이제 웨이브 중에도 합성이 되므로 거절될
+  // 일이 없다 — 끌고 가는 것이 맞다.
+  //
+  // 시계를 안 멈추는 전제는 그대로다(멈추면 열고 닫기만으로 준비 시간을 무한히
+  // 늘릴 수 있다). 그래서 고르는 동안 웨이브가 그냥 시작되고 적이 흐른다. 그게
+  // 이제는 손해가 아니라 **선택의 값이다** — 전투 중에 합칠지, 한 박자 기다릴지.
   state.wave++;
   state.phase = 'wave';
   state.waveT = 0;
@@ -4797,6 +4833,15 @@ function towerCenterPx(t) {
 
 function drawTutorial() {
   if (tuteMerged) return;
+  // **안내는 준비 단계에만.** 합성 자체는 웨이브 중에도 되지만(#40) 첫 합성을
+  // 가르치는 링을 전투 한복판에 띄울 이유가 없다 — 적이 흐르는 화면에서 파란 링이
+  // 깜빡이면 가르치는 게 아니라 방해다. 판을 처음 잡은 사람은 어차피 준비 단계에서
+  // 이걸 본다.
+  //
+  // 부수 효과가 하나 더 있다. 이 링은 `frameNow` 로 매 프레임 다른 픽셀을 내는데,
+  // 웨이브 중에 그리면 `verify-build` 의 프레임 세기가 흔들린다(rAF 콜백이 한 실제
+  // 프레임에 두 번 들면 카운트와 가상 시계가 어긋난다). 실측 8회 중 7회 불일치였다.
+  if (state.phase !== 'build') return;
   if (state.paused || state.picker || state.choice) return;
   if (drag && drag.moved) return;          // 이미 끌고 있으면 안내가 방해된다
   const pair = mergeablePair();
