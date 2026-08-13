@@ -208,16 +208,31 @@ function known(name, worse, detail, why) {
   ok('5성은 2x2 로 커진다', big && g.towerFootprint(big) === 2, big ? String(g.towerFootprint(big)) : 'null');
   ok('5성 진입 시 분기 선택이 뜬다', !!state.choice && state.choice.tier === 5);
 
-  // 웨이브 중에는 합칠 수 없다. 결과 타워가 자리를 옮기면
-  // 오라 범위와 마력로 조준선이 한복판에서 흔들린다.
+  // **웨이브 중에도 합칠 수 있다(#40).** 오래 준비 단계 전용이었고 근거는 「결과
+  // 타워가 자리를 옮기면 오라 범위와 조준선이 한복판에서 흔들린다」였다. 그 현상은
+  // 지금도 맞지만, 소환이 이미 웨이브 중에 되므로(아래 단언) 합성만 예외인 상태였다.
+  // 새 타워가 한복판에 생기는 것도 범위와 조준선을 똑같이 바꾼다.
+  //
+  // **판이 끝난 뒤(over·clear)에는 여전히 막힌다** — 거기서는 보드가 판정을 마쳤다.
   state.towers.length = 0;
   state.choice = null;
   const w1 = put('marksman', 1, 2, 4), w2 = put('marksman', 1, 3, 4);
   state.phase = 'wave';
-  ok('웨이브 중엔 합성 불가', !g.canMerge(w1, w2) && g.mergeTowers(w1, w2) === null);
-  ok('타워가 그대로 남는다', state.towers.length === 2, String(state.towers.length));
+  ok('웨이브 중에도 합성된다', g.canMerge(w1, w2));
+  ok('  소환도 웨이브 중에 된다 (합성만 예외였다)', (() => {
+    const n = state.towers.length; const gold = state.gold; state.gold = 9999;
+    g.summon('marksman'); const grew = state.towers.length > n;
+    state.towers.length = n; state.gold = gold; return grew;
+  })());
+  ok('  실제로 합쳐진다', g.mergeTowers(w1, w2) !== null && state.towers.length === 1,
+    String(state.towers.length));
+  state.towers.length = 0;
+  const o1 = put('marksman', 1, 2, 4), o2 = put('marksman', 1, 3, 4);
+  state.phase = 'over';
+  ok('판이 끝난 뒤엔 못 합친다', !g.canMerge(o1, o2) && g.mergeTowers(o1, o2) === null);
+  ok('  타워가 그대로 남는다', state.towers.length === 2, String(state.towers.length));
   state.phase = 'build';
-  ok('준비 단계로 오면 다시 된다', g.canMerge(w1, w2));
+  ok('  준비 단계에서도 된다', g.canMerge(o1, o2));
 
   // 조폐소는 5성이어도 1칸
   state.towers.length = 0;
@@ -558,25 +573,34 @@ function known(name, worse, detail, why) {
   ok('잘못된 자리는 거절한다', bad === null && state.towers.length === 2, String(state.towers.length));
   g.clearChoices();
 
-  // 웨이브가 시작되면 취소된다 (손실 없음). 웨이브 중에 모드가 살아 있는 프레임은 0.
+  // **웨이브가 시작돼도 모드를 끌고 간다(#40).** 예전에는 여기서 취소했고 근거가
+  // 「mergeAllowed 가 준비 단계 전용이라 배치를 다 시켜 놓고 마지막에 거절하는
+  // 화면이 된다」였다. 이제 웨이브 중에도 합성되므로 거절될 일이 없다.
+  //
+  // 시계를 안 멈추는 전제는 그대로다 — 고르는 동안 적이 흐른다. 그게 손해가 아니라
+  // 선택의 값이다(전투 중에 합칠지, 한 박자 기다릴지).
   reset();
   const w1 = put('marksman', 4, 1, 8), w2 = put('marksman', 4, 3, 8);
-  const wGold = state.gold, wSnap = snap();
+  const wGold = state.gold;
   state.toast = null;
   g.beginMergePlace(w1, w2);
   ok('  웨이브 직전에 모드가 열려 있다', g.mergePlaceState().open === true);
   state.wave = 3;          // 첫 웨이브는 눌러야 오므로 이미 굴러가는 판으로 둔다
   state.timer = 0.05;
-  let leaked = 0;
+  let alive = 0;
   for (let i = 0; i < 30; i++) {
     g.update(1 / 30);
-    if (state.phase === 'wave' && g.mergePlaceState().open) leaked++;
+    if (state.phase === 'wave' && g.mergePlaceState().open) alive++;
   }
-  ok('웨이브가 시작되면 모드가 닫힌다',
-    state.phase === 'wave' && g.mergePlaceState().open === false, state.phase);
-  ok('  웨이브 중 열려 있는 프레임 0', leaked === 0, String(leaked));
-  ok('  취소돼도 골드·타워가 그대로', state.gold === wGold && snap() === wSnap);
-  ok('  왜 취소됐는지 알려 준다', !!state.toast, state.toast ? state.toast.text : '없음');
+  ok('웨이브가 시작돼도 모드가 살아 있다',
+    state.phase === 'wave' && g.mergePlaceState().open === true, state.phase);
+  ok('  웨이브 중 열려 있는 프레임이 있다', alive > 0, String(alive));
+  ok('  아직 커밋 전이라 골드가 그대로', state.gold === wGold, String(state.gold));
+  ok('  웨이브 중에 배치를 확정할 수 있다', (() => {
+    const n = state.towers.length;
+    const sel = g.mergePlaceState().sel;
+    return !!sel && g.mergeTowers(w1, w2, sel) !== null && state.towers.length < n;
+  })());
 
   // 불변식: mergeSpot !== null ⟺ mergeSpots.length > 0
   // 이게 깨지면 "미리보기는 자리가 있다는데 모드가 안 열린다"(또는 그 반대)가 난다.
@@ -776,8 +800,20 @@ function known(name, worse, detail, why) {
   const a = put('marksman', 1, 3, 8), b = put('marksman', 1, 4, 8);
   ok('같은 종류·성급 두 개면 쌍이 잡힌다', !!g.mergeablePair());
 
+  // **합성은 웨이브 중에도 되지만(#40) 안내는 준비 단계에만 뜬다.** `mergeablePair`
+  // 는 「합칠 쌍이 있나」라서 웨이브 중에도 쌍을 잡는다 — 안내를 거르는 것은
+  // `drawTutorial` 의 `state.phase !== 'build'` 다. 전투 한복판에 첫 합성 링을
+  // 띄우면 가르치는 게 아니라 방해이고, 그 링이 매 프레임 다른 픽셀을 내서
+  // verify-build 의 프레임 세기까지 흔든다(실측 8회 중 7회 불일치).
   state.phase = 'wave';
-  ok('웨이브 중엔 안내 안 뜬다', g.mergeablePair() === null);
+  ok('웨이브 중에도 합칠 쌍은 잡힌다', !!g.mergeablePair());
+  ok('  그래도 안내는 준비 단계에만', (() => {
+    const draws = g.draws; draws.reset();
+    g.render();
+    const wave = draws.count('arc');
+    state.phase = 'build'; draws.reset(); g.render();
+    return draws.count('arc') > wave;
+  })(), '웨이브 중 링 없음');
   state.phase = 'build';
 
   g.mergeTowers(a, b);
@@ -1109,6 +1145,36 @@ function known(name, worse, detail, why) {
   ok('  6성이 만들어진다', six && six.star === 6, six ? String(six.star) : 'null');
   ok('  6성 진입에 모달이 안 뜬다', state.choice === null,
     state.choice ? 'tier ' + state.choice.tier : '없음');
+
+  // ── 판이 성립하는가 ──
+  // 위 단언들은 「규칙이 걸린다」까지만 본다. 규칙이 걸려도 **판이 못 깰 판이거나
+  // 거저 주는 판이면** 도전이 아니다. 계단 게이트에서 뺀 대신 이 줄이 지킨다 —
+  // 안 두면 starMax 를 5 로 바꿔 판이 무너져도 npm test 가 통과한다(#33 의 무감시와
+  // 같은 형태다). 계단 위 판이 아니므로 진도 p 로는 안 잰다. 클리어 비율로 본다.
+  //
+  // 폭이 넓은 것은 이 판이 난이도 축이 아니기 때문이다. 잡으려는 것은 「튜닝이
+  // 어긋났다」가 아니라 **「제약이 판을 부쉈다」**다. npm run curve 의 35덱 210판
+  // 실측은 31.4% 이고, 여기 8판은 그보다 훨씬 거친 표본이라 폭을 더 준다.
+  //
+  // **8판으로는 하한을 못 건다.** 처음에 8판 · 하한 1 로 뒀다가 15런 중 1런이
+  // `0/8` 로 물렸다. 실측 클리어율 31.4% 면 `P(0 of 8) = 0.686^8 = 4.9%` 이고
+  // 15런에 한 번 볼 확률이 53% 다 — 계산이 관측과 정확히 맞는다. 20판이면
+  // `P(0 of 20) = 0.05%` 라 하한이 선다. 이 판은 계단 밖이라 밸런스 블록의
+  // 「8판 표본은 게이트지 눈금이 아니다」가 그대로 적용되는 자리다.
+  {
+    const CH_N = 20, CH_LO = 1, CH_HI = 17;
+    const runs = [];
+    for (let i = 0; i < CH_N; i++) {
+      const gg = load();
+      runs.push(greedy(gg, { stage: chal }));
+    }
+    const cleared = runs.filter(r => r.result === 'clear').length;
+    ok(`도전 판이 성립한다 (${CH_N}판 중 ${CH_LO}~${CH_HI} 클리어)`,
+      cleared >= CH_LO && cleared <= CH_HI,
+      cleared + '/' + CH_N + '  (curve 35덱 210판 실측 31.4%)');
+    ok('  7성이 안 나온다', runs.every(r => r.maxStar <= 6),
+      '최고 ' + Math.max(...runs.map(r => r.maxStar)));
+  }
 }
 
 // ── 덱 선택 ───────────────────────────────────────────────────
