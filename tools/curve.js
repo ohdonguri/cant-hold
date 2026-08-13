@@ -65,12 +65,16 @@ function combos(a, k) {
 }
 
 const DECKS = combos(KINDS, 3);
+// **`starMax` 를 태그에 같이 박는다**(#39). 도전 판이 붙으면서 이 표에 **규칙이 다른
+// 판**이 처음으로 섞였다 — 판 이름만 보고는 어느 규칙으로 잰 값인지 모른다. 위 「행마다
+// 태그가 붙는가」와 같은 취지다: 한 줄만 복사해 가도 출처가 따라가야 한다.
 const TAG = `${DECKS.length}덱x${TRIALS} · seed${SEED}(덱마다 재박음) · SUMMON_SAMPLES=${SUMMON_SAMPLES}`;
+const rowTag = r => `${TAG} · starMax=${r.starMax}`;
 
 // 한 판을 35덱 x TRIALS 회 돌린다. 반환값은 **두 자로 같이 잰 것**이다 —
 // 센티넬 평균(호환)과 총웨이브로 자른 진도(눈금)를 한 번의 시행에서 뽑으므로
 // 두 열이 서로 다른 표본을 보는 일이 없다.
-function measure(st, waveMax) {
+function measure(st, waveMax, starMax, curve) {
   const means = [], prog = [];
   let clearDecks = 0, clearRuns = 0, runs = 0;
   for (const deck of DECKS) {
@@ -93,7 +97,7 @@ function measure(st, waveMax) {
   const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
   const sorted = means.slice().sort((a, b) => a - b);
   return {
-    st, waveMax, clearDecks, clearRuns, runs,
+    st, waveMax, starMax, curve, clearDecks, clearRuns, runs,
     clearRate: clearRuns / runs,
     p: avg(prog) / waveMax,
     mean: avg(means), best: sorted[sorted.length - 1], worst: sorted[0],
@@ -101,40 +105,68 @@ function measure(st, waveMax) {
 }
 
 // 판 목록을 하드코딩하지 않는다. 박아 두면 판이 늘었을 때 **조용히 안 잰다**(place.js 와 같은 규칙).
-const { STAGES } = load();
+const { STAGES, isCurveStage } = load();
 const rows = [];
 for (let st = 0; st < STAGES.length; st++) {
   const g = load({});
   g.loadStage(st);
-  rows.push(measure(st, g.CFG.WAVE_MAX));
+  // `starMax` 도 게임에서 그대로 읽는다. 여기 상수를 베끼면 판 정의를 고쳤을 때
+  // 태그만 조용히 틀린다 — `waveMax` 를 게임에서 읽는 것과 같은 이유다.
+  rows.push(measure(st, g.CFG.WAVE_MAX, g.CFG.STAR_MAX, isCurveStage(STAGES[st])));
 }
+// 계단 위의 판만 S 번호를 받는다. 도전 판을 S6 으로 찍으면 다음 사람이 이 표를
+// 위에서 아래로 읽으며 「여섯 번째 계단」으로 오해한다.
+let ci = 0;
+for (const r of rows) r.label = r.curve ? 'S' + (r.st + 1) : 'C' + ++ci;
 
 console.log('── 난이도 눈금 ──');
-console.log('판 이름: ' + STAGES.map((s, i) => `S${i + 1} ${s.name}`).join(' · '));
+console.log('판 이름: ' + rows.map(r => `${r.label} ${STAGES[r.st].name}`).join(' · '));
 console.log('`상한`/`바닥` 이 붙은 칸은 포화라 아무것도 안 재고 있다 — 눈금으로 쓰지 마라.');
 console.log('클리어가 거의 다 나는 앞 판은 클리어판 비율로, 바닥에 눌린 뒤 판은 진도 p 로 읽는다.');
 console.log('`전체평균`은 클리어를 99 로 세는 DESIGN 표 호환 열이고 **눈금이 아니다**');
 console.log('(p 는 클리어를 총웨이브로 센다). 판마다 어느 칸을 읽는지는 DESIGN §난이도의 눈금.');
+console.log('**C 행(도전 판)은 계단 밖이다 — `p` 로 줄 세우지 마라.** 그 판은 난이도 축이');
+console.log('아니라 규칙 축으로 만든 판이라, 여기서는 `기록` 으로만 찍고 판정에 안 쓴다.');
 console.log('');
 console.log('판  총웨이브        클리어판       진도 p     전체평균(99·눈금아님)  표본·시딩');
 for (const r of rows) {
   const clearMark = r.clearRate >= CLEAR_HI ? ' 상한' : r.clearRate <= CLEAR_LO ? ' 바닥' : '    ';
-  const pMark = r.clearRate >= P_SATURATED_AT ? ' 상한' : '    ';
+  // 도전 판의 `p` 는 **눈금이 아니라 기록**이다. 포화 표시(`상한`)와 같은 자리에
+  // 찍는 이유도 같다 — 이 칸은 읽으면 안 된다는 표시가 값 옆에 붙어 있어야 한다.
+  const pMark = !r.curve ? ' 기록' : r.clearRate >= P_SATURATED_AT ? ' 상한' : '    ';
   console.log(
-    ('S' + (r.st + 1)).padEnd(4),
+    r.label.padEnd(4),
     String(r.waveMax).padStart(5),
     `${r.clearRuns}/${r.runs}`.padStart(10),
     (100 * r.clearRate).toFixed(1).padStart(6) + '%' + clearMark,
     r.p.toFixed(2).padStart(6) + pMark,
     r.mean.toFixed(1).padStart(12),
-    '  ' + TAG);
+    '  ' + rowTag(r));
+}
+
+// ── 도전 판은 「같은 지형의 본편 판」과만 견준다 ─────────────────
+// 계단에서의 위치가 아니라 **제약의 효과**를 보는 것이라, 지형이 같은 판과
+// 나란히 놓아야 차이가 `starMax` 로 읽힌다. 같은 실행에서 잰 두 값이라
+// 그리디 세대·시딩·표본이 자동으로 같다(그게 이 대조의 전제다).
+for (const r of rows) {
+  if (r.curve) continue;
+  const base = rows.find(b => b.curve
+    && JSON.stringify(STAGES[b.st].lanes) === JSON.stringify(STAGES[r.st].lanes));
+  if (!base) { console.log(`\n${r.label}: 지형이 같은 본편 판이 없다 — 대조 생략`); continue; }
+  console.log(`\n── ${r.label} 대 ${base.label} (지형 동일 · 규칙만 다르다) ──`);
+  console.log(`클리어판  ${base.label} ${(100 * base.clearRate).toFixed(1)}% (starMax ${base.starMax})`
+    + `  →  ${r.label} ${(100 * r.clearRate).toFixed(1)}% (starMax ${r.starMax})`);
+  console.log('이 두 칸의 차이가 곧 제약의 효과다. **비율이 0 이나 1 에 붙으면 그 판은');
+  console.log('제약을 얹어도 아무것도 안 읽히는 판이라는 뜻이다** — ② 를 복사한 이유가 그것이다.');
 }
 
 // DESIGN §밸런스 표를 이 도구로 다시 뜰 수 있어야 한다. 형식이 갈리면 문서를 손으로
 // 옮겨 적게 되고, 그게 정본이 셋으로 갈라진 원인이다(#37). 이 블록은 그대로 붙여넣는 용도다.
 console.log('\n── DESIGN §밸런스는 시뮬레이션으로 역산한다 붙여넣기용 (클리어 99) ──');
 console.log('스테이지  총웨이브  전체평균  최고덱  최저덱  클리어덱  클리어판');
-for (const r of rows) {
+// **계단 위의 판만 붙여넣는다.** 저 표는 스테이지 계단의 표이고, 도전 판을 끼우면
+// 문서에서 여섯 번째 계단으로 굳는다. 도전 판의 값은 위 대조 블록에 있다.
+for (const r of rows.filter(x => x.curve)) {
   console.log(
     `   ${r.st + 1}`.padEnd(9),
     String(r.waveMax).padStart(5),

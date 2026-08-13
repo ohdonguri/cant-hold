@@ -588,7 +588,11 @@ function known(name, worse, detail, why) {
   // 없으면 st>=1 에서 pickStage 가 통째로 no-op 이 되어 **다섯 판 전부 스테이지1
   // (7x10 1레인)을 재게 된다.** 오래 「4스테이지」라고 적힌 채로 사실은 한 판만
   // 보고 있었다 — checked 는 그래도 200 이 나와서 통과했다.
-  g.applyBundle({ v: 1, unlocked: g.STAGES.length, best: [], run: null });
+  // **`unlocked` 만으로는 도전 판이 안 열린다**(#39). 그 판은 계단 밖이라
+  // `stageUnlocked()` 가 `best[unlockAfter]` 를 보므로, 기록을 통째로 채워
+  // 「전부 깬 사람」을 만든다. 여기가 비면 pickStage(5) 가 다시 no-op 이 되어
+  // 위 문단이 적어 둔 사고(한 판만 재면서 다섯 판이라고 적혀 있던 것)가 재발한다.
+  g.applyBundle({ v: 1, unlocked: g.STAGES.length, best: g.STAGES.map(s => s.waves), run: null });
   const visited = new Set();
   for (let st = 0; st < g.STAGES.length; st++) {
     for (let trial = 0; trial < 25; trial++) {
@@ -929,7 +933,25 @@ function known(name, worse, detail, why) {
   const g = load();
   const { state } = g;
   ok('스테이지 선택 화면에서 시작', state.phase === 'stage', state.phase);
-  ok('카드가 스테이지 수만큼', g.stageCardRects().length === g.STAGES.length);
+  // 탭 두 장을 **둘 다** 센다. 「본편 5장」만 두면 도전 화면이 무검사로 들어온다 —
+  // #33 이 새 판을 아무 게이트 없이 들여보낸 자리와 같다. 기대값은 STAGES 에서
+  // 뽑으므로 판을 더 붙여도 이 두 줄은 그대로 맞는다.
+  const curveN = g.curveStages().length, chalN = g.STAGES.length - curveN;
+  state.stageTab = 'main';
+  ok('본편 탭은 계단 위의 판만', g.stageCardRects().length === curveN,
+    g.stageCardRects().length + '/' + curveN);
+  ok('  본편 카드는 전부 onCurve', g.stageCardRects().every(r => g.isCurveStage(r.def)));
+  state.stageTab = 'challenge';
+  ok('도전 탭은 계단 밖의 판만', g.stageCardRects().length === chalN,
+    g.stageCardRects().length + '/' + chalN);
+  ok('  도전 카드는 전부 onCurve 아님', g.stageCardRects().every(r => !g.isCurveStage(r.def)));
+  // 탭이 제목 줄 자리를 그대로 쓰므로(세로 증가 0px) 카드 맨 위(132)와 안 겹쳐야 한다.
+  const tabs = g.stageTabRects();
+  state.stageTab = 'main';
+  ok('  탭이 카드 목록과 안 겹친다',
+    tabs.every(t => t.y + t.h <= g.stageCardRects()[0].y),
+    '탭 바닥 ' + Math.max(...tabs.map(t => t.y + t.h)) + ' / 첫 카드 ' + g.stageCardRects()[0].y);
+  ok('  탭끼리 안 겹친다', tabs[0].x + tabs[0].w < tabs[1].x);
 
   g.pickStage(1);
   ok('잠긴 스테이지는 못 고름', state.phase === 'stage', state.phase);
@@ -939,13 +961,18 @@ function known(name, worse, detail, why) {
   ok('맵이 실려 있다', g.lanes.length >= 1 && g.pathCells.size > 0,
     '레인 ' + g.lanes.length + ', 경로칸 ' + g.pathCells.size);
 
-  // 스테이지마다 맵과 규칙이 실제로 다른지
+  // 스테이지마다 맵과 규칙이 실제로 다른지.
+  // **키에 규칙까지 넣는 이유**: ④ 역류는 ② 이중 병목과 지형이 같고 레인 수만
+  // 다르며, 도전 판(#39)은 ② 를 **좌표까지 그대로 복사하고 starMax 만 다르다.**
+  // 경로칸만 세면 그 판이 「같은 판」으로 접혀 검사가 조용히 통과한다 — loadStage 가
+  // 갈아끼우는 것을 전부 키에 넣어야 「판이 실제로 다른가」를 재는 자가 된다.
   const seen = new Set();
   for (let i = 0; i < g.STAGES.length; i++) {
     g.loadStage(i);
-    seen.add([...g.pathCells].sort().join('|') + '#' + g.lanes.length);
+    seen.add([...g.pathCells].sort().join('|') + '#' + g.lanes.length
+      + '#' + g.CFG.OPEN_ROWS + '#' + g.CFG.WAVE_MAX + '#' + g.CFG.STAR_MAX + '#' + g.STAGES[i].hpMult);
   }
-  ok('스테이지마다 맵이 다르다', seen.size === g.STAGES.length, seen.size + '/' + g.STAGES.length);
+  ok('스테이지마다 맵·규칙이 다르다', seen.size === g.STAGES.length, seen.size + '/' + g.STAGES.length);
 
   // 행 개방 개수. 개방은 한 번에 2행씩이고(index.html:3102) BOARD_H 에서 멈추므로,
   // unlockAt 이 (h - openRows) / 2 개가 아니면 둘 중 하나가 조용히 난다 —
@@ -969,8 +996,28 @@ function known(name, worse, detail, why) {
   // 이어하기 554~606 → 로그인 616~658). 320x568 같은 더 좁은 기기를 받으려면
   // 카드를 스크롤시키거나 접어야 하고 그건 이 티켓 밖이다 — 여기서는 바닥이
   // 어디인지를 숫자로 박아 두어, 판이 늘어 이 값이 올라가면 바로 걸리게 한다.
+  //
+  // ── [2026-08 #39] **판이 여섯이면 658px 에서 꼬리가 742 로 넘친다** ──────
+  // 도전 판을 여섯째 카드로 붙이지 않고 **탭으로 가른** 진짜 이유가 이 실측이다.
+  // 목록이 여섯 장이면 카드 높이가 하한 72 에 걸려 더 안 줄고, 그 아래가 통째로
+  // 밀려난다(658px 기준 · 실측):
+  //
+  //   장수  카드 높이  마지막 카드 바닥  이어하기      로그인 바닥
+  //     5      72          540          554~606      **658**  ← 여유 0
+  //     6      72          624          638~690      **742**  ← 84px 넘침
+  //
+  // (여섯째 카드가 top 132 에서 `5 x (72 + 12)` 만큼 내려가고, 그 아래로
+  //  이어하기 52 + 여백 14 · 로그인 42 + 여백 10 이 그대로 따라 내려간다.)
+  //
+  // **이건 레이아웃 티켓을 피한 것이지 없앤 게 아니다.** 본편 목록이 여섯 장이
+  // 되는 날 같은 값이 그대로 온다 — 그때는 카드를 접거나 스크롤시켜야 하고,
+  // 탭을 하나 더 만들어 도망가는 것은 답이 아니다.
+  //
+  // 아래 목록 `[844, 667, 658]` 을 **그대로 유지한다.** 도전 탭은 카드가 한 장이라
+  // 항상 여유가 있어서 아무것도 안 잰다 — 재야 할 것은 언제나 **가장 긴 탭**이다.
   {
     const CARD_MIN = 72;          // 58 + 11(셋째 줄) + 여백 3
+    state.stageTab = 'main';      // 가장 긴 탭에서 잰다
     for (const h of [844, 667, 658]) {
       g.view.h = h;
       const cards = g.stageCardRects();
@@ -983,9 +1030,85 @@ function known(name, worse, detail, why) {
     }
   }
 
-  // 후반 스테이지는 레인이 여러 개
-  g.loadStage(g.STAGES.length - 1);
-  ok('마지막 스테이지는 다중 레인', g.lanes.length > 1, String(g.lanes.length));
+  // 후반 스테이지는 레인이 여러 개.
+  // **본편의 마지막 판을 겨눈다.** `STAGES.length - 1` 로 두면 도전 판(#39)이
+  // 붙은 지금 1레인 복사본을 재게 된다 — 겨누는 대상이 통째로 옮겨 가는 것은
+  // #33 의 S4 래칫과 같은 실패모드다.
+  const lastCurve = g.curveStages().length - 1;
+  g.loadStage(lastCurve);
+  ok('본편 마지막 스테이지는 다중 레인', g.lanes.length > 1,
+    'S' + (lastCurve + 1) + ' 레인 ' + g.lanes.length);
+}
+
+// ── 도전 스테이지 (#39) ───────────────────────────────────────
+// 계단 밖의 판이다. 화면(탭)만 갈라 두고 규칙이 실제로 안 걸리면 ② 이중 병목의
+// 복사본이 하나 늘 뿐이므로, **제약이 걸리는 자리를 하나씩** 잡는다.
+{
+  console.log('도전 스테이지');
+  const g = load();
+  const { state, CFG } = g;
+  const chal = g.STAGES.findIndex(s => !g.isCurveStage(s));
+  ok('도전 판은 배열 뒤에 붙는다', chal === g.curveStages().length,
+    'index ' + chal + ' / 본편 ' + g.curveStages().length + '판');
+
+  // ── 해금 ──
+  // 본편 계단(`unlocked`)과 **다른 자**로 열린다. 여기가 `unlocked` 를 보고 있으면
+  // ⑤ 를 깬 사람의 계단이 한 칸 더 있는 것처럼 밀린다.
+  ok('처음에는 잠겨 있다', g.stageUnlocked(chal) === false);
+  g.applyBundle({ v: 1, unlocked: 5, best: [g.STAGES[0].waves, 0, 0, 0, 0], run: null });
+  ok('  본편이 다 열려 있어도 그것만으로는 안 열린다', g.stageUnlocked(chal) === false);
+  g.applyBundle({ v: 1, unlocked: 3, best: [g.STAGES[0].waves, g.STAGES[1].waves, 0, 0, 0], run: null });
+  ok('  같은 지형의 본편 판을 깨면 열린다', g.stageUnlocked(chal) === true);
+
+  // ── 계단은 안 움직인다 ──
+  // 도전 판을 깨는 것이 본편 해금을 밀면 「본편이 여섯 판」이 된다.
+  const before = g.saveBundle().unlocked;
+  g.pickStage(chal);
+  ok('  골라진다', state.phase === 'deck', state.phase);
+  ['shredder', 'frost', 'marksman'].forEach(k => g.toggleDeckPick(k));
+  g.startRun();
+  state.wave = CFG.WAVE_MAX;
+  g.endWave();
+  ok('  도전 판을 깨도 본편 계단은 그대로', state.phase === 'clear' && g.saveBundle().unlocked === before,
+    before + ' → ' + g.saveBundle().unlocked);
+
+  // ── 제약이 실제로 걸리는가 ──
+  // 상한값 하나로 합성(canMerge)·특성 모달·이어하기 필터가 전부 걸린다.
+  g.loadStage(chal);
+  ok('도전 판은 성급 상한이 6', CFG.STAR_MAX === 6, String(CFG.STAR_MAX));
+  g.loadStage(0);
+  ok('  본편으로 돌아오면 7', CFG.STAR_MAX === 7, String(CFG.STAR_MAX));
+
+  const put = (kind, star, gx, gy) => {
+    const t = { id: 600 + state.towers.length, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 };
+    state.towers.push(t);
+    return t;
+  };
+  const reset = (st) => {
+    g.loadStage(st);
+    state.phase = 'build';
+    state.openRows = CFG.BOARD_H;
+    state.towers.length = 0;
+    state.choice = null;
+    g.clearChoices();
+    state.gold = 99999;
+  };
+
+  reset(chal);
+  ok('도전 판에서 6성끼리는 못 합친다', !g.canMerge(put('marksman', 6, 1, 8), put('marksman', 6, 3, 8)));
+  reset(0);
+  ok('  본편에서는 된다 (7성)', g.canMerge(put('marksman', 6, 1, 8), put('marksman', 6, 3, 8)));
+
+  // **6성 진입에 모달이 뜨면 빈 모달이다.** 분기표(BRANCH/TRAITS)에 tier 6 이 없다.
+  // index.html 의 `star === 3 || star === 5 || star === 7` 을 CFG.STAR_MAX 로
+  // 파생시키면 정확히 그 사고가 난다 — 하드코딩이라 5·6 양쪽에서 자동으로 맞는 게
+  // 의도이고, 이 줄이 그 의도를 잠근다.
+  reset(chal);
+  const six = g.mergeTowers(put('marksman', 5, 1, 8), put('marksman', 5, 4, 8));
+  ok('  6성이 만들어진다', six && six.star === 6, six ? String(six.star) : 'null');
+  ok('  6성 진입에 모달이 안 뜬다', state.choice === null,
+    state.choice ? 'tier ' + state.choice.tier : '없음');
 }
 
 // ── 덱 선택 ───────────────────────────────────────────────────
@@ -1134,7 +1257,15 @@ function known(name, worse, detail, why) {
   const DECK = ['shredder', 'arc', 'mint'];
   const rows = [];
   const n = 8;
-  for (let st = 0; st < load().STAGES.length; st++) {
+  // **계단 위의 판만 본다**(#39). 도전 판(`onCurve: false`)은 난이도 계단 밖이라
+  // 이 블록의 어느 줄도 그 판에 대해 뜻이 없다 — 「첫 판이 가장 쉽고 마지막 판이
+  // 가장 어렵다」는 순서에 대한 말이고, 도전 판은 순서에 안 들어간다. 명단을
+  // 안 거르면 「마지막 판」이 그리로 옮겨 가 **S5 가 무감시**가 된다(#33 에서
+  // S4 래칫이 정확히 그렇게 옮겨 갔다). 판별로 명단을 짜지 않고 `curveStages()`
+  // 를 부르는 이유는, 화면(stageCardRects)과 **같은 자**를 봐야 하기 때문이다.
+  const g0 = load();
+  const stageIdx = g0.STAGES.map((_, i) => i).filter(i => g0.isCurveStage(g0.STAGES[i]));
+  for (const st of stageIdx) {
     const w = [];
     // `max` 는 그 판의 총웨이브다. **판을 실제로 돌린 게임에서 그대로 읽는다** —
     // 여기 상수를 베껴 두면 `waves` 가 바뀌었을 때 p 만 조용히 틀린다.
@@ -1215,6 +1346,8 @@ function known(name, worse, detail, why) {
 
   // 마지막 판은 따로 잠근다. 위 래칫이 S4 전용이라 여기가 비면 새로 붙는 판이
   // 아무 검사도 없이 들어온다 — #33 이 정확히 그 상태로 한 번 갔다.
+  // **여기서 「마지막」은 계단의 마지막(S5)이다** — 위 `stageIdx` 가 도전 판을
+  // 명단에서 뺐다. 안 뺐으면 이 줄이 도전 판으로 옮겨 가 S5 가 무감시가 된다.
   const lastRow = rows[rows.length - 1];
   ok('마지막 스테이지는 안 깨진다', lastRow.clears <= 2,
     'S' + (lastRow.st + 1) + ' ' + lastRow.clears + '/' + n);
@@ -1673,6 +1806,17 @@ function known(name, worse, detail, why) {
   ok('덱 수가 안 맞으면 버린다', g.restoreRun({ ...snap, deck: ['frost'] }) === false);
   ok('없는 스테이지면 버린다', g.restoreRun({ ...snap, stage: 99 }) === false);
   ok('빈 값이면 버린다', g.restoreRun(null) === false);
+  // 성급 상한이 판마다 다르다(#39). 규칙을 넘는 타워를 **조용히 걸러 내면 유저에겐
+  // 타워 증발로 보인다** — 이어하기를 누르는 순간 7성이 사라진 판이 뜬다. 이
+  // 함수의 규칙은 「어중간하게 복원하지 않는다」이므로 통째로 버려야 한다.
+  {
+    const chal = g.STAGES.findIndex(s => !g.isCurveStage(s));
+    const over = { ...snap, stage: chal, towers: [{ x: 1, y: 8, k: 'marksman', s: 7 }] };
+    ok('  판 규칙을 넘는 성급이면 버린다', g.restoreRun(over) === false,
+      '도전 판(상한 ' + g.stageStarMax(g.STAGES[chal]) + ')에 7성');
+    ok('  같은 판이라도 상한 안이면 되살아난다',
+      g.restoreRun({ ...over, towers: [{ x: 1, y: 8, k: 'marksman', s: 6 }] }) === true);
+  }
 
   // 세이브는 줄어들면 안 된다
   const merged = g.mergeBundle(
