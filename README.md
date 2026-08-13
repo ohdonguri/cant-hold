@@ -113,7 +113,9 @@ npm test     규칙 테스트 + 시드 고정 회귀 (헤드리스). 아래 둘�
   tools/test.js       규칙·경계·렌더 호출 검사
   tools/seedcheck.js  시드 고정 밸런스 회귀 (결과 + Math.random 호출 횟수)
 npm run seedcheck 시드 회귀만 따로
-npm run tune 밸런스 상수 그리드 서치
+npm run curve 스테이지 난이도 곡선 (35덱 x 6회 = 210판). **난이도 눈금의 정본이다**
+npm run tune 밸런스 상수 그리드 서치. 축을 움직였을 때의 진도 이동량(민감도)만 찍고
+             **어떤 조합도 추천하지 않는다** — 목표값은 DESIGN §난이도의 눈금에 있다
 npm run sim  그리디 플레이 1회 결과
 npm run shot 레이아웃 스크린샷 (playwright 필요)
 npm run shot -- --repeat 10  같은 캡처를 10번 돌려 컷별 md5 가 갈리는지 본다.

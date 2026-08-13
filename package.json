@@ -6,6 +6,7 @@
     "test": "node tools/test.js && node tools/seedcheck.js",
     "seedcheck": "node tools/seedcheck.js",
     "tune": "node tools/tune.js",
+    "curve": "node tools/curve.js",
     "sim": "node tools/tune.js one",
     "shot": "node tools/shot.js",
     "parity": "node tools/parity.js",
