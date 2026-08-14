@@ -162,10 +162,8 @@ const EXPOSE = [
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
-  // 도전 판(#39). 「어느 판이 계단 위인가」를 테스트가 **같은 자로** 봐야 한다 —
-  // `onCurve !== false` 를 테스트에 베껴 두면 명단이 두 벌이 되고, 그건 이 판을
-  // 붙인 이유(플래그 하나가 화면과 게이트를 같이 먹인다)를 정면으로 깬다.
-  'isCurveStage', 'curveStages', 'stageStarMax', 'stageUnlocked', 'stageTabRects',
+  // 「이 판을 지금 고를 수 있는가」. 테스트가 조건을 베끼면 자가 두 벌이 된다.
+  'stageUnlocked',
   // 스테이지 선택 화면의 아래 두 줄. 카드 높이 하한(index.html stageCardRects)이
   // 좁은 화면에서 이 둘을 화면 밖으로 밀어내지 않는지 테스트가 봐야 하는데,
   // 좌표식을 테스트에 베껴 두면 레이아웃을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
