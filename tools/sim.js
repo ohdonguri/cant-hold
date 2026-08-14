@@ -162,6 +162,9 @@ const EXPOSE = [
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
+  // 세이브 형식 버전과 「뜻이 안 바뀐 인덱스 수」. 테스트가 리터럴 3·5 를 베껴 두면
+  // 판을 또 붙여 경계가 움직였을 때 테스트만 옛 값을 지키며 통과한다.
+  'SAVE_VERSION', 'SAVE_V2_STABLE', 'migrateBundle',
   // 「이 판을 지금 고를 수 있는가」. 테스트가 조건을 베끼면 자가 두 벌이 된다.
   'stageUnlocked',
   // 카드 높이 하한 두 벌(full/compact). 테스트가 72·51 을 베껴 두면 하한을 고쳤을 때

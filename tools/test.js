@@ -1983,7 +1983,9 @@ function known(name, worse, detail, why) {
     ok('옛 세이브는 best 로 클리어를 메운다',
       b.cleared[0] && b.cleared[1] && b.cleared[2] && !b.cleared[3], JSON.stringify(b.cleared));
     ok('  열려 있던 판이 그대로 열려 있다', b.unlocked === 4, String(b.unlocked));
-    ok('  버전이 올라간다', b.v === 2, String(b.v));
+    // 기대값을 게임에서 읽는다. 리터럴을 적으면 형식을 또 올렸을 때 이 줄만 옛 값을
+    // 지키며 통과한다(#44 에서 v3 으로 올리며 실제로 걸렸다).
+    ok('  버전이 올라간다', b.v === g.SAVE_VERSION, b.v + '/' + g.SAVE_VERSION);
 
     // 굳힌 뒤로는 새 칸만 본다. **best 가 꽉 차 있어도 cleared 가 false 면 안 열린다** —
     // 위 사망 시나리오가 남기는 세이브가 정확히 이 모양이다.
@@ -2040,6 +2042,109 @@ function known(name, worse, detail, why) {
     won[a] = true;
     g.applyBundle({ v: 2, unlocked: 1, best: reached, cleared: won, run: null });
     ok('  깨면 열린다', g.stageUnlocked(a + 1) === true);
+  }
+}
+
+// ── 세이브 마이그레이션: 인덱스의 뜻이 바뀌었다 (#44) ─────────────
+// 지금까지 세이브는 **칸이 늘기만** 했다. 그래서 인덱스는 언제나 같은 판을 가리켰고
+// 마이그레이션이라고 해 봐야 없는 칸을 메우는 것뿐이었다(v1 → v2, #45).
+//
+// **여기서 처음으로 같은 인덱스가 다른 판이 됐다.** 출시본의 `STAGES[5]` 는 도전 판
+// 「봉인된 병목」이고 이 빌드에서는 ⑥ 합수다. 도전 판의 해금 조건은 ② 클리어뿐이라
+// **③④⑤ 를 안 깬 사람도 `cleared[5] = true` 를 들고 있을 수 있다.** 그대로 읽으면
+// 그 사람에게 여섯 판이 전부 열리고, `mergeBundle` 이 OR 로 합치므로 되돌릴 길이 없다.
+//
+// #45 가 `best` 를 「깼다」로 읽어 유저에게 갔던 것과 **같은 종류**다. 그래서 그 블록과
+// 같은 방식으로 잠근다 — 판정 직후가 아니라 **세이브를 한 번 왕복시킨 뒤에** 묻는다.
+{
+  console.log('세이브 마이그레이션');
+  const V2 = 5;   // 출시본의 본편 판 수. 아래에서 게임 값과 대조한다
+
+  {
+    const g = load();
+    ok('SAVE_VERSION 이 올라가 있다', g.SAVE_VERSION >= 3, String(g.SAVE_VERSION));
+    // **경계를 게임에서 읽는다.** 판을 또 붙여도 이 값은 5 로 고정이라야 한다 —
+    // `STAGES.length` 로 쓰면 경계가 같이 밀려 멀쩡한 칸까지 버린다.
+    ok('  뜻이 안 바뀐 인덱스 수가 5 다', g.SAVE_V2_STABLE === V2, String(g.SAVE_V2_STABLE));
+    ok('  그 경계가 지금 판 수보다 작다', g.SAVE_V2_STABLE < g.STAGES.length,
+      g.SAVE_V2_STABLE + ' < ' + g.STAGES.length);
+  }
+
+  // ── [A] 도전 판을 깬 v2 세이브 ──
+  // 이 모양이 실재한다: ② 만 깨고 도전 판을 깬 사람. ③④⑤ 는 안 깼다.
+  {
+    const g = load();
+    g.applyBundle({
+      v: 2, unlocked: 3,
+      best:    [20, 25, 0, 0, 0, 25],
+      cleared: [true, true, false, false, false, true],
+      run: null,
+    });
+    const b = g.saveBundle();
+    ok('[A] 도전 판 클리어가 ⑥ 클리어로 안 읽힌다', b.cleared[V2] === false,
+      JSON.stringify(b.cleared));
+    // 이 줄이 이 블록의 전부다. 마이그레이션이 없으면 여기서 3 → 6 으로 뛴다.
+    ok('  그래서 해금이 안 밀린다', b.unlocked === 3, String(b.unlocked));
+    ok('  ⑥ 은 잠겨 있다', g.stageUnlocked(V2) === false);
+    ok('  도전 판 도달 기록도 버린다', !b.best[V2], String(b.best[V2]));
+    // **앞 칸은 그대로 살아 있어야 한다.** 통째로 버리면 진행도가 날아간다.
+    ok('  ①② 기록은 그대로다',
+      b.cleared[0] === true && b.cleared[1] === true && b.best[1] === 25,
+      JSON.stringify(b.cleared) + ' / ' + JSON.stringify(b.best));
+  }
+
+  // ── [C] 도전 판 이어하기 스냅샷 ──
+  // 도전 판은 7x10 · 25웨이브였고 ⑥ 은 10x14 · 30웨이브다. 그대로 되살리면
+  // 「어중간하게 복원하지 않는다」(restoreRun 머리 주석)가 정면으로 깨진다.
+  {
+    const g = load();
+    const run = {
+      stage: V2, deck: ['shredder', 'frost', 'marksman'], wave: 12,
+      gold: 300, essence: 1, life: 18, openRows: 6, summoned: 2, towers: [],
+    };
+    g.applyBundle({ v: 2, unlocked: 3, best: [20, 25, 0, 0, 0, 25], cleared: [], run });
+    ok('[C] 도전 판 이어하기 스냅샷은 버려진다', g.saveBundle().run === null,
+      JSON.stringify(g.saveBundle().run));
+  }
+
+  // 살아남은 인덱스의 스냅샷은 **안 버린다.** 위 줄이 `run` 을 무조건 null 로
+  // 만들어도 통과하므로 반대쪽을 같이 잠근다.
+  {
+    const g = load();
+    const run = {
+      stage: 2, deck: ['shredder', 'frost', 'marksman'], wave: 7,
+      gold: 300, essence: 1, life: 18, openRows: 6, summoned: 2, towers: [],
+    };
+    g.applyBundle({ v: 2, unlocked: 3, best: [20, 25, 7, 0, 0, 0], cleared: [], run });
+    const kept = g.saveBundle().run;
+    ok('  ③ 이어하기 스냅샷은 그대로 남는다', kept && kept.stage === 2 && kept.wave === 7,
+      JSON.stringify(kept));
+  }
+
+  // ── 병합에서도 같은 문을 지난다 ──
+  // `cloudPull` 이 `mergeBundle(saveBundle(), remote)` 를 부른다. 한쪽만 마이그레이션
+  // 하면 OR 로 합치는 순간 옛 칸이 되살아나고, 그건 한 번 열리면 못 되돌린다.
+  {
+    const g = load();
+    const m = g.mergeBundle(
+      { v: 2, unlocked: 3, best: [20, 25, 0, 0, 0, 25], cleared: [true, true, false, false, false, true], run: null },
+      { v: 3, unlocked: 3, best: [20, 25, 0, 0, 0, 0], cleared: [true, true, false, false, false, false], run: null });
+    ok('병합해도 도전 판 칸이 안 살아난다', m.cleared[V2] === false, JSON.stringify(m.cleared));
+    g.applyBundle(m);
+    ok('  합친 것을 읽어도 해금이 안 밀린다', g.saveBundle().unlocked === 3,
+      String(g.saveBundle().unlocked));
+  }
+
+  // ── v3 세이브는 안 건드린다 ──
+  // 마이그레이션이 버전을 안 보고 무조건 자르면, 앞으로 ⑥ 을 깬 사람의 기록이
+  // 저장할 때마다 사라진다. 그 반대쪽을 잠근다.
+  {
+    const g = load();
+    const full = g.STAGES.map(() => true);
+    g.applyBundle({ v: 3, unlocked: g.STAGES.length, best: g.STAGES.map(s => s.waves), cleared: full, run: null });
+    const b = g.saveBundle();
+    ok('v3 세이브의 ⑥ 클리어는 그대로 남는다', b.cleared[V2] === true, JSON.stringify(b.cleared));
+    ok('  ⑥ 도달 기록도 그대로다', b.best[V2] === g.STAGES[V2].waves, String(b.best[V2]));
   }
 }
 
