@@ -450,9 +450,11 @@ const capture = async (browser) => {
     __reseed();
     window.update = window.__update;
     restart();
-    // 도전 판은 `unlocked` 로 안 열린다 — `best[unlockAfter]` 를 본다(index.html
+    // 도전 판은 `unlocked` 로 안 열린다 — `cleared[unlockAfter]` 를 본다(index.html
     // stageUnlocked). 기록을 채워 「본편을 깬 사람」의 화면을 찍는다. 안 채우면
     // 잠긴 카드가 찍혀서 정작 볼 것(카드 내용)이 안 나온다.
+    // **v1 번들(cleared 칸 없음)을 그대로 둔다** — applyBundle 의 마이그레이션이
+    // best 로 메우므로 이 줄은 그대로 통하고, 덤으로 그 경로를 매번 밟는다.
     applyBundle({ v: 1, unlocked: STAGES.length, best: STAGES.map(s => s.waves), run: null });
     state.stageTab = 'challenge';
     __freeze();

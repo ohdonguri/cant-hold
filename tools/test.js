@@ -1927,6 +1927,143 @@ function known(name, worse, detail, why) {
   ok('이어할 판은 더 나아간 쪽', merged.run.stage === 1, 'stage ' + merged.run.stage);
 }
 
+// ── 클리어 기록 (#45) ─────────────────────────────────────────
+// `best[i]`(그 판에서 도달한 최고 웨이브)와 「깼다」는 **다른 사실**이다. 한 칸으로
+// 겸하던 시절에는 마지막 웨이브 **도중에 죽어도** `best[i] === waves` 가 찍혔고
+// (startWave 가 클리어 검사보다 먼저 wave 를 올린다), 세이브를 다시 읽는 쪽
+// (unlockFromRecord)이 그걸 「깼다」로 읽어 **죽은 판의 다음이 열렸다.**
+//
+// 그래서 이 블록은 판정 직후가 아니라 **세이브를 한 번 왕복시킨 뒤에** 묻는다.
+// 즉시 해금(endWave 의 clear 분기)은 phase 를 보고 있어서 그때도 정확했고, 그래서
+// 판정 직후의 unlocked 만 보면 버그가 있는 코드도 전부 통과한다 — 그게 이 버그가
+// 유저에게 갈 때까지 안 잡힌 이유다.
+{
+  console.log('클리어 기록');
+  const S = 2;                        // 유저가 밟은 판(③ 갈래길)
+
+  // 그 판의 마지막 웨이브를 세운 뒤, **어떻게 끝나는지만** 갈라 준다.
+  const lastWave = finish => {
+    const g = load();
+    const { state } = g;
+    g.loadStage(S);
+    state.phase = 'deck';
+    state.deckPick = ['shredder', 'frost', 'marksman'];
+    g.startRun();
+    state.wave = g.STAGES[S].waves - 1;
+    state.phase = 'build';
+    g.rushWave();                     // 마지막 웨이브 시작 — 여기서 wave 가 총웨이브가 된다
+    finish(g);
+    return g;
+  };
+
+  {
+    const g = lastWave(x => { x.state.life = 0; x.update(1 / 30); });
+    const b = g.saveBundle();
+    ok('재현 판은 본편이고 마지막이 아니다',
+      g.isCurveStage(g.STAGES[S]) && S + 2 <= g.curveStages().length,
+      'S' + (S + 1) + ' / 본편 ' + g.curveStages().length + '판');
+    ok('마지막 웨이브 도중 사망은 게임오버다', g.state.phase === 'over', g.state.phase);
+    // best 의 뜻은 안 바뀐다. 「도달했다」는 사실이므로 여전히 찍혀야 한다.
+    ok('  best 에는 마지막 웨이브가 그대로 찍힌다', b.best[S] === g.STAGES[S].waves,
+      'best[' + S + '] = ' + b.best[S] + ' / 판 웨이브 ' + g.STAGES[S].waves);
+    ok('  그래도 깬 것으로는 안 적힌다', b.cleared[S] === false, JSON.stringify(b.cleared));
+
+    // ★ 이 줄이 #45 다. 옛 조건에서는 여기서 unlocked 가 1 → 4 로 뛰었다.
+    const g2 = load();
+    g2.applyBundle(b);
+    ok('  세이브를 다시 읽어도 다음 판이 안 열린다',
+      g2.stageUnlocked(S + 1) === false && g2.saveBundle().unlocked === b.unlocked,
+      'unlocked ' + b.unlocked + ' → ' + g2.saveBundle().unlocked);
+  }
+
+  {
+    const g = lastWave(x => {
+      x.state.enemies.length = 0;
+      x.state.spawnQueue.length = 0;
+      x.endWave();
+    });
+    const b = g.saveBundle();
+    ok('마지막 웨이브를 끝내면 클리어다', g.state.phase === 'clear', g.state.phase);
+    ok('  깬 것으로 적힌다', b.cleared[S] === true, JSON.stringify(b.cleared));
+    const g3 = load();
+    g3.applyBundle(b);
+    ok('  세이브를 다시 읽으면 다음 판이 열린다', g3.stageUnlocked(S + 1) === true);
+    // 즉시 해금(endWave)과 세이브 재계산(unlockFromRecord)이 **같은 답**을 내야 한다.
+    // 둘이 다른 답을 내고 있었다는 것 자체가 #45 의 신호였다.
+    ok('  즉시 해금과 세이브 재계산이 같은 답', g3.saveBundle().unlocked === b.unlocked,
+      b.unlocked + ' → ' + g3.saveBundle().unlocked);
+  }
+
+  // ── 옛 세이브(v1 · 새 칸이 없다) ──
+  // **지금 열려 있는 것을 그대로 굳힌다.** 새 규칙을 소급 적용하면 「마지막 웨이브
+  // 도달」로 지금까지 열려 있던 사람의 진행도가 통째로 날아간다.
+  {
+    const g = load();
+    const w = g.STAGES.map(s => s.waves);
+    // ①②③ 을 마지막 웨이브까지 간 기록. 옛 조건에서 이 세이브는 ④ 까지 열어 줬다.
+    g.applyBundle({ v: 1, unlocked: 3, best: [w[0], w[1], w[2]], run: null });
+    const b = g.saveBundle();
+    ok('옛 세이브는 best 로 클리어를 메운다',
+      b.cleared[0] && b.cleared[1] && b.cleared[2] && !b.cleared[3], JSON.stringify(b.cleared));
+    ok('  열려 있던 판이 그대로 열려 있다', b.unlocked === 4, String(b.unlocked));
+    ok('  버전이 올라간다', b.v === 2, String(b.v));
+
+    // 굳힌 뒤로는 새 칸만 본다. **best 가 꽉 차 있어도 cleared 가 false 면 안 열린다** —
+    // 위 사망 시나리오가 남기는 세이브가 정확히 이 모양이다.
+    const g4 = load();
+    g4.applyBundle({ v: 2, unlocked: 1, best: [w[0], w[1], w[2]], cleared: [false, false, false], run: null });
+    ok('  새 세이브는 best 가 꽉 차 있어도 cleared 를 따른다',
+      g4.saveBundle().unlocked === 1, String(g4.saveBundle().unlocked));
+
+    // 몇 번을 다시 읽어도 같은 값이라야 한다(applyBundle 주석의 멱등성).
+    g.applyBundle(g.saveBundle());
+    g.applyBundle(g.saveBundle());
+    ok('  다시 읽어도 안 밀린다', g.saveBundle().unlocked === 4, String(g.saveBundle().unlocked));
+  }
+
+  // ── 클라우드 병합 ──
+  // 클리어 기록은 **OR** 다. 한쪽에서만 깬 판도 깬 판이고, 여기서 잃으면 기기를
+  // 옮기는 순간 열려 있던 판이 도로 잠긴다(best 를 Math.max 로 합치는 것과 같은 이유).
+  {
+    const g = load();
+    const w = g.STAGES.map(s => s.waves);
+    const m = g.mergeBundle(
+      { v: 2, unlocked: 1, best: [], cleared: [true, false, false], run: null },
+      { v: 2, unlocked: 1, best: [], cleared: [false, true, false], run: null });
+    ok('클리어 기록은 OR 로 합친다',
+      m.cleared[0] === true && m.cleared[1] === true && m.cleared[2] === false,
+      JSON.stringify(m.cleared));
+
+    // 한쪽이 옛 세이브면 그쪽만 옛 조건으로 메운다. 이게 없으면 **새 기기에서 한 번
+    // 로그인하는 것만으로 옛 기기의 진행도가 병합에서 사라진다.**
+    const m2 = g.mergeBundle(
+      { v: 1, unlocked: 4, best: [w[0], w[1], w[2]], run: null },
+      { v: 2, unlocked: 1, best: [], cleared: [false, false, false], run: null });
+    ok('  옛 세이브와 섞여도 안 잃는다', m2.cleared[0] && m2.cleared[1] && m2.cleared[2],
+      JSON.stringify(m2.cleared));
+    g.applyBundle(m2);
+    ok('  합친 것을 읽으면 그대로 열려 있다', g.saveBundle().unlocked === 4,
+      String(g.saveBundle().unlocked));
+  }
+
+  // ── 도전 판의 문도 같은 자를 쓴다 ──
+  // `stageUnlocked()` 가 best 를 보고 있으면 본편 판의 마지막 웨이브에서 죽은 사람에게
+  // 도전 판이 열린다. 같은 버그의 다른 문이다.
+  {
+    const g = load();
+    const chal = g.STAGES.findIndex(s => !g.isCurveStage(s));
+    const a = g.STAGES[chal].unlockAfter;
+    const reached = [];
+    reached[a] = g.STAGES[a].waves;
+    g.applyBundle({ v: 2, unlocked: 1, best: reached, cleared: [], run: null });
+    ok('도전 판도 도달만으로는 안 열린다', g.stageUnlocked(chal) === false);
+    const won = [];
+    won[a] = true;
+    g.applyBundle({ v: 2, unlocked: 1, best: reached, cleared: won, run: null });
+    ok('  깨면 열린다', g.stageUnlocked(chal) === true);
+  }
+}
+
 // ── 관측소 표적 유지 ──────────────────────────────────────────
 // 매 발 HP 최고를 다시 고르면 관측소는 연속타격을 원리적으로 못 쌓는다. 자기가 방금
 // 깎은 놈이 그만큼 내려가 다음 발에는 다른 놈이 1위가 되기 때문이다. 실측 평균
