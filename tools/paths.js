@@ -81,12 +81,31 @@ function evaluate(cand) {
   const covOpen = spread(free(h - open));
   const covAll = spread(free(0));
 
+  // 레인을 **전부** 사거리 안에 넣는 배치 칸이 몇 곳인가. 편차는 「좋은 자리가
+  // 갈리는가」를 재는 자라, 레인이 여럿일 때 **한 자리가 갈래를 다 덮어 버리는가**를
+  // 못 잰다 — ⑤ 분수령은 개방 행 48칸 중 18칸(37.5%)이 두 레인을 다 덮어서, 레인이
+  // 갈렸는데도 「어디를 막을까」가 1레인 판과 비슷해진다. 이 값이 0 에 가까우면
+  // 갈래마다 따로 답해야 한다는 뜻이고, **레인을 늘린 판이 실제로 규칙을 바꿨는지를
+  // 재는 유일한 기계 지표**다. 1레인 판에서는 정의상 배치 칸 전부라 볼 것이 없다.
+  //
+  // **개방 행은 `free(h - open)` 이다 — `y >= open` 이 아니다.** 9x14 · open 8 에서
+  // 전자는 행 6~13(8줄) 이고 후자는 행 8~13(6줄) 이라, 잘못 걸면 분자와 분모가 같이
+  // 작아져서 **비율까지 그럴듯하게 틀린다.** #42 기획 실측이 정확히 그렇게 나서
+  // C2 를 「0/34」로 적었는데 실제로는 1/43 이다(빠진 행 6 에 그 한 칸이 있다).
+  const laneSets = lanes.map(path => [...cells([path])].filter(k => {
+    const [x, y] = k.split(',').map(Number);
+    return x >= 0 && x < w && y >= 0 && y < h;
+  }).map(k => k.split(',').map(Number)));
+  const coversAll = (spots) => spots.filter(([x, y]) =>
+    laneSets.every(pts => pts.some(([px, py]) => Math.hypot(px - x, py - y) <= RANGE))).length;
+
   const lens = lanes.map(laneLen);
   return {
     w, h, open,
     lanes: lanes.length,
     path: inBoard.length,
     len: Math.round(lens.reduce((a, b) => a + b, 0) / lens.length),
+    lens: lens.map(v => Math.round(v)),
     free6: free(h - open).length,
     freeAll: free(0).length,
     big6: big(h - open),
@@ -96,6 +115,8 @@ function evaluate(cand) {
     covMax: covOpen.max,
     sdOpen: covOpen.sd,
     sdAll: covAll.sd,
+    allOpen: coversAll(free(h - open)),
+    allAll: coversAll(free(0)),
   };
 }
 
@@ -147,6 +168,15 @@ const STAGES = [
   { name: '⑤ 분수령', w: 9, h: 14, open: 8, lanes: [
     [P(-1, 0), P(4, 0), P(4, 3), P(0, 3), P(0, 10), P(4, 10), P(4, 13), P(8, 13), P(8, 14)],
     [P(-1, 0), P(4, 0), P(4, 3), P(8, 3), P(8, 10), P(4, 10), P(4, 13), P(8, 13), P(8, 14)]] },
+  // 도전 판(계단 밖 · onCurve: false)이라 편차 하한 1.5 를 안 겨눈다 — 이 판의
+  // 근거는 「전레인동시」 열이 개방 행 1/43 (2.3%) 이라는 것이다. 한 자리로 갈래를
+  // 다 덮지 못해야 갈래마다 따로 답하게 된다. 같은 9x14 인 ⑤ 분수령은 18/48
+  // (37.5%) 이라 레인이 갈렸는데도 세 자리 중 하나꼴로 「다 덮는 자리」가 있다.
+  // C1 봉인된 병목은 여기 없다 — 지형이 ② 이중 병목 복사본이라 새로 잴 것이 없다.
+  { name: 'C2 세 갈래 어귀', w: 9, h: 14, open: 8, lanes: [
+    [P(-1, 1), P(2, 1), P(2, 7), P(0, 7), P(0, 14)],
+    [P(4, -1), P(4, 4), P(6, 4), P(6, 10), P(4, 10), P(4, 14)],
+    [P(9, 2), P(6, 2), P(6, 6), P(8, 6), P(8, 14)]] },
 ];
 
 // ── 큰 맵 후보. 개방 행은 현행 비율(6/10)을 따라 round(h*0.6) 으로 둔다. ──
@@ -158,6 +188,25 @@ for (const [w, h] of [[7, 10], [8, 12], [9, 12], [9, 14], [10, 14], [11, 16], [1
   BIG.push({ name: `뱀 ${w}x${h}`, w, h, open: openRows(h), lanes: [serpentine(w, h)] });
   BIG.push({ name: `갈래 ${w}x${h}`, w, h, open: openRows(h), lanes: forked(w, h) });
 }
+
+// ── 3레인 후보 중 떨어진 둘. LEGACY 와 같은 이유로 남긴다 — 「왜 F 인가」의 반례다.
+// 채택안(C2 세 갈래 어귀)은 위 실제 스테이지 표에 있다. 셋 다 9x14 · open 8 이라
+// 「전레인동시」와 레인 길이만 견주면 된다.
+const TRI = [
+  // A 는 편차가 셋 중 가장 크지만(1.78) **전제가 깨진다** — 개방 행에서 한 자리가
+  // 세 레인을 다 덮는 칸이 있고, 출구 셋도 두 대로 덮인다. 「어디를 막을까」가
+  // 2레인 판과 같아지므로 편차를 산 대가가 헛돈다. 편차는 게이트가 아니다.
+  { name: 'A 삼거리(기각)', w: 9, h: 14, open: 8, lanes: [
+    [P(-1, 1), P(2, 1), P(2, 6), P(0, 6), P(0, 11), P(3, 11), P(3, 14)],
+    [P(4, -1), P(4, 4), P(6, 4), P(6, 9), P(4, 9), P(4, 12), P(5, 12), P(5, 14)],
+    [P(9, 2), P(6, 2), P(6, 6), P(8, 6), P(8, 11), P(7, 11), P(7, 14)]] },
+  // G 는 출구를 세 변에 흩어 놓았는데 **3번 레인이 나머지의 절반**이다. 속도가 같은
+  // 적이 2배 빨리 도착하므로 「어디를 막을까」가 「짧은 레인부터」로 고정된다.
+  { name: 'G 세 변(기각)', w: 9, h: 14, open: 8, lanes: [
+    [P(-1, 1), P(2, 1), P(2, 8), P(0, 8), P(0, 14)],
+    [P(4, -1), P(4, 5), P(7, 5), P(7, 11), P(4, 11), P(4, 14)],
+    [P(9, 2), P(6, 2), P(6, 7), P(9, 7)]] },
+];
 
 // ── 7x10 초기 탐색 후보. 스테이지 1·2 를 정할 때 쓴 것이라 결론이 이미 났다. ──
 // --all 로만 찍는다. 지우지 않는 이유는 "나선은 안 된다" 같은 반례가 여기 있어서다.
@@ -186,7 +235,8 @@ function table(title, cands) {
     '후보'.padEnd(22),
     '보드'.padStart(6), '레인', '경로', '길이',
     '배치(시작/전체)'.padStart(14), '2x2(시작/전체)'.padStart(13),
-    '커버 중앙/최소~최대'.padStart(16), '편차(시작/전체)');
+    '커버 중앙/최소~최대'.padStart(16), '편차(시작/전체)',
+    '전레인동시(시작/전체)');
   const rows = cands.map(c => ({ name: c.name, ...evaluate(c) }));
   for (const r of rows) {
     console.log(
@@ -199,6 +249,16 @@ function table(title, cands) {
       (r.big6 + '/' + r.bigAll).padStart(13),
       (r.covMed + '  ' + r.covMin + '~' + r.covMax).padStart(16),
       (r.sdOpen.toFixed(2) + '/' + r.sdAll.toFixed(2)).padStart(14),
+      // 분모를 같이 찍는다. 「1곳」과 「18곳」은 배치 칸 수가 다르면 못 견준다 —
+      // 읽을 값은 비율이고(⑤ 18/48 = 37.5% 대 C2 1/43 = 2.3%), 1레인 판은 정의상
+      // 전부라 `-` 로 비운다.
+      (r.lanes > 1
+        ? `${r.allOpen}/${r.free6}  ${r.allAll}/${r.freeAll}`
+        : '-').padStart(18),
+      // 레인이 여럿이면 길이를 레인별로도 찍는다. 평균만 보면 한 레인이 나머지의
+      // 절반이어도 안 보이는데, 그런 판은 「짧은 레인부터 막는다」가 늘 정답이라
+      // 배치 결정이 사라진다(후보 G 세 변이 18/21/11 로 그렇게 떨어졌다).
+      r.lanes > 1 ? '  레인 ' + r.lens.join('/') : '',
     );
   }
   return rows;
@@ -234,9 +294,10 @@ if (require.main === module) {
 
   const stageRows = table('실제 스테이지 (기준선)', STAGES);
   const bigRows = table('큰 맵 후보 — 뱀(1레인) / 갈래(2레인)', BIG);
+  const triRows = table('3레인 후보 중 기각된 것 (채택안은 위 C2)', TRI);
   if (all) verdict(table('7x10 초기 탐색 (결론 남음)', LEGACY));
 
-  verdict([...stageRows, ...bigRows]);
+  verdict([...stageRows, ...bigRows, ...triRows]);
 
   // 배치 칸이 늘어난 배수. 덱을 늘리려면 소환 횟수가 늘어야 하고(CFG.DECK_SIZE 주석:
   // 84소환/7종 = 종당 12개 < 5성에 필요한 16개), 그 상한 하나가 보드 넓이다.

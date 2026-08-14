@@ -444,8 +444,10 @@ const capture = async (browser) => {
   // 이 컷에서 볼 것은 셋이고 전부 헤드리스가 못 보는 것이다.
   //   ① 탭 두 개가 제목 줄 자리에 들어가고 아래 설명 줄(y=78)과 안 겹치는가
   //   ② 지금 어느 탭인지가 색으로 읽히는가 (선택된 쪽만 파란 테두리)
-  //   ③ 카드 한 장짜리 목록이 허전하게 안 보이는가 — 카드는 상한 88 에 걸리고
-  //      아래 이어하기·로그인 줄이 위로 딸려 올라온다
+  //   ③ 카드 **두 장**의 셋째 줄이 각자 다른 것을 말하는가 — 제약이 있는 판은
+  //      「7성 없음」, 제약이 없는 판(#42)은 「출구 3」이다. 무조건 성급 문구를
+  //      찍던 시절에는 둘째 카드에 **「8성 없음」이라는 거짓말**이 떴다.
+  //      (카드는 상한 88 에 걸리고 아래 이어하기·로그인 줄이 위로 딸려 올라온다.)
   await page.evaluate(() => {
     __reseed();
     window.update = window.__update;
@@ -467,6 +469,76 @@ const capture = async (browser) => {
     if (cards.some(c => !stageUnlocked(c.i))) return '잠긴 카드가 찍힌다';
     // 탭이 카드 위에 얹히면 컷이 무의미하다. 좌표로도 한 번 본다.
     if (stageTabRects().some(t => t.y + t.h > cards[0].y)) return '탭이 카드와 겹친다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // ── 3레인 도전 판 (#42 세 갈래 어귀 9x14) ────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 난수가 밀린다).
+  //
+  // 이 컷에서 볼 것은 셋이다. 전부 그림이라 헤드리스가 못 본다.
+  //   ① 갈래 셋이 서로 구분되게 그려지는가 — 9x14 에 경로가 셋이라 2레인 판보다
+  //      훨씬 빽빽하다. 통로가 붙어 보이면 「어느 갈래를 막을까」가 안 읽힌다.
+  //   ② 9열이 화면 폭에 들어가는가 (가로가 병목이다 — 셀 41.1px, 9-wideboard 와 같다)
+  //   ③ 잠긴 구역 안내(고정 12px)가 3레인 지형 위에서도 안 잘리는가
+  //
+  // **관문(빨간 표시)은 이 컷에 안 나온다 — 이 판의 문제가 아니다.** `render()` 가
+  // `drawBoard()` **앞에서 보드 사각형으로 클립**을 걸고(index.html render 의
+  // `ctx.rect(ox, oy, cell*BOARD_W, cell*BOARD_H)`), 관문은 레인의 **마지막 점**에
+  // 그리는데 그 점은 언제나 보드 밖이다(이 판은 y=14, ① 은 y=10, ④ 는 x=-1).
+  // 그래서 **일곱 판 전부** 관문 획이 클립에 잘려 한 번도 화면에 안 나온 상태다.
+  // 캔버스 픽셀로 확인했다(보드 아래 4px 지점이 배경색 #0d1117).
+  // 이 컷이 아니라 렌더 티켓이 고칠 자리다 — 고치면 보드가 있는 컷의 md5 가
+  // 통째로 갈리므로 판 추가와 같은 커밋에 섞으면 안 된다.
+  //
+  // 아래 확인 함수는 그래서 **좌표로** 본다. 관문 자리가 셋으로 갈렸는지와 오른쪽
+  // 끝이 화면 폭 안인지는 그림이 안 나와도 지금 잠가 둘 수 있고, 위 클립을 고치는
+  // 사람이 이 컷을 다시 떴을 때 무엇을 보아야 하는지가 여기 적혀 있게 된다.
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    // 도전 판은 `unlocked` 가 아니라 `best[unlockAfter]` 로 열린다(9-wideboard 와
+    // 다른 자다). 기록을 채워야 pickStage 가 통과한다.
+    applyBundle({ v: 1, unlocked: STAGES.length, best: STAGES.map(s => s.waves), run: null });
+    // **인덱스를 못 박지 않는다.** 도전 판이 또 붙으면 하드코딩한 번호가 다른 판을
+    // 가리키게 된다 — 레인 셋인 판을 이름이 아니라 **성질**로 찾는다.
+    pickStage(STAGES.findIndex(s => !isCurveStage(s) && s.lanes.length === 3));
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    // 관문이 볼거리이므로 타워는 보드가 비어 보이지 않을 만큼만 깐다.
+    // 개방 행은 6~13. 레인 세 갈래를 피해 놓는다.
+    let id = 7500;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    put('marksman', 5, 2, 8);         // 2x2. 열 2~3 x 행 8~9
+    put('shredder', 3, 1, 6);
+    put('frost',    2, 7, 7);
+    put('marksman', 1, 5, 12);
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('11-trilane', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 9 || CFG.BOARD_H !== 14)
+      return '9x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
+    // 관문이 겹치면 눈으로 셋을 못 센다. 좌표로 먼저 셋인지 본다 — 이 줄이 없으면
+    // 「관문 셋을 확인했다」가 사실은 두 개짜리 컷을 본 것일 수 있다.
+    const gates = new Set(lanes.map(L => {
+      const b = L.points[L.points.length - 1];
+      return b.x + ',' + b.y;
+    }));
+    if (gates.size !== 3) return '관문이 셋이 아니다: ' + [...gates].join(' ');
+    // 관문은 **셀 중심**(+0.5)에서 ±0.4 를 뻗는다 — 셀 왼쪽 모서리 기준으로 +0.9 다.
+    // 오른쪽 끝 출구가 캔버스 안인지 본다(9열이라 가로가 병목이다).
+    const right = Math.max(...lanes.map(L => L.points[L.points.length - 1].x));
+    if (cellToPx(right, 0).x + view.cell * 0.9 > view.w)
+      return '관문이 화면 밖으로 나간다: x=' + right;
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });
