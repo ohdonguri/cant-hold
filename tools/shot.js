@@ -438,6 +438,54 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 10열 보드 (⑥ 합수 10x14) ────────────────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 난수가 밀린다).
+  //
+  // 이 컷에서 볼 것은 셋이고 전부 셀이 37.0px 로 줄어서 생기는 문제다. 9x14(41.1px)
+  // 보다 한 칸 더 좁아진 **이 게임에서 가장 작은 셀**이라 여기가 진짜 하한이다.
+  //   ① 10열이 화면 폭에 들어가는가 (가로가 병목이다 — 세로는 594/14 로 남는다)
+  //   ② ★배지(round(cell*0.26) = 9.6px)가 셀 밖으로 안 나가고 스프라이트와 안 겹치는가
+  //   ③ 두 갈래가 서로 구분되게 그려지고, 아래 합수 지점이 한 곳으로 읽히는가
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // **인덱스를 못 박지 않는다.** 10열 판을 성질로 찾는다 — 판이 또 붙어도 안 밀린다.
+    pickStage(STAGES.findIndex(s => s.w === 10));
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 7800;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 두 갈래(왼쪽 x0 기둥 · 오른쪽 x9 기둥)와 합수 지점을 피한다.
+    put('marksman', 5, 2, 6);         // 2x2. 열 2~3 x 행 6~7
+    put('shredder', 4, 6, 6);
+    put('frost',    3, 7, 7);
+    put('shredder', 2, 6, 8);
+    put('marksman', 1, 2, 9);
+    put('frost',    2, 7, 9);
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('11-tenwide', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
+      return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 2) return '2레인이 아니다: ' + lanes.length;
+    // 10열이 폭 안에 들어가는가. 셀 왼쪽 모서리 + 한 칸이 캔버스 안이라야 한다.
+    if (cellToPx(CFG.BOARD_W - 1, 0).x + view.cell > view.w)
+      return '보드가 화면 밖으로 나간다: cell ' + view.cell.toFixed(1);
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (!state.towers.some(t => t.star >= 5)) return '5성(2x2)이 없다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };

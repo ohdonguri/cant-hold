@@ -1090,6 +1090,45 @@ function known(name, worse, detail, why) {
   ok('마지막 스테이지는 다중 레인', g.lanes.length > 1,
     'S' + (last + 1) + ' 레인 ' + g.lanes.length);
 
+  // ── ⑥ 합수가 실제로 「갈래마다 따로 답하는」 판인가 (#44) ──────────────────
+  // **판을 이름으로 집는다.** `lanes.length > 1` 같은 성질로 거르면 레인이 줄었을 때
+  // 검사가 실패하는 게 아니라 **안 돈다** — #42 에서 3레인 판의 3번 레인을 지워도
+  // `npm test` 가 exit 0 으로 통과한 적이 있다.
+  //
+  // 「전레인동시」는 `tools/paths.js` 가 재는 값이다(개방 행 배치 칸 중 사거리 안에
+  // **모든** 레인의 칸이 들어오는 칸 수). 이 판을 고른 근거가 그 수이므로 자를 두 벌
+  // 만들지 않고 그 파일을 그대로 부른다.
+  //
+  // **밴드에 상한과 하한이 둘 다 있다.**
+  //   상한 32%  이보다 높으면 ⑤(37.5%)와 다를 게 없다 — 한 자리가 두 갈래를 다 덮어서
+  //             「어디를 막을까」가 1레인 판에 가까워진다. 이 판을 만든 이유가 사라진다
+  //   하한 15%  **이 아래는 그리디의 벽이다.** 좌/우로 완전히 가른 후보들이 8~12% 에서
+  //             조기 전멸률 45~74% 로 무너졌고(⑤ 는 0%), 3레인 판(#42)은 2.3% 로
+  //             밸런스 게이트를 아예 못 넘었다. 낮을수록 좋은 값이 아니다
+  {
+    const { evaluate, STAGES: PS } = require('./paths.js');
+    // `index.html` 은 `openRows`, `paths.js` 는 `open` 이다. **살아 있는 판 정의로**
+    // 재려고 여기서 맞춰 넘긴다 — `paths.js` 의 복사본을 쓰면 좌표가 갈렸을 때
+    // 이 줄이 옛 좌표를 재고 통과한다.
+    const shape = d => ({ w: d.w, h: d.h, open: d.openRows ?? d.open, lanes: d.lanes });
+    const ratio = d => { const e = evaluate(shape(d)); return e.allOpen / e.free6; };
+    const NM = '합수';
+    const idx = g.STAGES.findIndex(s => s.name === NM);
+    ok(`[${NM}] 판이 있다`, idx >= 0, idx >= 0 ? 'index ' + idx : '없음');
+    if (idx >= 0) {
+      const def = g.STAGES[idx];
+      ok('  레인이 둘이다', def.lanes.length === 2, def.lanes.length + '레인');
+      const r = ratio(def);
+      ok('  전레인동시가 밴드 안이다 (15~32%)', r >= 0.15 && r <= 0.32,
+        (r * 100).toFixed(1) + '%');
+      // 대조 — ⑤ 는 공유 머리 구간 때문에 이 값이 더 높다. 같이 안 높으면 자가
+      // 고장 난 것이지 새 판이 특별한 게 아니다.
+      const s5 = PS.find(s => s.name.startsWith('⑤'));
+      ok('  ⑤ 분수령은 이 값이 더 높다', ratio(s5) > r,
+        '⑤ ' + (ratio(s5) * 100).toFixed(1) + '% > ⑥ ' + (r * 100).toFixed(1) + '%');
+    }
+  }
+
   // ── 레인 배정 (#42) ──
   // 스폰은 `laneCursor++ % lanes.length` 라운드로빈이다. 여기서 잡는 것은 둘이다.
   //   ① 한 웨이브의 적이 레인에 고르게 갈리는가 (한 레인만 밀리면 그 판은 사실상
