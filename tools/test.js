@@ -1015,35 +1015,73 @@ function known(name, worse, detail, why) {
   // 카드를 스크롤시키거나 접어야 하고 그건 이 티켓 밖이다 — 여기서는 바닥이
   // 어디인지를 숫자로 박아 두어, 판이 늘어 이 값이 올라가면 바로 걸리게 한다.
   //
-  // ── **판이 여섯이면 658px 에서 꼬리가 742 로 넘친다** ────────────────────
-  // 목록이 여섯 장이면 카드 높이가 하한 72 에 걸려 더 안 줄고, 그 아래가 통째로
-  // 밀려난다(658px 기준 · 실측):
-  //
-  //   장수  카드 높이  마지막 카드 바닥  이어하기      로그인 바닥
-  //     5      72          540          554~606      **658**  ← 여유 0
-  //     6      72          624          638~690      **742**  ← 84px 넘침
-  //
-  // (여섯째 카드가 top 132 에서 `5 x (72 + 12)` 만큼 내려가고, 그 아래로
-  //  이어하기 52 + 여백 14 · 로그인 42 + 여백 10 이 그대로 따라 내려간다.)
-  //
-  // 도전 판을 여섯째 카드로 안 붙이고 탭으로 가른 것(#39)이 이 실측 때문이었는데,
-  // **그건 레이아웃 티켓을 피한 것이지 없앤 게 아니었다.** 본편 목록이 여섯 장이
-  // 되는 날 같은 값이 그대로 온다 — 그때는 카드를 접거나 스크롤시켜야 한다.
+  // **하한이 둘이라 기대값도 둘이다**(index.html `STAGE_CARD_MIN`). 셋째 줄을 접은
+  // 카드는 51 이면 안 깨지고, 안 접은 카드는 72 라야 한다. **어느 쪽인지를 테스트가
+  // 다시 판단하지 않는다** — 카드가 들고 오는 `compact` 를 그대로 읽는다. 여기서
+  // 「658 이하면 접힌다」식으로 조건을 베끼면 자가 두 벌이 되고, 그건 이 리포가
+  // 반복해서 데인 자리다.
   //
   // 아래 목록 `[844, 667, 658]` 을 **그대로 유지한다.** 통과시키려고 기기를 빼면
   // 회귀를 숨기는 것이다.
-  {
-    const CARD_MIN = 72;          // 58 + 11(셋째 줄) + 여백 3
+  const narrow = (gg, label) => {
+    const M = gg.STAGE_CARD_MIN;
     for (const h of [844, 667, 658]) {
-      g.view.h = h;
-      const cards = g.stageCardRects();
+      gg.view.h = h;
+      const cards = gg.stageCardRects();
       const lastCard = cards[cards.length - 1];
-      const tail = g.cloudRect();
-      ok(`  ${h}px 에서 카드 안이 안 깨진다`, lastCard.h >= CARD_MIN,
-        '카드 높이 ' + lastCard.h.toFixed(1) + ' (하한 ' + CARD_MIN + ')');
-      ok(`  ${h}px 에서 마지막 줄이 화면 안`, tail.y + tail.h <= h,
+      const tail = gg.cloudRect();
+      const min = lastCard.compact ? M.compact : M.full;
+      ok(`  ${label} ${h}px 에서 카드 안이 안 깨진다`, lastCard.h >= min,
+        '카드 높이 ' + lastCard.h.toFixed(1) + ' (하한 ' + min
+        + (lastCard.compact ? ' · 셋째 줄 접음' : '') + ')');
+      ok(`  ${label} ${h}px 에서 마지막 줄이 화면 안`, tail.y + tail.h <= h,
         '로그인 줄 바닥 ' + (tail.y + tail.h).toFixed(1) + ' / 화면 ' + h);
     }
+  };
+  narrow(g, `${g.STAGES.length}장`);
+  g.view.h = 844;
+
+  // ── 여섯 장을 **판을 안 늘린 채로** 잰다 ────────────────────────────────
+  // 다섯 장은 658px 에서 꼬리 바닥이 정확히 658 로 여유가 0 이었고, 여섯 장이면
+  // 하한 72 에 걸려 더 안 줄면서 그대로 **742 로 84px 넘쳤다.** 판을 실제로 붙이기
+  // 전에 여기서 먼저 재는 이유는 그래야 「레이아웃이 문제인가 새 판이 문제인가」가
+  // 갈리기 때문이다.
+  //
+  // **가짜 판은 다른 `load()` 에 넣는다.** 위 `g` 의 STAGES 를 늘리면 이 블록의
+  // 나머지 단언(행 개방 개수 · 맵이 다른가 · 레인 배정)이 전부 가짜 판을 같이 재게
+  // 된다. 판이 실제로 여섯이 되면 `while` 이 아무것도 안 밀어 넣고 진짜 여섯 장을
+  // 잰다 — 그때 이 블록을 지울 필요가 없다.
+  {
+    const g6 = load();
+    const proto = g6.STAGES[0];
+    while (g6.STAGES.length < 6) {
+      g6.STAGES.push({ ...proto, name: '가짜 ' + (g6.STAGES.length + 1) });
+    }
+    narrow(g6, '여섯 장');
+
+    // **접힌다는 것을 그림에서 본다.** 위 두 줄은 좌표만 보므로 `compact` 를 켜고도
+    // 셋째 줄을 그대로 그리면(= 카드 밖에 글자가 얹히면) 전부 통과한다 — 이 리포가
+    // 세 번 빠진 함정이라 `draws` 로 실제 호출을 센다. 카드 하나가 줄 하나를
+    // 잃으므로 차이는 정확히 판 수다.
+    const n6 = g6.STAGES.length;
+    const texts = (h) => {
+      g6.view.h = h;
+      g6.state.phase = 'stage';
+      g6.draws.reset();
+      g6.render();
+      return g6.draws.count('fillText');
+    };
+    const wide = texts(844), tight = texts(658);
+    ok('  여섯 장 · 좁은 화면에서 셋째 줄이 실제로 안 그려진다', wide - tight === n6,
+      `844px ${wide}줄 → 658px ${tight}줄 (차이 ${wide - tight} / 판 ${n6})`);
+    // 위 줄만 있으면 「844 에서도 접혀 있고 658 에서 두 줄을 더 뺐다」로도 통과한다.
+    // 넓은 화면에서는 안 접힌다는 것을 따로 잠근다.
+    g6.view.h = 844;
+    ok('  여섯 장 · 넓은 화면에서는 안 접힌다',
+      g6.stageCardRects().every(r => !r.compact));
+    g6.view.h = 658;
+    ok('  여섯 장 · 658px 에서는 접힌다',
+      g6.stageCardRects().every(r => r.compact));
   }
 
   // 후반 스테이지는 레인이 여러 개.

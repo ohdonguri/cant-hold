@@ -2526,25 +2526,63 @@ async function cloudToggle() {
 
 // ── 스테이지 선택 ────────────────────────────────────────────
 
+// 카드 목록 **아래**에 붙는 두 줄. 여기 한 곳에서만 값을 잡는다 — 아래
+// `stageCardRects` 가 「카드를 접을지」를 정하려면 꼬리가 실제로 몇 px 인지를 알아야
+// 하는데, 그 숫자를 거기 베껴 두면 이어하기 줄 높이를 고쳤을 때 **접는 판단만 옛
+// 값을 지키며** 조용히 틀린다.
+const RESUME_GAP = 14, RESUME_H = 52, CLOUD_GAP = 10, CLOUD_H = 42;
+const STAGE_TAIL_H = RESUME_GAP + RESUME_H + CLOUD_GAP + CLOUD_H;   // 118
+
+// 카드 높이 하한이 **둘**인 이유는 카드 안의 줄 수가 둘이기 때문이다.
+//   `full`     제목(y+12) · 설명(y+36) · 셋째 줄(y+58 · 11px) → 내용 바닥 69 + 여백 3
+//   `compact`  셋째 줄을 접는다 → 설명 바닥 48 + 여백 3
+// 하한이 없으면 카드가 판 수로 나뉘어 무한정 줄고 글자가 카드 밖으로 나간다
+// (판이 다섯 장이 되며 375x667 이 처음 걸렸다 — 67.4 가 나와 난이도 점이 밖에 그려졌다).
+const STAGE_CARD_MIN = { full: 72, compact: 51 };
+
 function stageCardRects() {
   const pad = 16, top = 132, gap = 12;
   const n = STAGES.length;
-  // 아래에 이어하기와 로그인 줄이 들어간다
+  // 하한에 걸린 카드는 더 안 줄므로 **그 아래가 통째로 화면 밖으로 밀려난다.**
+  // 다섯 장은 658px(iPhone SE 가로 375 의 세로 가용분)에서 꼬리 바닥이 정확히 658 로
+  // 여유가 0 이었고, 여섯 장이 되면 그대로 **742 로 84px 넘친다.**
   //
-  // **하한 72 는 카드 안이 안 깨지는 최소 높이다.** 셋째 줄(난이도 점)이 `y + 58`
-  // 에 11px 로 그려지므로 내용 바닥이 69 이고, 여백 3 을 더한 값이다. 판이 넷일
-  // 때는 이 식이 594 까지 버텨서 하한이 필요 없었는데, **다섯 장이 되며 한계선이
-  // 675 로 올라가 375x667(iPhone SE·8)이 처음으로 걸렸다** — 67.4 가 나와 난이도
-  // 점이 카드 밖에 그려졌다. 하한이 없으면 판을 붙일 때마다 같은 일이 난다.
-  // (하한에 걸리면 카드가 화면 아래로 밀려날 수 있다. 그건 tools/test.js
-  //  「좁은 화면에서도 스테이지 카드가 안 깨진다」가 잡는다.)
+  //   장수  하한 full 로 깔았을 때 꼬리 바닥(658px 기준)
+  //     5      658   ← 여유 0
+  //     6      742   ← 84px 넘침
   //
-  // **판이 여섯 장이 되면 658px 에서 꼬리가 742 로 넘친다**(실측 · tools/test.js
-  // 의 같은 블록에 계산이 있다). 도전 판을 탭으로 가른 것은 그 레이아웃 티켓을
-  // **피한 것이지 없앤 게 아니다** — 본편 목록이 여섯 장이 되는 날 다시 온다.
-  const h = Math.max(72, Math.min(88, (view.h - top - 150 - (n - 1) * gap) / n));
+  // **셋째 줄을 접는 쪽을 골랐다.** 후보는 셋이었다.
+  //   · 헤더(top 132)를 줄인다 — 최대 32px 이라 84px 을 못 만든다. 혼자서는 안 된다
+  //   · 목록을 스크롤시킨다 — 84px 을 확실히 만들지만 이어하기·로그인 줄이 스크롤
+  //     안으로 들어가거나 밖에 떠야 하고, 그 둘의 좌표를 카드 목록에서 따는 지금
+  //     구조(resumeRect)가 통째로 바뀐다. 판 하나 붙이자고 낼 값이 아니다
+  //   · **셋째 줄을 접는다(채택)** — 카드당 20px 씩 여섯 장이면 120px 이라 84 를 덮고,
+  //     잃는 정보가 가장 적다. 접히는 것은 `●●●○○○ 웨이브 30 갈래 2` 인데 계단에서
+  //     몇 번째인지는 **카드 번호(「6. 」)가 이미 말하고 있다.** 설명 줄은 못 접는다 —
+  //     잠긴 카드에서 그 줄이 「이전 스테이지를 깨야 열린다」라 유일한 안내다
+  //
+  // **접는 조건은 「하한 full 로 깔면 꼬리가 화면 밖인가」다.** 「화면이 몇 px 이하」가
+  // 아니다 — 판 수·꼬리 높이가 바뀌면 그 경계도 같이 움직여야 하고, 무엇보다 **지금
+  // 들어가는 화면에서는 한 줄도 안 뺏는다**(다섯 장 · 658px 은 여유가 0 이라 여전히
+  // 세 줄로 들어간다. 이 커밋이 기존 레이아웃을 1px 도 안 건드린 근거가 이것이다).
+  //
+  // **판이 일곱이 되면 여기서 또 막힌다**(실측 · 접은 뒤 · 390 폭):
+  //   장수  844px          742px          700px          667px          658px
+  //     6   83.7 세줄 812  72.0 세줄 742  59.7 접힘 668  54.2 접힘 635  52.7 접힘 626
+  //     7   72.0 세줄 826  55.4 접힘 710  51.0 접힘 679  **12px 넘침**  **21px 넘침**
+  //     8   59.8 접힘 812  51.0 접힘 742  **42px 넘침**  **75px 넘침**  **84px 넘침**
+  // (숫자는 카드 높이와 로그인 줄 바닥이다. 일곱 장부터는 하한 51 에 걸려 더 안 준다.)
+  //
+  // 즉 **접기로 번 것은 판 하나치다.** 일곱 장이 되는 날 667·658 이 다시 걸리고,
+  // 그때는 위 후보 중 남은 둘(스크롤 · 헤더 축소)을 써야 한다 — 접기로 또 도망갈
+  // 곳이 없다. 여덟 장은 700px 도 못 버틴다.
+  const fit = (min) => Math.max(min, Math.min(88, (view.h - top - 150 - (n - 1) * gap) / n));
+  const tailBottom = (h) => top + (n - 1) * (h + gap) + h + STAGE_TAIL_H;
+  const full = fit(STAGE_CARD_MIN.full);
+  const compact = tailBottom(full) > view.h;
+  const h = compact ? fit(STAGE_CARD_MIN.compact) : full;
   return STAGES.map((def, i) => ({
-    i, def, x: pad, y: top + i * (h + gap), w: view.w - pad * 2, h,
+    i, def, compact, x: pad, y: top + i * (h + gap), w: view.w - pad * 2, h,
   }));
 }
 
@@ -2580,14 +2618,18 @@ function drawStageSelect() {
     fitText(open ? r.def.desc : '이전 스테이지를 깨야 열린다',
       r.x + 16, r.y + 36, r.w - 32, 12);
 
-    ctx.fillStyle = open ? '#6e7681' : '#3d444d';
     // 셋째 줄은 난이도 계단의 몇 번째인가다. hpMult 를 그대로 보여주면 오해한다 —
     // 레인이 갈리면 배율이 1 미만이어도 타워가 한쪽만 커버해서 더 어렵다.
-    fitText(
-      `${'●'.repeat(r.i + 1)}${'○'.repeat(STAGES.length - r.i - 1)}` +
-      `   웨이브 ${r.def.waves}   ` +
-      (r.def.lanes.length > 1 ? `갈래 ${r.def.lanes.length}` : '한 갈래'),
-      r.x + 16, r.y + 58, r.w - 32, 11);
+    // **좁은 화면에서는 이 줄이 접힌다**(stageCardRects 의 `compact`). 카드 밖에
+    // 그리면 아래 카드 위에 글자가 얹히므로, 안 그리는 것이 유일한 답이다.
+    if (!r.compact) {
+      ctx.fillStyle = open ? '#6e7681' : '#3d444d';
+      fitText(
+        `${'●'.repeat(r.i + 1)}${'○'.repeat(STAGES.length - r.i - 1)}` +
+        `   웨이브 ${r.def.waves}   ` +
+        (r.def.lanes.length > 1 ? `갈래 ${r.def.lanes.length}` : '한 갈래'),
+        r.x + 16, r.y + 58, r.w - 32, 11);
+    }
   }
   // 이어하기. 웨이브 사이 스냅샷이 있을 때만 뜬다.
   if (savedRun) {
@@ -2644,12 +2686,12 @@ function drawStageSelect() {
 
 function resumeRect() {
   const pad = 16, b = stageCardRects();
-  const y = b.length ? b[b.length - 1].y + b[b.length - 1].h + 14 : 400;
-  return { x: pad, y, w: view.w - pad * 2, h: 52 };
+  const y = b.length ? b[b.length - 1].y + b[b.length - 1].h + RESUME_GAP : 400;
+  return { x: pad, y, w: view.w - pad * 2, h: RESUME_H };
 }
 function cloudRect() {
   const r = resumeRect();
-  return { x: r.x, y: r.y + r.h + 10, w: r.w, h: 42 };
+  return { x: r.x, y: r.y + r.h + CLOUD_GAP, w: r.w, h: CLOUD_H };
 }
 
 function resumeRun() {

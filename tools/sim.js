@@ -164,6 +164,9 @@ const EXPOSE = [
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
   // 「이 판을 지금 고를 수 있는가」. 테스트가 조건을 베끼면 자가 두 벌이 된다.
   'stageUnlocked',
+  // 카드 높이 하한 두 벌(full/compact). 테스트가 72·51 을 베껴 두면 하한을 고쳤을 때
+  // 테스트만 옛 값을 지키며 통과한다 — 아래 resumeRect/cloudRect 와 같은 이유다.
+  'STAGE_CARD_MIN',
   // 스테이지 선택 화면의 아래 두 줄. 카드 높이 하한(index.html stageCardRects)이
   // 좁은 화면에서 이 둘을 화면 밖으로 밀어내지 않는지 테스트가 봐야 하는데,
   // 좌표식을 테스트에 베껴 두면 레이아웃을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
