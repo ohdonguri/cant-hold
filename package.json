@@ -7,6 +7,7 @@
     "seedcheck": "node tools/seedcheck.js",
     "tune": "node tools/tune.js",
     "curve": "node tools/curve.js",
+    "affinity": "node tools/affinity.js",
     "sim": "node tools/tune.js one",
     "shot": "node tools/shot.js",
     "parity": "node tools/parity.js",
