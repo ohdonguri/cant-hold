@@ -327,6 +327,13 @@ const AURA_KINDS = new Set(KIND_KEYS.filter(k => KINDS[k].group === 'aura'));
 // 통로 전체를 꿴다.
 const BEAM_HALF = 0.7;
 
+// 박격포 무분기 폭발 반경(칸). 분기 계수(A 0.8 / B 1.4)는 fireTower 에서 곱한다.
+// **값은 안 움직였다 — 이름만 붙였다.** 그리디가 「폭발이 경로를 얼마나 덮는가」로
+// 자리를 고르게 되면서(tools/sim.js §종류별 자리 점수) 시뮬이 이 수를 읽어야 하는데,
+// 리터럴로 두면 시뮬이 베껴 갖고 여기를 고쳐도 조용히 안 따라온다. 같은 이유로
+// BEAM_HALF 도 시뮬이 불러 쓴다.
+const BLAST_RADIUS = 0.8;
+
 // ═════════════════════════════════════════════════════════════
 // 적. hp 는 waveHp() 에 곱해지는 배수, speed 는 BASE_SPEED 배수.
 // leak 은 관문을 통과했을 때 깎이는 수치.
@@ -1817,7 +1824,7 @@ function fireTower(t, dt) {
 
   if (t.kind === 'mortar') {
     const c = towerCenter(t);
-    const radius = 0.8 * (t.b3 === 'A' ? 0.8 : t.b3 === 'B' ? 1.4 : 1);
+    const radius = BLAST_RADIUS * (t.b3 === 'A' ? 0.8 : t.b3 === 'B' ? 1.4 : 1);
     const shots = t.b5 === 'A1' ? 3 : 1;
     // 탄막(A1)은 3발을 **경로를 따라** 늘어놓는다. 원래는 targets[0]/[1]/[2] 로 서로
     // 다른 적을 겨냥하고 거기에 가로 ±0.6칸 지터를 한 번 더 얹었는데(이중 분산),

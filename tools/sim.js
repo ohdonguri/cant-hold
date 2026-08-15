@@ -50,6 +50,12 @@ const SUMMON_SAMPLES = 2;
 // 위 표와 다른 것을 재게 되고, 게다가 `pickKind` 가 종류를 먼저 정하므로 종류별
 // 커버는 「이 종류를 어디에 놓나」만 바꾸지 「대충 한다」의 정의를 바꾸지 않는다.
 // 사람도 타워마다 사거리를 재고 놓지는 않는다 — 통로 옆인지만 본다.
+//
+// **#48 이 이 문단의 뒷부분을 뒤집었다 — 앞부분은 그대로다.** 「종류별로 재면 어디에
+// 놓나만 바뀐다」는 맞는 말인데, 박격포와 마력로는 **어디에 놓나가 곧 성능**이라
+// 그게 바로 고쳐야 할 것이었다(아래 §종류별 자리 점수). 다만 **이 커버 표 자체는
+// 한 줄도 안 고쳤다** — DESIGN §스테이지의 커버 편차 표와 이어지는 자는 여전히
+// 이 `COVER_RANGE` 하나이고, 종류별 점수는 그 옆에 따로 붙인 것이다.
 const { RANGE: COVER_RANGE } = require('./paths.js');
 
 // 그리기 호출을 기록할 수 있는 캔버스 스텁.
@@ -133,6 +139,12 @@ const EXPOSE = [
   // 리드(착탄 지연 0.5초만큼 앞을 겨냥)를 손으로 베끼면 BASE_SPEED 를 고쳤을 때
   // 테스트만 옛 값을 지키며 통과한다.
   'towerRange', 'towerFootprint', 'posAt', 'buildSpawnQueue', 'enemySpeed',
+  // 종류별 자리 점수(#48)가 쓰는 판정 원본. **하나도 베끼지 않으려고 내보낸다.**
+  //   towerCenter/distTo  사거리가 원이 아니라 **정사각형**이라는 규칙(index.html
+  //                       distTo 주석)까지 따라온다. 커버 표는 원(hypot)이라 둘이 다르다
+  //   BEAM_HALF           마력로 관통 판정의 수직거리 한계
+  //   BLAST_RADIUS        박격포 무분기 폭발 반경
+  'towerCenter', 'distTo', 'BEAM_HALF', 'BLAST_RADIUS',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
   'applyStacks', 'debuffScale', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
@@ -317,7 +329,199 @@ function coverTable(g) {
   return cov;
 }
 
-// k-표본 최고. 후보에서 **복원추출로** `k` 칸을 뽑아 커버가 가장 큰 칸을 준다.
+// ── 종류별 자리 점수 (#48) ───────────────────────────────────
+// 일곱 종이 커버 하나로 자리를 고르면 **자리 선택이 곧 성능인 타워**만 손해를 본다.
+// `npm run affinity`(35덱 x 8회 · seed 12345)로 재면 판이 어려워질수록 정확히 둘만
+// 음수로 벌어졌다 — ③ −.060/−.022 · ⑤ −.111/−.058 · ⑥ **−.175/−.069**(박격포/마력로).
+// 나머지 다섯은 0 이거나 양수다. 그 둘이 KINDS 의 `how` 가 자리를 지정하는 종류다:
+//
+//   박격포  '적이 줄지어 오는 직선을 덮는다'    폭발 반경 0.8 · 원 판정
+//   마력로  '통로와 나란히 놓아야 한 줄을 꿴다'  blurb '직선 관통. 배치 각도가 곧 성능'
+//
+// **판정식을 여기서 다시 쓰지 않는다.** 게임에서 불러 온다 — 폭발은 `BLAST_RADIUS`
+// 와 `updateShells` 의 원 판정, 관통은 `BEAM_HALF` 와 마력로 분기의 투영·수직거리
+// 판정, 사거리는 `towerRange`·`distTo` 다. 베끼면 게임과 시뮬이 갈리고, 그건 이
+// 파일이 `COVER_RANGE` 로 이미 한 번 데인 자리다(위 주석).
+//
+// **관측소·오라·조폐소는 커버 그대로 둔다.** 바꿀 근거가 없다 — affinity 에서 그
+// 넷은 음수가 아니고, 관측소의 how(「뒤쪽 안전한 칸」)는 커버가 이미 대충 맞춘다.
+// 조폐소가 공격도 안 하면서 통로 옆 좋은 칸을 먹는 문제는 그대로 남아 있다
+// (tools/place.js 머리). 이 티켓이 잰 것은 「자를 바꾼 둘」이라 나머지를 같이 만지면
+// affinity 전후 비교에서 원인 귀속이 안 된다.
+
+// 경로를 칸보다 잘게 뜬 표본. 진행 거리 `PATH_STEP` 칸마다 `posAt` 을 부른다.
+//
+// **박격포는 칸 단위로는 원리적으로 아무것도 못 잰다.** 폭발 반경 0.8 이 칸 간격
+// 1.0 보다 **작아서**, 경로 칸 중심만 세면 어느 칸에 떨어져도 걸리는 칸이 자기
+// 자신 하나뿐이라 모든 자리의 점수가 똑같아진다. 이건 튜닝이 아니라 격자 해상도의
+// 문제라 표본을 잘게 뜨는 것 말고 방법이 없다.
+//
+// **레인마다 따로 뜨고 겹치는 구간을 합치지 않는다.** `coverTable` 이 쓰는
+// `pathCells` 는 Set 이라 ④ 역류처럼 두 레인이 같은 칸을 지나면 한 번만 세는데,
+// 폭발과 관통에 걸리는 것은 칸이 아니라 **그 자리를 지나는 적**이라 레인이 겹치면
+// 실제로 두 배다. 두 자가 다른 것을 재는 게 맞고, 그래서 표도 따로 둔다.
+//
+// **보드 밖도 안 자른다.** 레인 시작점이 `x = -1` 인데 적은 거기에 진짜로 있고
+// `enemiesInRange` 도 보드 경계를 안 본다. 커버 표는 `paths.js` 와 맞추려고 자르지만
+// 이쪽은 게임 판정을 따라간다.
+const PATH_STEP = 0.2;
+
+function pathSamples(g) {
+  const xs = [], ys = [];
+  for (let lane = 0; lane < g.lanes.length; lane++) {
+    const len = g.laneLen(lane);
+    for (let d = 0; d <= len; d += PATH_STEP) {
+      const p = g.posAt(d, lane);
+      xs.push(p.x); ys.push(p.y);
+    }
+  }
+  return { xs: Float64Array.from(xs), ys: Float64Array.from(ys), n: xs.length };
+}
+
+// 점수 표는 **`g` 인스턴스마다 · 스테이지마다** 다시 만든다. `coverTable` 과 같은
+// 규칙이고 이유도 같다 — 모듈 전역에 두면 스테이지 1 의 표로 스테이지 5 를 놓는다.
+function memo(cache, g, build) {
+  const hit = cache.get(g);
+  if (hit && hit.stage === g.state.stage) return hit.score;
+  const score = build(g);
+  cache.set(g, { stage: g.state.stage, score });
+  return score;
+}
+
+// 「1성 무분기」로 재는 이유: 자리는 소환 시점에 정해지는데 그때 성급도 분기도 1/무다.
+// 분기 계수(폭발 A 0.8 / B 1.4, 사거리 오라군 A 1.5 / B 0.85)는 나중에 곱해지므로
+// 자리끼리의 **순위**를 안 바꾼다 — 순위만 쓰는 자라 여기서 안 본다.
+const probeTower = (kind, gx, gy) => ({ kind, star: 1, gx, gy });
+
+// ── 박격포: 폭발이 경로를 얼마나 덮는가 ───────────────────────
+// 포탄은 **적이 있는 자리**에 떨어진다(`targets[0]` 을 겨냥). 그러니 자리의 값은
+// 「사거리 안에 적이 얼마나 있나」x「그 자리에 떨어졌을 때 몇을 같이 덮나」이고,
+// 적이 경로를 따라 고르게 있다고 보면 그대로
+//
+//   점수(x,y) = Σ (사거리 안 표본 i) 폭발크기(i)
+//   폭발크기(i) = |{ j : hypot(p_j − p_i) <= BLAST_RADIUS }|      ← updateShells 와 같은 식
+//
+// 가 된다. 사거리 안 표본이 없으면 0 이라 커버처럼 통로에서 먼 칸을 자동으로 버린다.
+//
+// **「직선이 좋다」는 가설이었고 이 식은 그 반대를 낸다.** 곧은 통로에서는 반경 0.8
+// 짜리 원이 경로를 1.6칸만 덮는데, 직각으로 꺾이는 자리에 떨어지면 두 팔을 비스듬히
+// 물어 2.0칸 넘게 덮는다(원 중심을 모서리 안쪽으로 조금 밀면 팔마다 1.04칸). 즉
+// 이 식이 실제로 상을 주는 것은 **직선이 아니라 꺾임과 레인이 겹치는 곳**이다.
+// KINDS.mortar.how 의 「줄지어 오는 직선」은 5성 탄막(A1)이 세 발을 경로를 따라
+// 늘어놓는 것을 말하는 것이고(index.html 박격포 주석), **무분기 1발의 자리값과는
+// 다른 이야기**다. 가설과 다르게 나왔으므로 가설을 안 따랐다.
+const blastCache = new WeakMap();
+
+function blastTable(g) {
+  return memo(blastCache, g, () => {
+    const { xs, ys, n } = pathSamples(g);
+    const R = g.BLAST_RADIUS;
+    const size = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      let c = 0;
+      for (let j = 0; j < n; j++)
+        if (Math.hypot(xs[j] - xs[i], ys[j] - ys[i]) <= R) c++;
+      size[i] = c;
+    }
+
+    const { BOARD_W, BOARD_H } = g.CFG;
+    const range = g.towerRange(probeTower('mortar', 0, 0));
+    const table = new Float64Array(BOARD_W * BOARD_H);
+    for (let y = 0; y < BOARD_H; y++)
+      for (let x = 0; x < BOARD_W; x++) {
+        const t = probeTower('mortar', x, y);
+        let s = 0;
+        for (let i = 0; i < n; i++)
+          if (g.distTo(t, { x: xs[i], y: ys[i] }) <= range) s += size[i];
+        table[y * BOARD_W + x] = s;
+      }
+    return (x, y) => table[y * BOARD_W + x];
+  });
+}
+
+// ── 마력로: 빔이 실제로 꿰는 양 ──────────────────────────────
+// 게임은 **사거리 안의 적 하나하나를 향해 쏴 보고 가장 많이 꿰는 방향을 고른다**
+// (index.html 마력로 분기). 그 루프를 그대로 두고 적 자리에 경로 표본을 넣는다:
+//
+//   점수(x,y) = max (겨냥 표본 a) |{ j : 0 <= proj_j <= r, |cross_j| <= BEAM_HALF }|
+//
+// `proj`·`cross` 도 게임 식 그대로다. 겨냥 후보는 **사거리 안**(`distTo`, 정사각형)
+// 표본이고, 맞는 쪽은 사거리 밖이어도 된다 — 게임도 `state.enemies` 전체를 훑고
+// 투영 길이 `r` 로만 자른다.
+//
+// **겨냥은 `AIM_STRIDE` 칸마다만 해 본다.** 표본마다 다 해 보면 표본수의 제곱이라
+// 판마다 수천만 번이 되는데, 겨냥 표본을 경로 1칸 간격으로 줄여도 각도 후보가
+// 통로 방향을 다 훑는다(빔 반폭 0.7 이 그보다 넓다). 맞는 쪽은 안 줄인다.
+const AIM_STRIDE = Math.max(1, Math.round(1 / PATH_STEP));
+const beamCache = new WeakMap();
+
+function beamTable(g) {
+  return memo(beamCache, g, () => {
+    const { xs, ys, n } = pathSamples(g);
+    const H = g.BEAM_HALF;
+    const r = g.towerRange(probeTower('arc', 0, 0));
+    // 빔에 걸릴 수 있는 가장 먼 거리. proj <= r 이고 |cross| <= H 이므로 hypot(r, H) 다.
+    const reach2 = r * r + H * H;
+
+    const { BOARD_W, BOARD_H } = g.CFG;
+    const table = new Float64Array(BOARD_W * BOARD_H);
+    for (let y = 0; y < BOARD_H; y++)
+      for (let x = 0; x < BOARD_W; x++) {
+        const t = probeTower('arc', x, y);
+        const c = g.towerCenter(t);
+        const aim = [], pool = [];
+        for (let i = 0; i < n; i++) {
+          const vx = xs[i] + 0.5 - c.x, vy = ys[i] + 0.5 - c.y;
+          if (vx * vx + vy * vy <= reach2) pool.push(i);
+          if (g.distTo(t, { x: xs[i], y: ys[i] }) <= r) aim.push(i);
+        }
+        let best = 0;
+        for (let a = 0; a < aim.length; a += AIM_STRIDE) {
+          const i = aim[a];
+          const ax = xs[i] + 0.5 - c.x, ay = ys[i] + 0.5 - c.y;
+          const len = Math.hypot(ax, ay);
+          // 겨냥점이 타워 중심과 정확히 겹치면 **방향이 없다.** 게임은 `|| 1` 로
+          // 0 을 피하는데 그러면 dx=dy=0 이라 투영도 수직거리도 전부 0 이 되어
+          // 「보드 전체를 꿴다」가 나온다. 게임에서는 적이 연속 좌표라 사실상 못
+          // 일어나지만 경로 표본은 격자점을 정확히 밟으므로 실제로 걸린다.
+          // 그런 칸은 전부 경로 칸이라 애초에 못 놓는다 — 방향이 아닌 것에
+          // 점수를 주느니 그 겨냥은 건너뛴다.
+          if (len === 0) continue;
+          const dx = ax / len, dy = ay / len;
+          let cnt = 0;
+          for (const j of pool) {
+            const vx = xs[j] + 0.5 - c.x, vy = ys[j] + 0.5 - c.y;
+            const proj = vx * dx + vy * dy;
+            if (proj < 0 || proj > r) continue;
+            if (Math.abs(vx * dy - vy * dx) > H) continue;
+            cnt++;
+          }
+          if (cnt > best) best = cnt;
+        }
+        table[y * BOARD_W + x] = best;
+      }
+    return (x, y) => table[y * BOARD_W + x];
+  });
+}
+
+// 이 종류는 어느 자로 자리를 고르는가. **여기가 유일한 분배 지점이다** —
+// `tools/place.js` 의 계측과 `tools/test.js` 의 백분위 게이트도 이 함수를 부른다.
+// 두 벌이 되면 「고르는 자」와 「재는 자」가 갈려서 백분위가 아무것도 안 잠근다
+// (place.js 머리가 강제 선택 처리로 이미 한 번 겪은 자리다).
+//
+// 자 **이름**도 여기서 나눈다. 계측 쪽에서 따로 이름을 매기면 「표에는 커버라고
+// 적혀 있는데 실제로는 폭발 표로 골랐다」가 조용히 성립한다.
+const SPOT_RULER = { mortar: '폭발', arc: '관통' };
+function spotRuler(kind) { return SPOT_RULER[kind] || '커버'; }
+
+function spotScore(g, kind) {
+  const ruler = spotRuler(kind);
+  if (ruler === '폭발') return blastTable(g);
+  if (ruler === '관통') return beamTable(g);
+  return coverTable(g);
+}
+
+// k-표본 최고. 후보에서 **복원추출로** `k` 칸을 뽑아 점수가 가장 큰 칸을 준다.
 //
 // 난수는 후보 수와 무관하게 **정확히 `k` 회**다. 후보가 1 개여도 `k` 회를 뽑는다 —
 // 회계가 단순해야 `seedcheck` 의 「호출 지점별로 갈라 세기」가 성립한다.
@@ -325,6 +529,10 @@ function coverTable(g) {
 //
 // 동점이면 **먼저 뽑힌 표본**이 이긴다(`>` 비교). `k = 1` 에서 뽑은 인덱스를 그대로
 // 쓰는 것과 같아야 퇴화값이 옛 동작과 비트 단위로 같다.
+//
+// **점수 함수는 인자로 받는다** — `cov` 라는 이름은 커버 하나뿐이던 시절의 것이고,
+// #48 부터 박격포·마력로는 다른 표가 들어온다(위 `spotScore`). 이 함수가 아는 것은
+// 「뽑은 것 중 큰 쪽」뿐이라 자를 바꿔도 여기는 안 움직인다.
 //
 // 복원추출이라 「전역 최고 칸」으로 뭉치지 않는다. 항상 최고 칸을 고르게 하면(k→∞)
 // 최고 칸이 차고 그 옆이 다음 최고라 한 주머니에 겹겹이 쌓이고, 경로의 나머지가
@@ -422,12 +630,18 @@ function greedy(g, opts = {}) {
   // 후보가 0 개면 `summon` 을 **아예 안 부른다.** 옛 동작도 그 경우 난수를 안 뽑고
   // 「빈 칸 없음」 토스트만 냈으므로 등가이고, 없는 후보에서 `k` 회를 뽑아 스트림을
   // 미는 것을 막는 자리이기도 하다.
+  //
+  // **종류를 자리보다 먼저 정한다(#48).** 자를 종류마다 다르게 쓰려면 순서가 이래야
+  // 한다. `pickKind` 는 난수를 한 번도 안 뽑고 상태도 안 바꾸므로 **이 자리바꿈만으로는
+  // 난수 스트림이 안 움직인다** — 움직이는 것은 `spotScore` 가 다른 표를 줄 때뿐이고,
+  // 그래서 자를 안 바꾼 덱(seedcheck 0번 `파쇄·관측·조폐`)은 rand 401 이 그대로다.
   function summonOne() {
     if (state.gold < g.summonCost()) return;
     const spots = summonSpots(g);
     if (!spots.length) return;
-    const [gx, gy] = pickSpot(spots, coverTable(g), samples);
-    g.summon(pickKind(state.deck, state.towers), gx, gy);
+    const kind = pickKind(state.deck, state.towers);
+    const [gx, gy] = pickSpot(spots, spotScore(g, kind), samples);
+    g.summon(kind, gx, gy);
   }
 
   function buildPhase() {
@@ -462,4 +676,9 @@ function greedy(g, opts = {}) {
   };
 }
 
-module.exports = { load, greedy, patch, pickKind, summonSpots, coverTable, pickSpot, SUMMON_SAMPLES };
+module.exports = {
+  load, greedy, patch, pickKind, summonSpots, coverTable, pickSpot, SUMMON_SAMPLES,
+  // 종류별 자리 점수(#48). `spotScore` 가 계측·게이트가 부르는 정문이고, 표 둘은
+  // `tools/test.js` 가 게임 판정으로 독립 계산한 값과 칸마다 대조하려고 같이 낸다.
+  spotScore, spotRuler, blastTable, beamTable, PATH_STEP,
+};

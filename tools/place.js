@@ -8,12 +8,12 @@
 // 움직이므로, 「그리디가 자리를 보고 놓는가」는 난이도와 **독립인 자**로 따로 재야
 // 한다. `npm test` 의 「배치 백분위」 게이트가 이 값을 상·하한으로 잠근다.
 //
-// 백분위 = 고른 칸보다 커버가 **낮은** 후보의 비율. 0.5 근처면 균등 난수라는 뜻이다.
+// 백분위 = 고른 칸보다 점수가 **낮은** 후보의 비율. 0.5 근처면 균등 난수라는 뜻이다.
 // k-표본 최고의 기대 백분위는 순서통계량이라 `k/(k+1)` 로 해석적으로 정해진다
 // (k=1 → 0.50, 2 → 0.67, 3 → 0.75, 4 → 0.80). 그래서 이 표는 「높을수록 좋다」가
-// 아니라 **「실측이 k/(k+1) 과 맞는가」**로 읽는다. 커버 정의(사거리 안 경로 칸 수)와
-// 사거리는 `tools/sim.js` 의 `coverTable` 을 그대로 쓴다 — 여기서 다시 구현하면
-// 자가 둘이 되고, 재는 쪽과 놓는 쪽이 갈리면 이 지표는 아무것도 안 잠근다.
+// 아니라 **「실측이 k/(k+1) 과 맞는가」**로 읽는다. 점수 정의는 `tools/sim.js` 의
+// `spotScore` 를 그대로 쓴다 — 여기서 다시 구현하면 자가 둘이 되고, 재는 쪽과
+// 놓는 쪽이 갈리면 이 지표는 아무것도 안 잠근다.
 //
 // **`npm test` 의 게이트도 이 파일의 `probe`/`meanPct` 를 부른다.** 백분위 계산을
 // 두 벌 두었더니 이미 경계에서 갈려 있었다 — 이쪽은 후보가 1칸인 강제 선택을
@@ -25,7 +25,13 @@
 // 종류별 줄을 따로 찍는 것은 **조폐소 때문**이다. 조폐소는 공격을 안 하는데 커버로
 // 자리를 고르면 통로 옆 좋은 칸을 먹는다(사람은 안 그런다). 이 티켓은 종류 구분
 // 없이 한 규칙으로 갔으므로, 다음 사람이 그 대가를 눈으로 볼 수 있어야 한다.
-const { load, greedy, coverTable, summonSpots, SUMMON_SAMPLES } = require('./sim.js');
+//
+// **#48 부터 자가 종류마다 다르다.** 박격포는 폭발이 덮는 경로, 마력로는 빔이 꿰는
+// 경로로 고른다(`tools/sim.js` §종류별 자리 점수). 그래서 백분위도 **그 종류가
+// 실제로 쓴 자로** 잰다 — 전부 커버로 재면 박격포·마력로가 「자기 자를 잘 썼는데
+// 남의 자로는 못 썼다」로 찍혀서, 위 `k/(k+1)` 대조가 그 둘에 대해 성립하지 않는다.
+// 순서통계량이라는 성질은 **점수 함수가 무엇이든** 그대로다.
+const { load, greedy, spotScore, spotRuler, summonSpots, SUMMON_SAMPLES } = require('./sim.js');
 
 const SEED = 12345;
 const TRIALS = 6;
@@ -43,7 +49,6 @@ function seeded(fn) {
 function probe(stage, samples) {
   const g = load({});
   g.loadStage(stage);
-  const cover = coverTable(g);
 
   const picks = [];
   const orig = g.summon;
@@ -55,14 +60,17 @@ function probe(stage, samples) {
     // 세면 늘 0(최악)으로 들어가 지표를 아래로 끌어당긴다. 게이트와 같은 규칙이다.
     if (g.state.towers.length > before && spots.length > 1) {
       const t = g.state.towers[g.state.towers.length - 1];
-      const covs = spots.map(([x, y]) => cover(x, y)).sort((a, b) => a - b);
-      const mine = cover(t.gx, t.gy);
-      const below = covs.filter(v => v < mine).length;
-      const tied = covs.filter(v => v === mine).length - 1;   // 나를 뺀 동률
+      // **놓은 타워의 종류로 자를 고른다.** `kind` 인자가 아니라 `t.kind` 를 쓰는
+      // 것은 게임이 실제로 무엇을 세웠는지가 정본이기 때문이다.
+      const score = spotScore(g, t.kind);
+      const scores = spots.map(([x, y]) => score(x, y)).sort((a, b) => a - b);
+      const mine = score(t.gx, t.gy);
+      const below = scores.filter(v => v < mine).length;
+      const tied = scores.filter(v => v === mine).length - 1;   // 나를 뺀 동률
       const n1 = spots.length - 1;
       picks.push({
-        kind: t.kind,
-        mine, best: covs[covs.length - 1], med: covs[covs.length >> 1],
+        kind: t.kind, ruler: spotRuler(t.kind),
+        mine, best: scores[scores.length - 1], med: scores[scores.length >> 1],
         // **동률을 반씩 센다(midrank).** 「나보다 낮은 것의 비율」만 세면 동률이
         // 많은 판에서 백분위가 통째로 눌린다 — 균등 난수인데도 0.5 가 안 나온다.
         // ① 외곽 도로가 정확히 그 판이고(커버 편차 0.82 — DESIGN §스테이지가
@@ -106,6 +114,8 @@ function report(ks) {
   const { STAGES } = load();
   for (const k of ks) {
     console.log(`\n── k = ${k}  (기대 백분위 ${(k / (k + 1)).toFixed(2)}) · 시드 ${SEED} · ${TRIALS}시행 ──`);
+    // 커버 세 칸은 **커버 자를 쓰는 종류만** 센다. 박격포(폭발)·마력로(관통)는 단위가
+    // 달라 같이 평균 내면 수가 통째로 뜻을 잃는다 — 백분위는 단위가 없어서 안 그렇다.
     console.log('스테이지'.padEnd(10), '소환수', '고른커버', '최고커버', '중앙커버', '백분위', 'k=1', '  strict', '  종류별 백분위');
     // 판 목록을 하드코딩하지 않는다. 박아 두면 판이 늘었을 때 **조용히 안 잰다.**
     for (let st = 0; st < STAGES.length; st++) {
@@ -115,16 +125,17 @@ function report(ks) {
         return out;
       });
       if (!picks.length) { console.log(`스테이지${st + 1} 소환 없음`); continue; }
-      const avg = (rows, f) => rows.reduce((s, p) => s + f(p), 0) / rows.length;
+      const avg = (rows, f) => (rows.length ? rows.reduce((s, p) => s + f(p), 0) / rows.length : NaN);
+      const covPicks = picks.filter(p => p.ruler === '커버');
       const byKind = [...new Set(picks.map(p => p.kind))].sort()
         .map(kd => kd + ' ' + avg(picks.filter(p => p.kind === kd), p => p.pct).toFixed(2))
         .join(' · ');
       console.log(
         `스테이지${st + 1}`.padEnd(10),
         String(Math.round(picks.length / TRIALS)).padStart(6),
-        avg(picks, p => p.mine).toFixed(2).padStart(8),
-        avg(picks, p => p.best).toFixed(2).padStart(8),
-        avg(picks, p => p.med).toFixed(2).padStart(8),
+        avg(covPicks, p => p.mine).toFixed(2).padStart(8),
+        avg(covPicks, p => p.best).toFixed(2).padStart(8),
+        avg(covPicks, p => p.med).toFixed(2).padStart(8),
         meanPct(picks).toFixed(3).padStart(7),
         (BASELINE[st] === undefined ? '—' : BASELINE[st].toFixed(3)).padStart(5),
         avg(picks, p => p.strict).toFixed(3).padStart(8),

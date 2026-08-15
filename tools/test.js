@@ -1,5 +1,6 @@
 // 회귀 테스트. 렌더는 검증하지 않고 규칙과 밸런스만 본다.
-const { load, greedy, pickKind, coverTable, pickSpot, SUMMON_SAMPLES } = require('./sim.js');
+const { load, greedy, pickKind, coverTable, pickSpot, SUMMON_SAMPLES,
+  spotScore, blastTable, beamTable, PATH_STEP } = require('./sim.js');
 // 배치 백분위 게이트는 **계측 도구와 같은 함수**를 쓴다(tools/place.js 헤더 참고).
 const { probe, meanPct } = require('./place.js');
 
@@ -1713,6 +1714,189 @@ function known(name, worse, detail, why) {
     const c5 = coverTable(g);
     const b = [c5(3, 5), c5(0, 9)];
     ok('  스테이지를 바꾸면 커버 표도 바뀐다', a.join() !== b.join(), a.join('/') + ' → ' + b.join('/'));
+  }
+}
+
+// ── 종류별 자리 점수 (#48) ────────────────────────────────────
+// 박격포·마력로만 커버가 아닌 자로 자리를 고른다(`tools/sim.js` §종류별 자리 점수).
+// **위 「배치 백분위」 블록은 이 변경을 하나도 안 잡는다** — 백분위는 「그 종류가 쓴
+// 자로 재면 k/(k+1) 인가」라서, 박격포를 커버로 되돌려도 여전히 0.67 이 나온다.
+// 순환이 위 블록보다 한 겹 더 깊은 셈이라 여기서는 **자 자체**를 본다.
+//
+// 네 겹이다. 겹마다 다른 변조를 잡는다:
+//   ⓪ 전제   폭발 반경이 칸보다 작다 — 이 자를 칸 단위로 못 만드는 이유 자체
+//   ① 분배   어느 종류가 어느 자를 쓰는가. **박격포를 커버로 되돌리면 여기서 걸린다**
+//   ② 정의   두 표가 게임 판정과 칸마다 같은가. 상수를 갈아도 여기서 걸린다
+//   ③ 판별력 새 자가 커버와 **다른 순위**를 매기는가. 자를 「커버 x 1.1」 같은 단조
+//            변환으로 위장해도 여기서 걸린다(① 은 함수가 다르기만 하면 통과한다)
+{
+  console.log('종류별 자리 점수 (#48)');
+  const g5 = load(); g5.loadStage(4);
+  const g6 = load(); g6.loadStage(5);
+
+  // ── ⓪ 왜 칸 단위로는 못 재는가 ────────────────────────────
+  // **폭발 반경 0.8 은 칸 간격 1.0 보다 작다.** 그래서 경로 「칸」만 세면 어느 칸에
+  // 떨어져도 걸리는 칸이 자기 자신 하나뿐이고, 모든 자리의 점수가 같아진다. 이건
+  // 튜닝이 아니라 격자 해상도의 문제라 `PATH_STEP` 으로 잘게 뜨는 것 말고 길이 없다.
+  // 반경이 1 을 넘게 바뀌면 이 전제가 깨지므로 그때 자를 다시 볼 것.
+  {
+    ok('  폭발 반경이 칸 간격보다 작다', g5.BLAST_RADIUS < 1, 'BLAST_RADIUS ' + g5.BLAST_RADIUS);
+    let worst = 0;
+    for (const key of g5.pathCells) {
+      const [x, y] = key.split(',').map(Number);
+      let n = 0;
+      for (const k2 of g5.pathCells) {
+        const [a, b] = k2.split(',').map(Number);
+        if (Math.hypot(a - x, b - y) <= g5.BLAST_RADIUS) n++;
+      }
+      worst = Math.max(worst, n);
+    }
+    ok('    그래서 경로 칸만 세면 어느 칸이든 자기 하나뿐이다', worst === 1, '최대 ' + worst + '칸');
+  }
+
+  // ── ① 어느 종류가 어느 자를 쓰는가 ────────────────────────
+  // **박격포 점수 함수를 커버로 되돌리는 변조가 정확히 여기서 걸린다.**
+  {
+    const cells = [];
+    for (let y = 0; y < g5.CFG.BOARD_H; y++)
+      for (let x = 0; x < g5.CFG.BOARD_W; x++) cells.push([x, y]);
+    const same = (f, h) => cells.every(([x, y]) => f(x, y) === h(x, y));
+    const cov = coverTable(g5);
+
+    ok('  박격포는 커버가 아닌 자를 쓴다',
+      !same(spotScore(g5, 'mortar'), cov) && same(spotScore(g5, 'mortar'), blastTable(g5)), '폭발');
+    ok('  마력로는 커버가 아닌 자를 쓴다',
+      !same(spotScore(g5, 'arc'), cov) && same(spotScore(g5, 'arc'), beamTable(g5)), '관통');
+    // 나머지 다섯은 **안 건드렸다는 것이 수용 기준**이다. 한 종류라도 새 자로 새면
+    // affinity 전후 비교에서 「자를 안 바꾼 타워까지 움직였다」가 된다.
+    const rest = ['shredder', 'eroder', 'frost', 'marksman', 'mint'];
+    const leaked = rest.filter(k => !same(spotScore(g5, k), cov));
+    ok('  나머지 다섯은 커버 표 그대로다', !leaked.length, leaked.length ? leaked.join(',') : rest.join(','));
+  }
+
+  // ── ② 두 표가 게임 판정과 같은가 ─────────────────────────
+  // 위 ① 은 「커버가 아니다」까지만 본다. 판정식이 틀려도 통과하므로, 여기서
+  // **게임이 실제로 쓰는 식**으로 독립 계산해 칸마다 대조한다. 위 커버 게이트가
+  // `paths.js` 로 하는 것과 같은 구조다.
+  //
+  // 표본 뜨는 규칙(`PATH_STEP`)은 자의 파라미터라 sim 에서 받아 오지만, **판정에
+  // 들어가는 수는 전부 게임 것**이다(BLAST_RADIUS · BEAM_HALF · towerRange · distTo).
+  // 그래서 index.html 쪽 상수를 고치면 이 줄이 걸린다.
+  {
+    const samples = (g) => {
+      const xs = [], ys = [];
+      for (let lane = 0; lane < g.lanes.length; lane++) {
+        const len = g.laneLen(lane);
+        for (let d = 0; d <= len; d += PATH_STEP) {
+          const p = g.posAt(d, lane);
+          xs.push(p.x); ys.push(p.y);
+        }
+      }
+      return { xs, ys, n: xs.length };
+    };
+
+    let bad = null;
+    for (const g of [g5, g6]) {
+      const { xs, ys, n } = samples(g);
+      const R = g.BLAST_RADIUS;
+      const mr = g.towerRange({ kind: 'mortar', star: 1 });
+      const ar = g.towerRange({ kind: 'arc', star: 1 });
+      const H = g.BEAM_HALF;
+      const bl = blastTable(g), be = beamTable(g);
+      const stride = Math.max(1, Math.round(1 / PATH_STEP));
+
+      for (let y = 0; y < g.CFG.BOARD_H && !bad; y++)
+        for (let x = 0; x < g.CFG.BOARD_W && !bad; x++) {
+          // 폭발: 사거리 안 표본마다 「그 자리에 떨어졌을 때 걸리는 표본 수」를 더한다
+          const tm = { kind: 'mortar', star: 1, gx: x, gy: y };
+          let want = 0;
+          for (let i = 0; i < n; i++) {
+            if (g.distTo(tm, { x: xs[i], y: ys[i] }) > mr) continue;
+            for (let j = 0; j < n; j++)
+              if (Math.hypot(xs[j] - xs[i], ys[j] - ys[i]) <= R) want++;
+          }
+          if (bl(x, y) !== want) { bad = `폭발 S${g.state.stage + 1} (${x},${y}) ${bl(x, y)} != ${want}`; break; }
+
+          // 관통: 사거리 안 표본을 하나씩 겨냥해 보고 가장 많이 꿰는 방향
+          const ta = { kind: 'arc', star: 1, gx: x, gy: y };
+          const c = g.towerCenter(ta);
+          const aim = [];
+          for (let i = 0; i < n; i++)
+            if (g.distTo(ta, { x: xs[i], y: ys[i] }) <= ar) aim.push(i);
+          let best = 0;
+          for (let a = 0; a < aim.length; a += stride) {
+            const i = aim[a];
+            const ax = xs[i] + 0.5 - c.x, ay = ys[i] + 0.5 - c.y;
+            const len = Math.hypot(ax, ay);
+            if (len === 0) continue;   // 방향이 없는 겨냥은 건너뛴다 (sim.js beamTable 주석)
+            const dx = ax / len, dy = ay / len;
+            let cnt = 0;
+            for (let j = 0; j < n; j++) {
+              const vx = xs[j] + 0.5 - c.x, vy = ys[j] + 0.5 - c.y;
+              const proj = vx * dx + vy * dy;
+              if (proj < 0 || proj > ar) continue;
+              if (Math.abs(vx * dy - vy * dx) > H) continue;
+              cnt++;
+            }
+            if (cnt > best) best = cnt;
+          }
+          if (be(x, y) !== best) { bad = `관통 S${g.state.stage + 1} (${x},${y}) ${be(x, y)} != ${best}`; break; }
+        }
+    }
+    ok('  두 표가 게임 판정과 칸마다 같다 (S5·S6)', !bad, bad || '전 칸 일치');
+  }
+
+  // ── ③ 새 자가 커버와 다른 순위를 매기는가 ─────────────────
+  // ① 은 「값이 다르다」까지다. 커버에 상수를 곱하기만 한 자도 통과한다 — 그러면
+  // **자를 바꿨다고 적고 실제로는 아무 자리도 안 바뀐** 상태가 된다. 그래서 순위가
+  // 실제로 갈리는 비율을 본다. 임계 5% 는 실측(폭발 19~27% · 관통 19~35%)의 4분의 1
+  // 아래라 여유가 크다 — 잡으려는 것은 「거의 같다」이지 「덜 다르다」가 아니다.
+  {
+    const disagree = (g, f) => {
+      const cov = coverTable(g), cells = [];
+      for (let y = 0; y < g.CFG.BOARD_H; y++)
+        for (let x = 0; x < g.CFG.BOARD_W; x++) if (!g.isPath(x, y)) cells.push([x, y]);
+      let diff = 0, n = 0;
+      for (let i = 0; i < cells.length; i++)
+        for (let j = i + 1; j < cells.length; j++) {
+          const [ax, ay] = cells[i], [bx, by] = cells[j];
+          const c = Math.sign(cov(ax, ay) - cov(bx, by));
+          const s = Math.sign(f(ax, ay) - f(bx, by));
+          if (c && s && c !== s) diff++;
+          n++;
+        }
+      return diff / n;
+    };
+    const mb = disagree(g6, blastTable(g6)), ab = disagree(g6, beamTable(g6));
+    ok('  폭발 자는 커버와 다른 순위를 매긴다 (>5%)', mb > 0.05, (100 * mb).toFixed(1) + '%');
+    ok('  관통 자는 커버와 다른 순위를 매긴다 (>5%)', ab > 0.05, (100 * ab).toFixed(1) + '%');
+  }
+
+  // ── ④ 유도 결과: 좋은 자리는 직선이 아니라 꺾임이다 ───────
+  // **착수 시점의 가설은 「박격포는 직선을 덮는다」였고, 판정식에서 유도하면 반대가
+  // 나온다.** 곧은 통로에 떨어진 반경 0.8 짜리 원은 경로를 1.6칸(= 표본 9개)만 무는데,
+  // 직각으로 꺾이는 자리에서는 두 팔을 비스듬히 물어 그보다 많이 덮는다. 레인이
+  // 겹치는 구간도 같은 이유로 커진다. 이 줄은 **그 유도가 실제로 성립하는지**를 본다 —
+  // 판을 새로 붙였는데 꺾임이 없으면 여기서 걸리고, 그때는 자가 아니라 판을 볼 일이다.
+  // (KINDS.mortar.how 의 「줄지어 오는 직선」은 5성 탄막이 세 발을 경로를 따라 늘어놓는
+  //  이야기라 무분기 1발의 자리값과는 다른 층이다 — index.html 박격포 주석.)
+  {
+    const straight = 2 * Math.floor(g6.BLAST_RADIUS / PATH_STEP) + 1;
+    const xs = [], ys = [];
+    for (let lane = 0; lane < g6.lanes.length; lane++) {
+      const len = g6.laneLen(lane);
+      for (let d = 0; d <= len; d += PATH_STEP) { const p = g6.posAt(d, lane); xs.push(p.x); ys.push(p.y); }
+    }
+    let max = 0, flat = 0;
+    for (let i = 0; i < xs.length; i++) {
+      let c = 0;
+      for (let j = 0; j < xs.length; j++)
+        if (Math.hypot(xs[j] - xs[i], ys[j] - ys[i]) <= g6.BLAST_RADIUS) c++;
+      if (c === straight) flat++;
+      max = Math.max(max, c);
+    }
+    ok('  곧은 통로의 폭발 크기가 계산값과 같다', flat > 0, `${straight}표본짜리 지점 ${flat}개`);
+    ok('    꺾임·레인겹침은 그보다 크다 (직선이 최선이 아니다)', max > straight, `최대 ${max} > 직선 ${straight}`);
   }
 }
 
