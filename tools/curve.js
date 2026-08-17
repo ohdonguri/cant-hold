@@ -32,9 +32,15 @@
 // 「눈금이 틀렸다」와 「자가 바뀌었다」를 못 가른다. #28 은 **어느 판인지** 안 적어서
 // 났고, #31·#35 뒤의 혼선은 **어느 그리디인지** 안 적어서 났다. 태그를 행 끝에 박는
 // 것은 한 줄만 복사해 가도 출처가 같이 따라가게 하려는 것이다.
+//
+// ── 제약 판은 덱 수가 다르다 (#50) ──────────────────────────
+// **판이 덱을 제한하면(`allowKinds`) 35덱을 돌면 안 된다** — 게임에서 못 고르는 덱을
+// 재는 것이라 그 행의 `p` 는 아무도 볼 수 없는 판의 난이도다. 허용 목록에서 조합을
+// 다시 만들면 C(4,3) = **4덱**이고, 그래서 행마다 표본 수가 다르다. 태그가 행 끝에
+// 붙는 이유가 여기서 한 번 더 붙는다 — 4덱 행과 35덱 행의 `p` 를 나란히 읽을 때
+// **표본이 다르다는 것이 같이 따라와야 한다**(이 파일 머리 「표본이 다르면 값이 다르다」).
 const { load, greedy, SUMMON_SAMPLES } = require('./sim.js');
 
-const KINDS = ['shredder', 'eroder', 'frost', 'mortar', 'marksman', 'arc', 'mint'];
 const SEED = 12345;
 const TRIALS = Number(process.env.TRIALS || 6);
 
@@ -64,13 +70,12 @@ function combos(a, k) {
   return combos(r, k - 1).map(c => [h, ...c]).concat(combos(r, k));
 }
 
-const DECKS = combos(KINDS, 3);
-const TAG = `${DECKS.length}덱x${TRIALS} · seed${SEED}(덱마다 재박음) · SUMMON_SAMPLES=${SUMMON_SAMPLES}`;
+const tagOf = n => `${n}덱x${TRIALS} · seed${SEED}(덱마다 재박음) · SUMMON_SAMPLES=${SUMMON_SAMPLES}`;
 
-// 한 판을 35덱 x TRIALS 회 돌린다. 반환값은 **두 자로 같이 잰 것**이다 —
+// 한 판을 (그 판이 받는 덱) x TRIALS 회 돌린다. 반환값은 **두 자로 같이 잰 것**이다 —
 // 센티넬 평균(호환)과 총웨이브로 자른 진도(눈금)를 한 번의 시행에서 뽑으므로
 // 두 열이 서로 다른 표본을 보는 일이 없다.
-function measure(st, waveMax) {
+function measure(st, waveMax, DECKS) {
   const means = [], prog = [];
   let clearDecks = 0, clearRuns = 0, runs = 0;
   for (const deck of DECKS) {
@@ -93,7 +98,7 @@ function measure(st, waveMax) {
   const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
   const sorted = means.slice().sort((a, b) => a - b);
   return {
-    st, waveMax, clearDecks, clearRuns, runs,
+    st, waveMax, clearDecks, clearRuns, runs, decks: DECKS.length,
     clearRate: clearRuns / runs,
     p: avg(prog) / waveMax,
     mean: avg(means), best: sorted[sorted.length - 1], worst: sorted[0],
@@ -106,7 +111,8 @@ const rows = [];
 for (let st = 0; st < STAGES.length; st++) {
   const g = load({});
   g.loadStage(st);
-  rows.push(measure(st, g.CFG.WAVE_MAX));
+  // 덱 목록도 박아 두지 않는다. 판마다 살아 있는 허용 목록에서 다시 만든다.
+  rows.push(measure(st, g.CFG.WAVE_MAX, combos(g.allowedKinds(st), 3)));
 }
 for (const r of rows) r.label = 'S' + (r.st + 1);
 
@@ -128,7 +134,7 @@ for (const r of rows) {
     (100 * r.clearRate).toFixed(1).padStart(6) + '%' + clearMark,
     r.p.toFixed(2).padStart(6) + pMark,
     r.mean.toFixed(1).padStart(12),
-    '  ' + TAG);
+    '  ' + tagOf(r.decks));
 }
 
 // DESIGN §밸런스 표를 이 도구로 다시 뜰 수 있어야 한다. 형식이 갈리면 문서를 손으로
@@ -142,7 +148,8 @@ for (const r of rows) {
     r.mean.toFixed(1).padStart(9),
     r.best.toFixed(1).padStart(7),
     r.worst.toFixed(1).padStart(7),
-    `${r.clearDecks}/${DECKS.length}`.padStart(8),
+    `${r.clearDecks}/${r.decks}`.padStart(8),
     `${r.clearRuns}/${r.runs}`.padStart(9));
 }
-console.log(TAG);
+// 행마다 덱 수가 다를 수 있으므로 표 아래 태그도 행별로 찍는다.
+for (const r of rows) console.log(`S${r.st + 1}  ${tagOf(r.decks)}`);

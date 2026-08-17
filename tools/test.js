@@ -1024,10 +1024,20 @@ function known(name, worse, detail, why) {
   //
   // 아래 목록 `[844, 667, 658]` 을 **그대로 유지한다.** 통과시키려고 기기를 빼면
   // 회귀를 숨기는 것이다.
+  // [2026-08 #50] **아래 두 줄만으로는 이제 부족하다.** 목록이 스크롤되면서 꼬리가
+  // 화면 바닥에 고정됐으므로 「마지막 줄이 화면 안」은 **정의상 참**이 됐다 — 그
+  // 줄 혼자 두면 아무것도 안 잰다(이 리포가 포화된 지표에 반복해서 데인 그 자리다).
+  // 그래서 스크롤이 실제로 닿는지를 같이 본다:
+  //   · 맨 위에서 첫 카드가 칸 안에 **온전히** 있다 (헤더 밑으로 안 파고든다)
+  //   · 끝까지 내리면 마지막 카드가 칸 안에 **온전히** 들어온다 (닿을 수 없는 판이 없다)
+  // 둘이 있어야 「스크롤 범위가 내용과 맞는가」가 잠긴다. 범위를 반만 잡아도 첫 줄은
+  // 통과하지만 둘째 줄이 잡는다.
   const narrow = (gg, label) => {
     const M = gg.STAGE_CARD_MIN;
     for (const h of [844, 667, 658]) {
       gg.view.h = h;
+      gg.setStageScroll(0);
+      const m = gg.stageListMetrics();
       const cards = gg.stageCardRects();
       const lastCard = cards[cards.length - 1];
       const tail = gg.cloudRect();
@@ -1037,6 +1047,15 @@ function known(name, worse, detail, why) {
         + (lastCard.compact ? ' · 셋째 줄 접음' : '') + ')');
       ok(`  ${label} ${h}px 에서 마지막 줄이 화면 안`, tail.y + tail.h <= h,
         '로그인 줄 바닥 ' + (tail.y + tail.h).toFixed(1) + ' / 화면 ' + h);
+      ok(`  ${label} ${h}px 에서 첫 카드가 칸 안에 온전히`, cards[0].y >= m.top - 0.01,
+        '첫 카드 y ' + cards[0].y.toFixed(1) + ' / 칸 위 ' + m.top);
+      gg.setStageScroll(m.maxScroll);
+      const bottomCard = gg.stageCardRects()[cards.length - 1];
+      ok(`  ${label} ${h}px 에서 마지막 카드까지 닿는다`,
+        bottomCard.y + bottomCard.h <= gg.stageListMetrics().tailTop + 0.01,
+        '끝까지 내렸을 때 바닥 ' + (bottomCard.y + bottomCard.h).toFixed(1)
+        + ' / 칸 아래 ' + m.tailTop.toFixed(1) + (m.maxScroll > 0 ? ' · 스크롤 ' + m.maxScroll.toFixed(0) : ' · 스크롤 없음'));
+      gg.setStageScroll(0);
     }
   };
   narrow(g, `${g.STAGES.length}장`);
@@ -1083,6 +1102,66 @@ function known(name, worse, detail, why) {
     g6.view.h = 658;
     ok('  여섯 장 · 658px 에서는 접힌다',
       g6.stageCardRects().every(r => r.compact));
+  }
+
+  // ── 열두 장을 **판을 안 늘린 채로** 잰다 (#50) ────────────────────────────
+  // 위 여섯 장 블록과 같은 취지다. 아홉 장은 이제 진짜 판이라 `narrow(g, …)` 가
+  // 재고 있고, 여기서는 **그 다음**을 미리 본다 — 접기는 아홉에서 이미 소진됐으므로
+  // (하한 51 에 눌린 채 658 에서 147px 넘쳤다) 열둘이 통과한다면 그건 순전히
+  // 스크롤이 하는 일이다. 「접기로 번 것은 판 하나치」를 스크롤이 끝냈다는 증거가
+  // 이 블록이고, 열세 장이 되어도 여기를 고칠 필요가 없다.
+  {
+    const g12 = load();
+    while (g12.STAGES.length < 12)
+      g12.STAGES.push({ ...g12.STAGES[0], name: '가짜 ' + (g12.STAGES.length + 1) });
+    narrow(g12, '열두 장');
+    g12.view.h = 658;
+    g12.setStageScroll(0);
+    const m = g12.stageListMetrics();
+    ok('  열두 장 · 658px 은 스크롤로만 들어간다', m.maxScroll > 0,
+      '스크롤 범위 ' + m.maxScroll.toFixed(0) + 'px');
+    // 스크롤이 필요 없는 화면에는 막대를 안 그린다. 늘 그리면 안 움직이는 장식이 된다.
+    const g6b = load();
+    g6b.view.h = 844;
+    g6b.setStageScroll(0);
+    ok('  여섯 장 · 844px 은 스크롤이 없다', g6b.stageListMetrics().maxScroll === 0,
+      String(g6b.stageListMetrics().maxScroll));
+  }
+
+  // ── 잘린 카드는 그려지지도, 눌리지도 않는다 (#50) ──────────────────────────
+  // **좌표 단언만으로는 못 잡는다.** 클립을 통째로 빼도 위 단언은 전부 통과하고,
+  // 화면에서만 카드가 헤더와 이어하기 줄 위로 삐져나온다 — 셋째 줄 접기에서
+  // 「카드 밖에 글자가 얹히면 안 된다」와 같은 사고다. 그래서 그리기 호출을 센다.
+  {
+    const gc = load();
+    while (gc.STAGES.length < 12)
+      gc.STAGES.push({ ...gc.STAGES[0], name: '가짜 ' + (gc.STAGES.length + 1) });
+    gc.view.h = 658;
+    gc.state.phase = 'stage';
+    gc.setStageScroll(0);
+    gc.draws.reset();
+    gc.render();
+    ok('  목록에 클립이 걸린다', gc.draws.count('clip') >= 1, String(gc.draws.count('clip')));
+
+    // 칸 밖으로 나간 카드는 탭도 안 먹는다. 안 그러면 이어하기 줄 뒤에 숨은 카드가
+    // 눌려서 「엉뚱한 판이 열린다」가 된다.
+    const m = gc.stageListMetrics();
+    const hidden = gc.stageCardRects().filter(r => !gc.stageCardVisible(r));
+    ok('  658px · 열두 장에서 칸 밖으로 나간 카드가 있다', hidden.length > 0, String(hidden.length));
+    // 잠긴 판이라 pickStage 는 어차피 거절한다 — 그래서 **1번 판을 맨 아래로 보내**
+    // 「열려 있는데 숨어 있는」 상황을 만든다. 스크롤을 끝까지 내리면 1번이 위로 빠진다.
+    gc.setStageScroll(gc.stageListMetrics().maxScroll);
+    const first = gc.stageCardRects()[0];
+    ok('  끝까지 내리면 1번 카드가 칸 밖이다', !gc.stageCardVisible(first),
+      'y ' + first.y.toFixed(1) + ' / 칸 위 ' + m.top);
+    gc.state.phase = 'stage';
+    gc.stageTap(first.x + 10, first.y + 10);
+    ok('  칸 밖 카드는 탭해도 안 열린다', gc.state.phase === 'stage', gc.state.phase);
+    // 대조 — 보이는 카드는 그대로 열린다. 위 줄만 있으면 「탭이 통째로 죽었다」도 통과한다.
+    gc.setStageScroll(0);
+    const top0 = gc.stageCardRects()[0];
+    gc.stageTap(top0.x + 10, top0.y + 10);
+    ok('  보이는 카드는 탭하면 열린다', gc.state.phase === 'deck', gc.state.phase);
   }
 
   // 후반 스테이지는 레인이 여러 개.
@@ -1211,6 +1290,141 @@ function known(name, worse, detail, why) {
   for (let i = 0; i < 25; i++) g.summon();
   const outside = state.towers.filter(t => !state.deck.includes(t.kind)).map(t => t.kind);
   ok('덱 밖 타워는 안 나옴', outside.length === 0, outside.join(',') || '없음');
+}
+
+// ── 덱 제약 기계 (#50) ────────────────────────────────────────
+// 판이 덱을 제한한다(`allowKinds`). 이 블록이 잠그는 것은 **기계**이지 특정 판이
+// 아니다 — 제약이 걸린 판 자체가 실제로 강제되는지는 아래 「강제」 블록이 잰다.
+//
+// **가짜 판을 쓴다.** 위 「여섯 장」 블록과 같은 이유다: 진짜 판에 붙은 목록으로
+// 기계를 재면 그 판의 목록을 고쳤을 때 기계 검사가 같이 흔들린다. 여기서 묻는 것은
+// 「목록이 있으면 그대로 걸리는가 · 없으면 아무 일도 안 일어나는가」뿐이다.
+{
+  console.log('덱 제약');
+  // ① **없으면 전부 허용이다.** 기존 판의 동작 불변은 이 한 줄에 달려 있다.
+  {
+    const g = load();
+    const withList = g.STAGES.filter(s => s.allowKinds).map(s => s.name);
+    // 이름을 박는다. 판을 붙이면서 옛 판에 목록을 얹으면 그 판의 덱이 조용히 좁아지는데,
+    // 개수만 세면 「새 판이 셋 붙었으니 셋이 맞다」로 통과한다.
+    const LEGACY = ['외곽 도로', '이중 병목', '갈래길', '역류', '분수령', '합수'];
+    const dirty = LEGACY.filter(n => {
+      const d = g.STAGES.find(s => s.name === n);
+      return d && d.allowKinds;
+    });
+    ok('기존 여섯 판에는 허용 목록이 없다', dirty.length === 0,
+      dirty.join(',') || ('목록 있는 판: ' + (withList.join(',') || '없음')));
+    for (let i = 0; i < g.STAGES.length; i++) {
+      if (g.STAGES[i].allowKinds) continue;
+      ok(`  [S${i + 1}] 목록이 없으면 7종 전부 허용`,
+        g.allowedKinds(i).length === g.KIND_KEYS.length
+        && g.KIND_KEYS.every(k => g.kindAllowed(k, i)));
+      ok(`  [S${i + 1}] 막힌 이유 줄이 비어 있다`, g.deckLimitNote(i) === '',
+        JSON.stringify(g.deckLimitNote(i)));
+    }
+  }
+
+  // ② 목록이 있으면 그대로 걸린다.
+  {
+    const g = load();
+    const { state } = g;
+    const ALLOW = ['shredder', 'eroder', 'frost', 'mortar'];
+    const BLOCK = ['marksman', 'arc', 'mint'];
+    g.STAGES.push({ ...g.STAGES[0], name: '가짜 제약', allowKinds: ALLOW });
+    const st = g.STAGES.length - 1;
+    // 해금은 「깬 판의 다음」이라 가짜 판은 안 열려 있다. pickStage 를 안 쓰고
+    // 직접 싣는다 — 여기서 재는 것은 해금이 아니라 덱 제약이다.
+    g.loadStage(st);
+    state.phase = 'deck';
+    state.deckPick = [];
+
+    ok('허용 목록이 그대로 나온다', g.allowedKinds().join(',') === ALLOW.join(','),
+      g.allowedKinds().join(','));
+    ok('  카드는 여전히 7장이다', g.deckCardRects().length === g.KIND_KEYS.length,
+      String(g.deckCardRects().length));
+
+    for (const k of BLOCK) {
+      state.toast = null;
+      g.toggleDeckPick(k);
+      ok(`  ${g.KINDS[k].name} 는 못 고른다`, !state.deckPick.includes(k), state.deckPick.join(',') || '(빈)');
+      // 회색으로 두고 아무 말 없으면 버그로 읽힌다. 탭에 이유가 뜨는지 본다.
+      ok(`  ${g.KINDS[k].name} 를 누르면 이유가 뜬다`,
+        !!state.toast && state.toast.text.includes(g.KINDS[k].name),
+        state.toast ? state.toast.text : '(토스트 없음)');
+    }
+    for (const k of ALLOW) {
+      state.deckPick = [];
+      g.toggleDeckPick(k);
+      ok(`  ${g.KINDS[k].name} 는 고를 수 있다`, state.deckPick.includes(k), state.deckPick.join(','));
+    }
+
+    // 이유 줄이 **금지 종류를 전부** 세는가. 하나라도 빠지면 회색 칸 중 하나가
+    // 설명 없이 남는다.
+    const note = g.deckLimitNote();
+    ok('  이유 줄이 금지 종류를 전부 적는다',
+      BLOCK.every(k => note.includes(g.KINDS[k].name)), note);
+    ok('  이유 줄이 강제되는 타워를 적는다', note.includes(g.KINDS.mortar.name), note);
+
+    // **그림에서 본다.** 위 단언은 전부 상태라, `drawDeckSelect` 에서 회색 처리와
+    // 안내 문구를 통째로 지워도 하나도 안 걸린다 — 이 리포가 세 번 빠진 함정이다.
+    state.deckPick = [];
+    state.toast = null;   // 토스트가 떠 있으면 그 글자가 같이 그려져 아래 단언이 헐거워진다
+    g.draws.reset();
+    g.render();
+    const drawn = g.draws.text;
+    ok('  덱 화면이 이유를 실제로 그린다', drawn.includes(note),
+      drawn.filter(s => s.includes('못 고른다')).join(' | ') || '(안 그림)');
+    const banned = drawn.filter(s => s === '이 판 금지').length;
+    ok('  막힌 카드마다 「이 판 금지」가 붙는다', banned === BLOCK.length,
+      banned + '/' + BLOCK.length);
+    // 허용된 카드는 사거리를 그대로 단다. 위 줄만 있으면 「전부 금지로 칠했다」도 통과한다.
+    // **접두사로 세면 안 된다** — 공격 그룹 머리말이 「사거리 안의 적을…」로 시작한다.
+    const ranged = drawn.filter(s => ALLOW.some(k => s === '사거리 ' + g.KINDS[k].range.toFixed(1))).length;
+    ok('  허용된 카드는 사거리를 그대로 단다', ranged === ALLOW.length,
+      ranged + '/' + ALLOW.length);
+
+    // ③ 시작 버튼도 막는다. 화면을 우회해 deckPick 을 직접 세우는 경로가 둘 있다.
+    state.deckPick = ['shredder', 'eroder', 'mint'];
+    g.startRun();
+    ok('  금지 종류가 섞인 덱으로는 시작 안 됨', state.phase === 'deck', state.phase);
+    state.deckPick = ['shredder', 'eroder', 'mortar'];
+    g.startRun();
+    ok('  허용 덱으로는 시작된다', state.phase === 'build', state.phase);
+
+    // ④ 랜덤 덱도 허용 안에서만 뽑는다.
+    g.loadStage(st);
+    let bad = 0;
+    for (let i = 0; i < 200; i++) {
+      g.rollDeck();
+      if (g.state.deck.some(k => !ALLOW.includes(k))) bad++;
+    }
+    ok('  rollDeck 이 허용 밖을 안 뽑는다 (200회)', bad === 0, bad + '/200');
+
+    // ⑤ 이어하기도 막는다. 목록이 붙기 전에 저장된 기록이 금지 종류를 들고 돌아올 수 있다.
+    const snap = { stage: st, deck: ['shredder', 'eroder', 'mint'], wave: 3, gold: 100, life: 20, towers: [] };
+    ok('  금지 덱 스냅샷은 이어하기가 거절한다', g.restoreRun(snap) === false);
+    ok('  허용 덱 스냅샷은 이어할 수 있다',
+      g.restoreRun({ ...snap, deck: ['shredder', 'eroder', 'mortar'] }) === true);
+  }
+
+  // ⑥ **그리디는 시끄럽게 죽는다.** 조용히 거절하면 `phase === 'deck'` 인 채로
+  //    4000초를 돌다 웨이브 0 짜리 결과를 내고, 그 수가 curve/affinity 표에 그대로
+  //    찍힌다 — 「제약 판은 진도가 0」으로 읽히는 최악의 조용한 실패다.
+  {
+    const g = load();
+    g.STAGES.push({ ...g.STAGES[0], name: '가짜 제약', allowKinds: ['shredder', 'eroder', 'frost', 'mortar'] });
+    const st = g.STAGES.length - 1;
+    let threw = null;
+    try { greedy(g, { stage: st, deck: ['shredder', 'arc', 'mint'] }); } catch (e) { threw = e; }
+    ok('  금지 덱을 받은 greedy 가 던진다', !!threw && /안 받는 종류/.test(threw.message),
+      threw ? threw.message : '(안 던졌다)');
+
+    const g2 = load();
+    g2.STAGES.push({ ...g2.STAGES[0], name: '가짜 제약', allowKinds: ['shredder', 'eroder', 'frost', 'mortar'] });
+    const r = greedy(g2, { stage: g2.STAGES.length - 1, deck: ['shredder', 'eroder', 'mortar'] });
+    ok('  허용 덱은 그대로 돈다', r.wave > 0 && (r.result === 'over' || r.result === 'clear'),
+      r.result + ' w' + r.wave);
+  }
 }
 
 // ── 빈 칸 소환 (2단계) ────────────────────────────────────────

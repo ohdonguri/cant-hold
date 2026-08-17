@@ -62,11 +62,16 @@ const { RANGE: COVER_RANGE } = require('./paths.js');
 // log 를 넘기면 호출한 메서드 이름이 순서대로 쌓인다. "무엇이 화면에 나왔나"를
 // 헤드리스에서 볼 수 있는 유일한 창이다 — 상태만 검사하면 drawXxx() 호출을
 // 통째로 지워도 테스트가 전부 통과한다(실제로 그랬다).
-function stubCtx(log) {
+// **`fillText` 만 인자를 같이 남긴다.** 이름만 세면 「한 줄 그렸다」까지밖에 못 보고,
+// 문구를 통째로 딴 것으로 바꿔도 통과한다 — 「막힌 이유를 보여준다」처럼 **글자가
+// 곧 기능인 자리**를 잠그려면 무엇을 그렸는지가 필요하다. 나머지 메서드는 그대로
+// 이름만 센다(인자를 전부 남기면 도트 굽기 한 판에 수천 줄이 쌓인다).
+function stubCtx(log, texts) {
   return new Proxy({}, {
     get(_, p) {
       if (p === 'measureText') return () => ({ width: 10 });
       if (p === 'canvas') return {};
+      if (texts && p === 'fillText') return s => { log.push(p); texts.push(String(s)); };
       if (log) return () => { log.push(p); };
       return () => {};
     },
@@ -173,6 +178,11 @@ const EXPOSE = [
   'sfx', 'sfxUnlock', 'sfxStats', 'SFX', 'SFX_VOICE_CAP', 'setSoundEnabled', 'toggleSound', 'fxState',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
+  // 판이 덱을 제한하는 기계(#50). **계측 도구가 이걸 안 보면 제약 판을 못 잰다** —
+  // `tools/affinity.js`·`tools/curve.js` 는 35덱을 고정으로 돌던 것이라 제약 판에서는
+  // 못 고르는 덱을 재게 된다. 허용 목록을 도구 쪽에 베끼면 자가 두 벌이 되므로
+  // 살아 있는 판 정의에서 그대로 가져다 쓴다.
+  'allowedKinds', 'kindAllowed', 'deckLimitNote',
   'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
   // 세이브 형식 버전과 「뜻이 안 바뀐 인덱스 수」. 테스트가 리터럴 3·5 를 베껴 두면
   // 판을 또 붙여 경계가 움직였을 때 테스트만 옛 값을 지키며 통과한다.
@@ -186,6 +196,11 @@ const EXPOSE = [
   // 좁은 화면에서 이 둘을 화면 밖으로 밀어내지 않는지 테스트가 봐야 하는데,
   // 좌표식을 테스트에 베껴 두면 레이아웃을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
   'resumeRect', 'cloudRect',
+  // 목록 스크롤(#50). `stageListMetrics` 는 「칸이 얼마고 얼마나 넘치는가」의 정본이라
+  // 테스트가 좌표식을 베끼지 않게 내보낸다. `stageTap` 은 핸들러 대신 부르는 정문이고
+  // (헤드리스가 탭 없이 밟는다), `setStageScroll` 은 스크롤을 감는 유일한 통로다 —
+  // 모듈 레벨 원시값이라 객체처럼 못 넘긴다(hitstopT 와 같은 사정).
+  'stageListMetrics', 'stageCardVisible', 'stageTap', 'setStageScroll', 'stageScrollState',
 ];
 
 function load(overrides) {
@@ -194,7 +209,8 @@ function load(overrides) {
   // 본 화면만 기록한다. 스프라이트를 굽는 오프스크린 캔버스까지 세면
   // 처음 그릴 때 굽는 도트 수백 줄이 섞여서 못 쓴다.
   const drawLog = [];
-  const canvas = { getContext: () => stubCtx(drawLog), addEventListener: () => {}, width: 0, height: 0, style: {} };
+  const drawTexts = [];
+  const canvas = { getContext: () => stubCtx(drawLog, drawTexts), addEventListener: () => {}, width: 0, height: 0, style: {} };
 
   const store = new Map();
   const localStorageStub = {
@@ -223,9 +239,11 @@ function load(overrides) {
 
   // 마지막 render 가 본 화면에 무엇을 그렸는지 세는 창.
   //   g.draws.reset(); g.render(); g.draws.count('fill')
+  //   g.draws.reset(); g.render(); g.draws.text.some(s => s.includes('금지'))
   api.draws = {
     log: drawLog,
-    reset() { drawLog.length = 0; },
+    text: drawTexts,
+    reset() { drawLog.length = 0; drawTexts.length = 0; },
     count(...names) { return drawLog.filter(n => names.includes(n)).length; },
   };
   // 오디오 시계를 앞으로 감는 창. 큐 쿨다운은 게임 dt 가 아니라 이 시계로 잰다.
@@ -582,6 +600,17 @@ function greedy(g, opts = {}) {
     if (deck) state.deckPick = deck.slice(0, CFG.DECK_SIZE);
     else { g.rollDeck(); state.deckPick = state.deck.slice(); }
     g.startRun();
+    // **오용은 시끄럽게 죽는다** — 위 `samples` 검사와 같은 규칙이다. 제약 판
+    // (`allowKinds`)에 못 고르는 덱을 주면 `startRun` 이 조용히 거절하고, 그러면
+    // 아래 while 이 `phase === 'deck'` 인 채로 4000초를 돌다 **웨이브 0 짜리 결과**를
+    // 낸다. 그 수가 표에 그대로 찍히면 「제약 판은 진도가 0 이구나」로 읽힌다.
+    if (state.phase === 'deck') {
+      const allow = g.allowedKinds();
+      const bad = state.deckPick.filter(k => !allow.includes(k));
+      throw new TypeError(bad.length
+        ? `이 판이 안 받는 종류: ${bad.join(',')} (허용: ${allow.join(',')})`
+        : `덱이 ${CFG.DECK_SIZE}종이 아니다: ${state.deckPick.join(',')}`);
+    }
   }
 
   function resolveChoice() {
