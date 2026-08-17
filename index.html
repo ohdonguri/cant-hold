@@ -243,6 +243,45 @@ const STAGES = [
 // 행 번호를 박아 두어야 한다.** #33 에서 래칫이 통째로 옮겨 가 S4 가 무감시가 된
 // 적이 있다.
 
+// ── 판이 덱을 제한한다 (`allowKinds`) ─────────────────────────
+// **없으면 전부 허용이다.** 기존 여섯 판은 이 필드를 안 달았고, 그래서 이 기계가
+// 붙어도 그 판들의 동작은 한 줄도 안 바뀐다 — 아래 세 함수 전부 `|| KIND_KEYS` 로
+// 떨어진다. 「제약이 기본이고 예외를 적는다」로 뒤집으면 판을 붙일 때마다 허용
+// 목록을 적어야 하고, 한 번 빠뜨리면 그 판이 조용히 덱 없는 판이 된다.
+//
+// 제약은 **덱 화면에서만** 건다. 소환 피커는 이미 `state.deck` 만 보여주므로
+// 덱이 정직하면 그 아래가 전부 정직하다 — 두 곳에서 거르면 자가 두 벌이 된다.
+function allowedKinds(stage) {
+  const def = STAGES[stage === undefined ? state.stage : stage];
+  return (def && def.allowKinds) || KIND_KEYS;
+}
+function kindAllowed(kind, stage) { return allowedKinds(stage).includes(kind); }
+
+// 막힌 이유를 한 줄로 만든다. **문구를 판 정의에 따로 적지 않는다** — 그러면
+// `allowKinds` 와 갈려서 「회색인데 이유는 다른 타워를 가리키는」 화면이 나온다.
+// 허용 목록에서 직접 만들면 갈릴 자리가 없다.
+// 조사는 받침으로 갈린다(서리탑**은** / 박격포**는**). 문구를 종류 이름으로 조립하는
+// 이상 손으로 맞출 수 없다 — 종류가 늘거나 이름이 바뀌면 그때마다 틀린다.
+function josa(word, withJong, withoutJong) {
+  const c = word.charCodeAt(word.length - 1) - 0xac00;
+  return word + (c >= 0 && c <= 11171 && c % 28 !== 0 ? withJong : withoutJong);
+}
+
+function deckLimitNote(stage) {
+  const allow = allowedKinds(stage);
+  const blocked = KIND_KEYS.filter(k => !allow.includes(k));
+  if (!blocked.length) return '';
+  const names = ks => ks.map(k => KINDS[k].name).join(' · ');
+  const must = allow.filter(k => KINDS[k].group === 'attack');
+  // 공격 타워가 정확히 하나만 남은 판이 이 기계를 만든 이유다. 그때는 「못 고른다」
+  // 보다 「반드시 쓴다」가 먼저 읽혀야 한다 — 회색 칸을 세는 화면이 아니라
+  // 남은 한 대로 어떻게 막을지를 정하는 화면이라야 한다.
+  if (must.length === 1)
+    return `${josa(KINDS[must[0]].name, '을', '를')} 반드시 쓰는 판이다. `
+      + `${josa(names(blocked), '은', '는')} 못 고른다`;
+  return `이 판은 ${josa(names(blocked), '을', '를')} 안 받는다`;
+}
+
 // 현재 스테이지의 런타임 데이터. loadStage() 가 제자리에서 갈아끼운다.
 // 재할당하면 밖에서 잡은 참조가 끊기므로 항상 같은 객체를 유지한다.
 const lanes = [];        // [{points, seg, len}]
@@ -491,7 +530,7 @@ let nextEnemyId = 1;
 // 어떤 웨이브에서 아플지가 이 게임의 첫 결정이다.
 // 시뮬 기준 최고 덱과 최저 덱의 차이가 10웨이브 이상 난다.
 function rollDeck() {
-  const pool = KIND_KEYS.slice();
+  const pool = allowedKinds().slice();
   const deck = [];
   while (deck.length < CFG.DECK_SIZE && pool.length)
     deck.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
@@ -500,13 +539,20 @@ function rollDeck() {
 
 function toggleDeckPick(kind) {
   const i = state.deckPick.indexOf(kind);
-  if (i >= 0) state.deckPick.splice(i, 1);
-  else if (state.deckPick.length < CFG.DECK_SIZE) state.deckPick.push(kind);
+  // 해제는 **먼저** 본다. 허용 검사를 앞에 두면 이미 고른 것을 못 빼는 상태가
+  // 생길 수 있고, 그건 회색 처리보다 훨씬 나쁘게 읽힌다.
+  if (i >= 0) { state.deckPick.splice(i, 1); return; }
+  // 회색으로 두고 아무 말 없으면 버그로 읽힌다. 탭에는 반드시 이유가 뜬다.
+  if (!kindAllowed(kind)) { toast(deckLimitNote()); return; }
+  if (state.deckPick.length < CFG.DECK_SIZE) state.deckPick.push(kind);
   else toast(`${CFG.DECK_SIZE}종까지만`);
 }
 
 function startRun() {
   if (state.deckPick.length !== CFG.DECK_SIZE) return;
+  // 화면은 이미 못 고르게 막지만 여기서 한 번 더 본다 — `state.deckPick` 을 직접
+  // 세우는 경로가 둘 있다(이어하기 복원 · tools/sim.js 의 그리디).
+  if (state.deckPick.some(k => !kindAllowed(k))) return;
   savedRun = null;
   state.deck = state.deckPick.slice();
   state.phase = 'build';
@@ -2131,6 +2177,10 @@ function pxToCell(px, py) {
 // ═════════════════════════════════════════════════════════════
 const buttons = [];   // {x,y,w,h,label,fn,enabled}
 let drag = null;      // {id, px, py, moved}
+// 스테이지 목록 끌기(#50). {y, scroll, moved}. `drag` 와 따로 두는 이유는 서로
+// 다른 화면의 것이고 pointerup 에서 하는 일이 정반대이기 때문이다 — 타워는
+// 「안 끌었으면 선택」, 목록은 「안 끌었으면 탭 판정」이다.
+let stageDrag = null;
 
 function layoutButtons() {
   buttons.length = 0;
@@ -2305,6 +2355,11 @@ function restoreRun(r) {
   if (!r || !STAGES[r.stage]) return false;
   const deck = (r.deck || []).filter(k => KINDS[k]);
   if (deck.length !== CFG.DECK_SIZE) return false;
+  // 판이 덱을 제한하면 그 규칙도 「지금 규칙」이다. 판에 `allowKinds` 가 붙기 전에
+  // 저장된 기록(또는 다른 기기의 옛 빌드)이 그 판의 금지 종류를 들고 돌아올 수
+  // 있는데, 그걸 받아 주면 화면에서 못 고르는 덱이 이어하기로만 서게 된다.
+  // **`state.stage` 가 아니라 `r.stage` 로 본다** — loadStage 는 아직 안 돌았다.
+  if (deck.some(k => !kindAllowed(k, r.stage))) return false;
 
   loadStage(r.stage);
   state.deck = deck;
@@ -2643,7 +2698,15 @@ const STAGE_TAIL_H = RESUME_GAP + RESUME_H + CLOUD_GAP + CLOUD_H;   // 118
 // (판이 다섯 장이 되며 375x667 이 처음 걸렸다 — 67.4 가 나와 난이도 점이 밖에 그려졌다).
 const STAGE_CARD_MIN = { full: 72, compact: 51 };
 
-function stageCardRects() {
+// 목록 스크롤 오프셋(px). 모듈 전역인 이유는 `laneCursor` 와 같다 — 판 상태가
+// 아니라 화면 상태라 스냅샷·세이브에 안 들어간다. 화면이 돌아가거나 판이 늘면
+// 상한이 바뀌므로 **읽을 때마다 다시 조인다**(`stageListMetrics`).
+let stageScroll = 0;
+
+// 목록의 치수를 한 곳에서 잡는다. `stageCardRects`·`resumeRect`·그리기·탭 판정이
+// 전부 이 값을 쓴다 — 넷이 각자 계산하면 「접혔는가」와 「어디까지 보이는가」가
+// 갈린다(이 파일이 이미 겪은 실패라 위 RESUME_GAP 주석이 그 얘기다).
+function stageListMetrics() {
   const pad = 16, top = 132, gap = 12;
   const n = STAGES.length;
   // 하한에 걸린 카드는 더 안 줄므로 **그 아래가 통째로 화면 밖으로 밀려난다.**
@@ -2679,15 +2742,75 @@ function stageCardRects() {
   // 즉 **접기로 번 것은 판 하나치다.** 일곱 장이 되는 날 667·658 이 다시 걸리고,
   // 그때는 위 후보 중 남은 둘(스크롤 · 헤더 축소)을 써야 한다 — 접기로 또 도망갈
   // 곳이 없다. 여덟 장은 700px 도 못 버틴다.
+  //
+  // ── [2026-08 #50] **그날이 왔다. 스크롤을 골랐다.** ────────────────────────
+  // 판이 아홉이 되면서 접기가 소진됐다. 실측(접은 뒤 · 390 폭 · 하한 51 에 눌림):
+  //   장수  844px            742px            700px            667px            658px
+  //     9   51.8 접힘 812    51.0 **63넘침**  51.0 **105넘침** 51.0 **138넘침** 51.0 **147넘침**
+  //    10   51.0 **24넘침**  126넘침          168넘침          201넘침          210넘침
+  //    12   150넘침          252넘침          294넘침          327넘침          336넘침
+  //
+  // **남은 둘 중 헤더 축소는 혼자 못 만든다.** 147px 을 만들려면 헤더(132 → 96 으로
+  // 36) · 카드 간격(12 → 8 로 32) · 꼬리 높이(118 → 102 로 16)를 **전부** 짜내도
+  // 84 다. 63 이 모자라고, 그렇게 조인 레이아웃은 열 장에서 다시 210 을 만난다.
+  //
+  // **네 번째 밀도(설명 줄까지 접기)도 안 고른다.** 제목과 설명을 한 줄에 합치면
+  // 하한이 34 쯤 되어 658 을 6px 여유로 통과하는데, 그건 **또 판 하나치**다
+  // (열 장에서 다시 막힌다). 위 표가 「접기로 번 것은 판 하나치」를 이미 적어 뒀고,
+  // 같은 거래를 한 번 더 하는 것은 이 주석을 두 번 쓰는 일이다.
+  //
+  // **스크롤은 판 수와 무관하다.** 그리고 이 파일이 걱정하던 대가가 실제로는
+  // 이득이었다 — 「이어하기·로그인의 좌표를 카드 목록에서 딴다」는 결합이 스크롤을
+  // 넣으면서 **사라진다.** 꼬리는 이제 화면 바닥에 붙고(아래 `tailTop`), 카드는
+  // 그 위 칸 안에서만 움직인다. 두 덩어리가 서로를 안 본다.
+  //
+  // **접기를 먼저, 스크롤을 나중에 쓴다.** 순서를 뒤집어 늘 세 줄로 깔고 스크롤만
+  // 쓰는 안도 있었는데, 그러면 지금 스크롤 없이 들어가는 화면까지 전부 스크롤이
+  // 생긴다. 스크롤은 **접어도 안 들어갈 때만** 나오는 마지막 수단이다.
   const fit = (min) => Math.max(min, Math.min(88, (view.h - top - 150 - (n - 1) * gap) / n));
-  const tailBottom = (h) => top + (n - 1) * (h + gap) + h + STAGE_TAIL_H;
   const full = fit(STAGE_CARD_MIN.full);
-  const compact = tailBottom(full) > view.h;
+  const contentOf = (h) => n * h + (n - 1) * gap;
+  const compact = top + contentOf(full) + STAGE_TAIL_H > view.h;
   const h = compact ? fit(STAGE_CARD_MIN.compact) : full;
+  const content = contentOf(h);
+
+  // **꼬리는 목록을 따라가되 바닥에서 멈춘다.** 목록이 짧으면 예전 그대로 카드
+  // 바로 아래에 붙고(그래서 지금 들어가는 화면은 1px 도 안 움직인다), 넘치기
+  // 시작하면 바닥에 고정되고 그 위가 스크롤 칸이 된다.
+  //
+  // **바닥 여백을 안 준다.** 12px 을 줘 봤는데 그 순간 여섯 장 742px 이 「꼬리
+  // 바닥 742(여유 0)」에서 「스크롤 12」로 넘어갔다 — 지금 스크롤 없이 들어가는
+  // 화면에 스크롤을 새로 만드는 것이라 이 절의 규칙을 어긴다. 여유 0 으로 붙는
+  // 것은 다섯 장 658px 이 이미 출시된 모양이라 전례도 있다. 홈 인디케이터와
+  // 겹치는 문제는 이 화면만의 것이 아니므로(덱 시작 버튼도 `view.h - 74` 다)
+  // 여기서 혼자 답할 자리가 아니다.
+  const tailTop = Math.min(top + content, view.h - STAGE_TAIL_H);
+  const viewH = tailTop - top;
+  const maxScroll = Math.max(0, content - viewH);
+  // 화면이 돌아가거나 판이 늘면 상한이 바뀐다. 읽을 때마다 조인다.
+  stageScroll = Math.max(0, Math.min(stageScroll, maxScroll));
+  return { pad, top, gap, n, h, compact, content, tailTop, viewH, maxScroll, scroll: stageScroll };
+}
+
+function stageCardRects() {
+  const m = stageListMetrics();
   return STAGES.map((def, i) => ({
-    i, def, compact, x: pad, y: top + i * (h + gap), w: view.w - pad * 2, h,
+    i, def, compact: m.compact, x: m.pad, y: m.top - m.scroll + i * (m.h + m.gap),
+    w: view.w - m.pad * 2, h: m.h,
   }));
 }
+
+// 목록 칸 안에 실제로 보이는가. **탭 판정과 그리기가 같은 함수를 쓴다** — 갈리면
+// 「안 보이는데 눌리는 카드」나 「보이는데 안 눌리는 카드」가 생긴다.
+function stageCardVisible(r) {
+  const m = stageListMetrics();
+  return r.y + r.h > m.top && r.y < m.tailTop;
+}
+
+// 스크롤을 감는 통로. 모듈 레벨 원시값이라 밖에서 못 잡는다(hitstopT 와 같은 사정).
+// 게임 코드는 `stageDrag` 만 쓰고, 이건 테스트가 「끝까지 내렸을 때」를 재는 자리다.
+function setStageScroll(v) { stageScroll = v; stageListMetrics(); }
+function stageScrollState() { return stageScroll; }
 
 function drawStageSelect() {
   ctx.fillStyle = '#0d1117';
@@ -2704,6 +2827,14 @@ function drawStageSelect() {
   ctx.font = '13px system-ui, sans-serif';
   ctx.fillText(`${unlocked} / ${STAGES.length} 해금`, 16, 100);
 
+  const m = stageListMetrics();
+  // 목록 칸 밖으로 나간 카드는 **잘라 낸다.** 안 자르면 헤더 위와 이어하기 줄
+  // 위로 카드가 겹쳐 그려진다 — 셋째 줄을 접을 때 「카드 밖에 글자가 얹히면
+  // 안 된다」고 적어 둔 것과 같은 사고다.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, m.top - 4, view.w, m.viewH + 8);
+  ctx.clip();
   for (const r of stageCardRects()) {
     const open = stageUnlocked(r.i);
     ctx.fillStyle = open ? '#161b22' : '#111519';
@@ -2734,6 +2865,22 @@ function drawStageSelect() {
         r.x + 16, r.y + 58, r.w - 32, 11);
     }
   }
+  ctx.restore();
+
+  // 스크롤 막대. **잘린 카드에 아무 표시도 없으면 「목록이 깨졌다」로 읽힌다** —
+  // 덱 화면에서 회색 칸에 이유를 붙인 것과 같은 규칙이다. 스크롤이 필요 없을 때는
+  // 아예 안 그린다(늘 그리면 안 움직이는 막대가 장식이 된다).
+  if (m.maxScroll > 0) {
+    const trackX = view.w - 7, barH = Math.max(28, m.viewH * m.viewH / m.content);
+    const barY = m.top + (m.viewH - barH) * (m.scroll / m.maxScroll);
+    ctx.fillStyle = '#21262d';
+    roundRect(trackX, m.top, 3, m.viewH, 1.5);
+    ctx.fill();
+    ctx.fillStyle = '#484f58';
+    roundRect(trackX, barY, 3, barH, 1.5);
+    ctx.fill();
+  }
+
   // 이어하기. 웨이브 사이 스냅샷이 있을 때만 뜬다.
   if (savedRun) {
     const r = resumeRect();
@@ -2787,10 +2934,12 @@ function drawStageSelect() {
   ctx.textAlign = 'left';
 }
 
+// **카드 목록에서 좌표를 안 딴다(#50).** 예전에는 마지막 카드 바닥에 붙였는데,
+// 그러면 카드가 하한에 걸려 더 안 줄 때 이 줄이 그대로 화면 밖으로 밀려났다.
+// 이제 `tailTop` 이 「목록을 따라가되 바닥에서 멈추는」 값이라 **밀려날 수 없다.**
 function resumeRect() {
-  const pad = 16, b = stageCardRects();
-  const y = b.length ? b[b.length - 1].y + b[b.length - 1].h + RESUME_GAP : 400;
-  return { x: pad, y, w: view.w - pad * 2, h: RESUME_H };
+  const m = stageListMetrics();
+  return { x: m.pad, y: m.tailTop + RESUME_GAP, w: view.w - m.pad * 2, h: RESUME_H };
 }
 function cloudRect() {
   const r = resumeRect();
@@ -2801,6 +2950,23 @@ function resumeRun() {
   if (!savedRun) return;
   if (!restoreRun(savedRun)) { savedRun = null; persist(); toast('이어할 수 없는 기록'); return; }
   state.selected = null;
+}
+
+// 스테이지 화면의 탭 하나. **끌지 않았을 때만** 불린다(pointerup).
+// 헤드리스가 탭 없이 이 경로를 밟을 수 있어야 해서 핸들러에 로직을 안 남긴다 —
+// 2x2 자리 고르기(mergePlaceSelect 등)와 같은 규칙이다.
+function stageTap(px, py) {
+  const inside = r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  const m = stageListMetrics();
+  // **목록 칸 안을 눌렀을 때만 카드를 본다.** 잘려서 이어하기 줄 뒤에 숨은 카드가
+  // 눌리면 「엉뚱한 판이 열린다」가 된다. 칸 밖이면 카드 판정 자체를 안 한다.
+  if (py >= m.top && py < m.tailTop) {
+    const hit = stageCardRects().find(r => inside(r) && stageCardVisible(r));
+    if (hit) { pickStage(hit.i); return; }
+    return;
+  }
+  if (savedRun && inside(resumeRect())) { resumeRun(); return; }
+  if (inside(cloudRect())) cloudToggle();
 }
 
 function pickStage(i) {
@@ -3102,8 +3268,14 @@ function drawDeckSelect() {
   ctx.fillText('덱 선택', 16, 44);
   ctx.fillStyle = '#8b949e';
   fitText(`${CFG.DECK_SIZE}종만 고른다. 고른 종류만 소환된다.`, 16, 76, view.w - 32, 13);
-  ctx.fillStyle = '#6e7681';
-  fitText('빠진 종류가 어느 웨이브에서 아플지가 이 판의 첫 결정이다.', 16, 96, view.w - 32, 13);
+  // 둘째 줄이 제약 판에서는 **막힌 이유**로 바뀐다. 줄을 새로 늘리지 않는 이유는
+  // 카드 목록이 `top = 118` 에서 시작하기 때문이다 — 여기 한 줄을 더 넣으면 일곱
+  // 장이 그만큼 얇아진다. 원래 문구(「빠진 종류가 어느 웨이브에서 아플지」)는
+  // **고를 수 있을 때** 하는 말이라, 못 고르는 판에서 자리를 내주는 게 맞다.
+  const limit = deckLimitNote();
+  ctx.fillStyle = limit ? '#d29922' : '#6e7681';
+  fitText(limit || '빠진 종류가 어느 웨이브에서 아플지가 이 판의 첫 결정이다.',
+    16, 96, view.w - 32, 13);
 
   for (const it of deckLayout()) {
     if (it.type === 'header') {
@@ -3119,36 +3291,48 @@ function drawDeckSelect() {
     const r = it;
     const k = KINDS[r.k];
     const on = state.deckPick.includes(r.k);
-    ctx.fillStyle = on ? '#1b2b1f' : '#161b22';
-    ctx.strokeStyle = on ? '#3fb950' : '#30363d';
+    // 막힌 카드는 **지우지 않고 회색으로 남긴다.** 목록에서 빼면 이 판에 그 타워가
+    // 없는 것처럼 보이고, 「내가 왜 이걸 못 쓰지」가 아니라 「이 게임에 저게
+    // 있었나」가 된다 — 강제하는 판이라는 사실 자체가 안 읽힌다.
+    const off = !kindAllowed(r.k);
+    ctx.fillStyle = off ? '#111519' : on ? '#1b2b1f' : '#161b22';
+    ctx.strokeStyle = off ? '#21262d' : on ? '#3fb950' : '#30363d';
     ctx.lineWidth = on ? 2 : 1.5;
     roundRect(r.x, r.y, r.w, r.h, 10);
     ctx.fill();
     ctx.stroke();
 
-    if (!drawSprite(r.k, k.color, r.x + 26, r.y + r.h / 2, 40)) {
-      ctx.fillStyle = k.color;
+    // 스프라이트도 같이 죽인다. 그림만 제 색이면 카드가 「선택 안 된 칸」으로
+    // 읽혀서 계속 눌러 보게 된다.
+    const sprColor = off ? mixHex(k.color, '#0d1117', 0.68) : k.color;
+    if (!drawSprite(r.k, sprColor, r.x + 26, r.y + r.h / 2, 40)) {
+      ctx.fillStyle = sprColor;
       ctx.font = '700 21px system-ui, sans-serif';
       ctx.fillText(k.tag, r.x + 14, r.y + r.h / 2 - 13);
     }
 
     const roomy = r.h >= 58;   // 짧은 화면에서는 카드가 얇아져 두 줄까지만 들어간다
-    ctx.fillStyle = '#e6edf3';
+    ctx.fillStyle = off ? '#484f58' : '#e6edf3';
     ctx.font = '700 14px system-ui, sans-serif';
     ctx.fillText(k.name, r.x + 48, roomy ? r.y + 8 : r.y + 10);
-    ctx.fillStyle = '#8b949e';
+    ctx.fillStyle = off ? '#3d444d' : '#8b949e';
     fitText(k.blurb, r.x + 48, roomy ? r.y + 27 : r.y + 30, r.w - 48 - 72, 11);
     if (roomy) {
-      ctx.fillStyle = '#6e7681';
+      ctx.fillStyle = off ? '#3d444d' : '#6e7681';
       fitText(k.how, r.x + 48, r.y + 44, r.w - 48 - 14, 10.5);
     }
 
     ctx.textAlign = 'right';
-    ctx.fillStyle = k.dmgType === 'physical' ? '#d29922' : k.dmgType === 'magic' ? '#a371f7' : '#6e7681';
+    ctx.fillStyle = off ? '#3d444d'
+      : k.dmgType === 'physical' ? '#d29922' : k.dmgType === 'magic' ? '#a371f7' : '#6e7681';
     ctx.font = '11px system-ui, sans-serif';
     ctx.fillText(k.role, r.x + r.w - 14, roomy ? r.y + 9 : r.y + 11);
-    ctx.fillStyle = '#484f58';
-    ctx.fillText('사거리 ' + k.range.toFixed(1), r.x + r.w - 14, roomy ? r.y + 27 : r.y + 29);
+    // **막힌 카드에는 사거리 대신 「이 판 금지」가 온다.** 셋째 줄(`how`)은 좁은
+    // 화면에서 접히므로 거기 적으면 접힌 화면에서 이유가 통째로 사라진다. 이 줄은
+    // roomy 와 무관하게 항상 그려지는 자리다.
+    ctx.fillStyle = off ? '#d29922' : '#484f58';
+    ctx.fillText(off ? '이 판 금지' : '사거리 ' + k.range.toFixed(1),
+      r.x + r.w - 14, roomy ? r.y + 27 : r.y + 29);
     ctx.textAlign = 'left';
   }
 
@@ -3218,12 +3402,11 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
 
+  // 목록이 스크롤되므로 **탭은 pointerup 에서 처리한다**(아래 `stageTap`).
+  // pointerdown 에서 바로 고르면 끌기 시작이 곧 판 선택이 되어 스크롤을 못 한다.
+  // 여기서는 끌기만 시작한다.
   if (state.phase === 'stage') {
-    const inside = r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
-    const hit = stageCardRects().find(inside);
-    if (hit) { pickStage(hit.i); return; }
-    if (savedRun && inside(resumeRect())) { resumeRun(); return; }
-    if (inside(cloudRect())) cloudToggle();
+    stageDrag = { y: py, scroll: stageScroll, moved: false };
     return;
   }
 
@@ -3277,6 +3460,14 @@ canvas.addEventListener('pointerdown', e => {
 });
 
 canvas.addEventListener('pointermove', e => {
+  // 스테이지 목록 끌기. 문턱 8px 은 아래 타워 드래그와 **같은 값이다** — 두 화면에서
+  // 「탭인가 끌기인가」의 기준이 다르면 손가락이 배운 것을 화면마다 다시 배워야 한다.
+  if (stageDrag) {
+    const dy = e.clientY - stageDrag.y;
+    if (Math.abs(dy) > 8) stageDrag.moved = true;
+    if (stageDrag.moved) stageScroll = stageDrag.scroll - dy;   // 상한은 metrics 가 조인다
+    return;
+  }
   if (!drag) return;
   drag.px = e.clientX;
   drag.py = e.clientY;
@@ -3284,6 +3475,12 @@ canvas.addEventListener('pointermove', e => {
 });
 
 canvas.addEventListener('pointerup', e => {
+  if (stageDrag) {
+    const moved = stageDrag.moved;
+    stageDrag = null;
+    if (!moved) stageTap(e.clientX, e.clientY);
+    return;
+  }
   if (!drag) return;
   const d = drag;
   drag = null;
@@ -3313,7 +3510,7 @@ canvas.addEventListener('pointerup', e => {
   else toast('7성이 최대');
 });
 
-canvas.addEventListener('pointercancel', () => { drag = null; });
+canvas.addEventListener('pointercancel', () => { drag = null; stageDrag = null; });
 
 // ESC 는 열려 있는 창을 먼저 닫는다. 닫을 게 없으면 판을 세운다.
 window.addEventListener('keydown', e => {
@@ -3329,6 +3526,10 @@ function restart() {
   state.phase = 'stage';
   state.paused = false;
   state.deckPick = [];
+  // 목록을 맨 위로 되돌린다. 판 상태가 아니라 화면 상태라 스냅샷에는 안 들어가고,
+  // 여기서만 되돌린다 — 판을 끝내고 돌아왔을 때 목록 중간에서 시작하면 「내가
+  // 어디에 있었지」가 된다. `laneCursor` 를 loadStage 에서 0 으로 돌리는 것과 같다.
+  stageScroll = 0;
   state.wave = 0;
   state.timer = CFG.WAVE_GAP;
   state.gold = CFG.START_GOLD;

@@ -13,6 +13,21 @@
 // 안 든 덱은 C(6,3)=20 이다. 그래서 두 무리의 크기가 15 대 20 으로 고정이고, 어느
 // 종류를 봐도 같은 분할이라 열끼리 나란히 읽어도 된다.
 //
+// ── 제약 판은 덱 수가 다르다 (#50) ──────────────────────────
+// **판이 덱을 제한하면(`allowKinds`) 이 도구가 35덱을 돌면 안 된다.** 못 고르는 덱을
+// 재는 것이라 그 표는 게임에 없는 판을 잰 값이다. 허용 목록에서 조합을 다시 만들면
+// 4종 중 3종 = **C(4,3) = 4덱**이고, 분할은 든 덱 C(3,2)=3 · 안 든 덱 C(3,3)=1 이 된다.
+//
+// **분할이 3 대 1 이라 열끼리의 비교는 여전히 되지만 표본이 얇다.** 「안 든 덱」이
+// 하나뿐이라 그 한 덱이 통째로 기준선이다 — 공격 타워 열에서는 그 한 덱이 정확히
+// 「오라 3종(공격 타워 없음)」이고, 그래서 이 판에서 그 열이 크게 양수인 것은
+// **정의상 그렇다.** 이 표로 「이 판이 이 타워를 좋아한다」를 새로 알아내는 게 아니라
+// **강제가 실제로 걸려 있는지**를 보는 것이다(직접 증거는 `npm test` 의 강제 게이트).
+//
+// 허용 목록을 여기 베끼지 않는다. `tools/sim.js` 가 내보내는 `allowedKinds` 로 살아
+// 있는 판 정의에서 그대로 읽는다 — 베끼면 `index.html` 을 고쳤을 때 이 도구만 옛
+// 목록을 재며 통과한다.
+//
 // ── 포화된 판은 아무것도 안 잰다 ──────────────────────────────
 // **0 을 「선호 없음」으로 읽으면 안 된다.** ① 외곽 도로는 35덱이 전부 클리어해서
 // `p` 가 35덱 모두 정확히 1.00 이고, 그래서 어느 열을 봐도 차이가 정확히 0 이다 —
@@ -70,15 +85,14 @@ const padE = (s, n) => s + ' '.repeat(Math.max(0, n - vw(s)));
 
 const g0 = load();
 const KINDS = g0.KIND_KEYS.slice();
-const DECKS = combos(KINDS, 3);
-const TAG = `${DECKS.length}덱x${TRIALS} · seed${SEED}(덱마다 재박음) · SUMMON_SAMPLES=${SUMMON_SAMPLES}`;
+const TAG = `x${TRIALS} · seed${SEED}(덱마다 재박음) · SUMMON_SAMPLES=${SUMMON_SAMPLES}`;
 
 // 진도 p 의 정의는 `tools/curve.js` 의 `measure()` 와 같다 — **클리어는 센티넬 99 가
 // 아니라 총웨이브로 센다.** 99 로 세면 앞판의 p 가 4.9 로 튀어 「진도」가 뜻을 잃는다.
 // (`curve.js` 를 불러 쓰지 못하는 것은 그 파일이 require 만으로 210판을 돌리는
 // 최상위 스크립트이기 때문이다. 정의가 두 벌인 자리라 DESIGN §난이도의 눈금과
 // 같이 봐야 한다.)
-function measure(st, waveMax) {
+function measure(st, waveMax, DECKS) {
   const rows = [];
   let clearRuns = 0, runs = 0;
   for (const deck of DECKS) {
@@ -110,30 +124,38 @@ const out = [];
 for (let st = 0; st < STAGES.length; st++) {
   const g = load({});
   g.loadStage(st);
-  const m = measure(st, g.CFG.WAVE_MAX);
+  // 판마다 다시 만든다. 제약 판은 4덱, 나머지는 35덱이다.
+  const decks = combos(g.allowedKinds(st), 3);
+  const m = measure(st, g.CFG.WAVE_MAX, decks);
+  // **못 고르는 종류는 빈칸이다.** 0 으로 찍으면 「선호 없음」과 구분이 안 되고,
+  // 그건 이 파일 머리가 포화 판에서 이미 금지한 읽기다.
   const aff = KINDS.map(k => {
     const wi = m.rows.filter(d => d.deck.includes(k)).map(d => d.p);
     const wo = m.rows.filter(d => !d.deck.includes(k)).map(d => d.p);
+    if (!wi.length || !wo.length) return null;
     return avg(wi) - avg(wo);
   });
-  out.push({ st, aff, clearRate: m.clearRate, spread: m.spread });
+  out.push({ st, aff, clearRate: m.clearRate, spread: m.spread, decks: decks.length });
 }
 
 console.log('── 판이 어느 타워를 좋아하는가 ──');
-console.log('affinity = mean(진도 p | 그 타워를 든 15덱) − mean(p | 안 든 20덱). 양수면 그 판이 그 타워를 좋아한다.');
+console.log('affinity = mean(진도 p | 그 타워를 든 덱) − mean(p | 안 든 덱). 양수면 그 판이 그 타워를 좋아한다.');
+console.log('분할은 덱 수에 딸린다 — 35덱 판은 15 대 20, 제약 판(4덱)은 3 대 1 이다.');
 console.log('`포화`/`무신호` 가 붙은 행은 아무것도 안 재고 있다 — 0 을 「선호 없음」으로 읽지 마라.');
 console.log('* 는 공격 타워(KINDS[k].group === "attack"). 자리 선택이 성능인 것은 이쪽이다.');
+console.log('`─` 는 그 판이 그 종류를 아예 안 받는다는 뜻이다(allowKinds). 0 과 다르다.');
 console.log('');
-console.log(padE('판', 14), padS('클리어', 8), padS('신호폭', 8), padS('', 6),
+console.log(padE('판', 14), padS('덱', 4), padS('클리어', 8), padS('신호폭', 8), padS('', 6),
   KINDS.map(k => padS((g0.KINDS[k].group === 'attack' ? '*' : '') + g0.KINDS[k].name, 8)).join(' '));
 for (const r of out) {
   const mark = r.clearRate >= CLEAR_HI ? '포화' : r.spread < SPREAD_LO ? '무신호' : '';
   console.log(
     padE(`${r.st + 1} ${STAGES[r.st].name}`, 14),
+    padS(String(r.decks), 4),
     padS((100 * r.clearRate).toFixed(1) + '%', 8),
     padS(r.spread.toFixed(3), 8),
     padS(mark, 6),
-    r.aff.map(v => padS((v >= 0 ? '+' : '') + v.toFixed(3), 8)).join(' '));
+    r.aff.map(v => padS(v === null ? '─' : (v >= 0 ? '+' : '') + v.toFixed(3), 8)).join(' '));
 }
 console.log('');
 console.log(TAG);
