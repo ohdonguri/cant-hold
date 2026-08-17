@@ -176,24 +176,74 @@ function seedRandom() {
 //   ⑤ 진짜 근거는 아래 퇴화값 블록이다 — `k=1` 로 두면 세 줄이 **비트 단위로**
 //      돌아온다. `k=1` 에서는 뽑은 인덱스를 그대로 쓰므로 점수 함수가 무엇이든 결과가
 //      같아야 하고, 실제로 205/131/595 가 그대로다. 즉 움직인 것은 **자 하나뿐**이다
+// [2026-08 판마다 최강이 다르게 (#52)] **여섯 줄을 전부 새로 떴다 — 아래 퇴화값
+// 블록까지다.** 이번에는 앞의 다섯 세대와 달리 바뀐 것이 `tools/sim.js` 가 아니라
+// **`index.html` 의 밸런스 상수**다. 세 값을 움직였다:
+//
+//   CFG.MINT_BASE       12  → 6     조폐소 웨이브 수입
+//   KINDS.mortar.base   1.2 → 1.8   박격포
+//   KINDS.arc.base      0.7 → 0.9   마력로
+//
+// **그래서 퇴화값 블록도 같이 움직인다. 그건 회귀가 아니라 정의상 그렇다.** 아래
+// 블록이 「위 CASES 를 새로 뜰 일이 있어도 이 세 줄은 안 바뀐다」고 적어 둔 것은
+// **배치 정책(sim.js)을 고칠 때의 이야기**였고 그 조건에서는 여전히 맞다. `k=1` 이
+// 잠그는 성질은 「그때의 게임으로 균등 난수 배치를 하면 이 값이 나온다」이지
+// 「2026-08-#35 시점의 게임」이 아니다. 밸런스를 고치면 두 블록이 같이 움직이는 것이
+// 맞고, 이 파일이 그걸 처음 겪는 것뿐이다(#35 이후 첫 index.html 밸런스 변경).
+// **한쪽만 움직이면 그때가 회귀다** — 그 성질은 그대로 남는다.
+//
+// 난수 호출 횟수를 **호출 지점별로 갈라 센 표**(앞 세대들과 같은 방식). 이번에는
+// 소스를 안 고치고 `Math.random` 안에서 호출 스택을 읽어 갈랐다 — 지점마다 틱을
+// 끼워 넣는 옛 방식은 `for (...) picks.push(...)` 처럼 **중괄호 없는 루프 본문**에
+// 걸리면 스트림을 통째로 밀어서, 세는 판이 seedcheck 가 세는 판과 달라진다(실제로
+// 한 번 그렇게 세어 7성 롤이 3 대신 1 로 잡혔다). 스택 방식은 틱 합이 총계와
+// 정확히 같은 것으로 검산된다.
+//
+//   케이스   소환 자리      7성 특성 롤   관측 치명      합계        소환 횟수
+//     0      392 → 300     9 → 3        0 → 0        401 → 303    196 → 150
+//     1      278 → 302     3 → 3        0 → 0        281 → 305    139 → 151
+//     3      350 → 444     6 → 0      267 → 286      623 → 730    175 → 222
+//
+//   ① **소환 자리는 세 줄 다 여전히 소환 횟수의 정확히 2배다**(300 = 2 x 150 ·
+//      302 = 2 x 151 · 444 = 2 x 222). 소비 규칙(`k` 회)은 안 건드렸고 판 길이가
+//      달라져 소환 수가 달라진 것이다 — 규칙이 바뀌었다면 짝수가 안 나온다
+//   ② 0번은 **조폐소 너프를 정면으로 맞는 유일한 케이스**다. 골드가 3120 → 1254 로
+//      60% 줄고 소환이 196 → 150 회로 줄었으며, 조폐소가 7성에 못 가고 6성에서
+//      멈춘다(`mint7` → `mint6`). 7성 특성 롤 9 → 3 이 그것을 그대로 센다 —
+//      7성 타워가 셋에서 하나로 줄었다. 판은 여전히 20웨이브 클리어인데 남은
+//      생명이 19 → 8 로 떨어져, **이 판이 조폐소 돈으로 무손실이던 판이었음**을 보인다
+//   ③ 1번은 **박격포·마력로 강화를 정면으로 맞는 유일한 케이스**다(덱이
+//      `서리·박격·마력`). `over w24` → **`clear w25`** 로 판을 깨고, 늘어난 난수
+//      24 회가 전부 소환 자리(278 → 302 = 12소환 x 2)다. 방향이 예측과 같다
+//   ④ 3번은 마력로 B 분기(과충전 — 딜 240% · 관통 무제한)라 마력로 강화가 가장
+//      크게 걸린다. `over w27` → **`over w30`**(마지막 웨이브까지 갔다). 관측 치명이
+//      267 → 286 으로 는 것은 판이 3웨이브 길어져 발수가 는 것이고, 7성 특성 롤이
+//      6 → 0 인 것은 이 판의 최고 성급이 7 → **6** 으로 내려갔기 때문이다 —
+//      골드가 깊은 합성 대신 타워 수로 갔다(towers 에 `eroder4` 가 12대 쌓여 있다.
+//      2x2 자리가 없어 짝이 다 맞아 버린 상태이고, `pickKind` 가 그런 종류를
+//      후순위로 두는 기존 동작이다. 이 티켓이 만든 것이 아니다)
+//   ⑤ **「좋아졌으니 맞다」로 안 쓴다.** 시드 하나짜리 판이라 세 줄로 밸런스의
+//      좋고 나쁨을 판정하지 않는다 — 퇴화값 블록의 3번은 오히려 `w28` → `w24` 로
+//      나빠졌다. 판정하는 자는 210판짜리 `npm run curve` 와 35덱짜리
+//      `npm run affinity` 이고, 그 표는 DESIGN §판이 어느 타워를 좋아하는가에 있다
 const CASES = [
   {
     name: '0 / 파쇄·관측·조폐',
     opts: { stage: 0, deck: ['shredder', 'marksman', 'mint'] },
-    expect: '{"result":"clear","wave":20,"life":19,"towers":["marksman7","mint7","shredder3","shredder7"],"maxStar":7,"gold":3120}',
-    rand: 401,
+    expect: '{"result":"clear","wave":20,"life":8,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
+    rand: 303,
   },
   {
     name: '1 / 서리·박격·마력',
     opts: { stage: 1, deck: ['frost', 'mortar', 'arc'] },
-    expect: '{"result":"over","wave":24,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar4","mortar6"],"maxStar":7,"gold":64}',
-    rand: 281,
+    expect: '{"result":"clear","wave":25,"life":5,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":988}',
+    rand: 305,
   },
   {
     name: '3 / 침식·마력·관측 (B,B1)',
     opts: { stage: 3, deck: ['eroder', 'arc', 'marksman'], branch3: 'B', branch5: 'B1' },
-    expect: '{"result":"over","wave":27,"life":0,"towers":["arc7","eroder7","marksman1","marksman2","marksman3","marksman4","marksman6"],"maxStar":7,"gold":72}',
-    rand: 623,
+    expect: '{"result":"over","wave":30,"life":0,"towers":["arc6","eroder2","eroder3","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder5","eroder6","marksman6"],"maxStar":6,"gold":51}',
+    rand: 730,
   },
 ];
 
@@ -230,15 +280,30 @@ for (const c of CASES) {
 // 쓴다(밀린 것과 좋아진 것을 못 가른다). 대신 **노브를 퇴화값으로 되돌리면 옛 값이
 // 정확히 돌아온다**는 것이 「바뀐 것은 정책 하나뿐」임을 보인다.
 //
-// 아래 값은 #35 이전(균등 난수)의 실측이고 이 파일이 오래 들고 있던 표 그대로다.
-// **위 CASES 를 새로 뜰 일이 있어도 이 세 줄은 안 바뀐다** — 바뀐다면 그건 배치
-// 정책 말고 다른 것이 같이 움직였다는 뜻이라 그때는 진짜 회귀다.
+// **「위 CASES 를 새로 뜰 일이 있어도 이 세 줄은 안 바뀐다」는 조건부였다 — 조건을
+// 적어 둔다(#52).** 그 말이 겨누던 것은 `tools/sim.js` 를 고치는 경우이고, 거기서는
+// 여전히 맞다: 배치 자·점수 함수를 무엇으로 바꾸든 `k=1` 이면 「난수로 한 곳 뽑기」로
+// 퇴화하므로 이 세 줄이 안 움직여야 한다. **그러나 `index.html` 의 밸런스 상수를
+// 고치면 두 블록이 같이 움직이는 것이 맞다** — 판 자체가 달라졌는데 배치만 퇴화시켜도
+// 결과는 달라진다. #52 가 그 첫 사례이고(MINT_BASE 12→6 · mortar 1.2→1.8 ·
+// arc 0.7→0.9), 아래 값은 그 뒤의 실측이다. 옛 값 205/131/595 는 #35~#48 세대의 것이라
+// 그 세대의 밸런스와 함께만 뜻이 있다.
+//
+// **잠그는 성질은 그대로다: 두 블록 중 한쪽만 움직이면 그때가 회귀다.** sim.js 만
+// 고쳤는데 여기가 움직였으면 배치 말고 다른 것이 샌 것이고, index.html 밸런스를
+// 고쳤는데 여기가 안 움직였으면 퇴화 경로가 실제 게임을 안 태우고 있는 것이다.
 const DEGENERATE = [
-  '{"result":"clear","wave":20,"life":20,"towers":["marksman7","mint7","shredder3","shredder7"],"maxStar":7,"gold":3120}',
-  '{"result":"over","wave":23,"life":0,"towers":["arc6","frost7","mortar6"],"maxStar":7,"gold":4}',
-  '{"result":"over","wave":28,"life":0,"towers":["arc7","eroder7","marksman2","marksman3","marksman4","marksman5","marksman6"],"maxStar":7,"gold":90}',
+  '{"result":"clear","wave":20,"life":9,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
+  '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
+  '{"result":"over","wave":24,"life":0,"towers":["arc1","arc2","arc4","arc6","eroder7","marksman6"],"maxStar":7,"gold":64}',
 ];
-const DEGENERATE_RAND = [205, 131, 595];
+// 지점별로 갈라 센 값(위 CASES 표와 같은 방식):
+//   케이스   소환 자리      7성 특성 롤   관측 치명      합계
+//     0      196 → 150     9 → 3        0 → 0        205 → 153
+//     1      128 → 151     3 → 3        0 → 0        131 → 154
+//     3      190 → 139     6 → 3      399 → 242      595 → 384
+// 여기서도 소환 자리는 소환 횟수와 1:1 이다(`k=1` 이므로 2배가 아니라 같은 수다).
+const DEGENERATE_RAND = [153, 154, 384];
 
 console.log('\n  ── 노브를 퇴화값(SUMMON_SAMPLES = 1)으로 두면 #35 이전과 같아야 한다 ──');
 CASES.forEach((c, i) => {
