@@ -1442,7 +1442,64 @@ function known(name, worse, detail, why) {
   }
 }
 
-// ── 강제 (#54) ────────────────────────────────────────────────
+// ── 덱 풀 (#54 · #56) ─────────────────────────────────────────
+// **판이 덱을 제한하면 그 판은 다른 표본으로 재는 판이다.** 풀은 허용 종 수에서
+// 그대로 따라 나오고, 그래서 이름을 종류가 아니라 **덱 수**로 붙인다 — 풀을 가른
+// 이유가 곧 「덱 공간이 다르다」이기 때문이다(DESIGN §계단은 덱 풀별로 잰다).
+//
+//   풀     허용        덱 수         강제의 성질
+//   35덱   목록 없음   C(7,3) = 35   제약 없음
+//   4덱    4종         C(4,3) = 4    그 타워 없는 덱이 **하나** 있다(오라 3종) — 시뮬이 잰다
+//   1덱    3종         C(3,3) = 1    덱이 유일하다 — **구조가 강제를 보증한다** (#56)
+//
+// **아래 두 블록(강제 · 밸런스)이 이 자를 같이 쓴다.** 풀을 두 곳에서 따로 계산하면
+// 「어느 덱으로 잰 수인가」가 갈리고, 그건 이 파일이 #37 에서 이미 데인 자리다.
+function combos(a, k) {
+  if (k === 0) return [[]];
+  if (a.length < k) return [];
+  return combos(a.slice(1), k - 1).map(c => [a[0], ...c]).concat(combos(a.slice(1), k));
+}
+// 그 판이 실제로 받는 덱 전부. **허용 목록은 살아 있는 판 정의에서 읽는다** —
+// 베끼면 index.html 을 고쳤을 때 이 파일만 옛 목록을 재며 통과한다.
+function poolDecks(g, st) { return combos(g.allowedKinds(st), g.CFG.DECK_SIZE); }
+function poolKey(g, st) { return poolDecks(g, st).length + '덱'; }
+// 그 풀에서 가장 뒤인가. 「마지막 스테이지는 안 깨진다」가 걸리는 판이 이것이다.
+function poolLast(g, st) {
+  const key = poolKey(g, st);
+  for (let j = st + 1; j < g.STAGES.length; j++) if (poolKey(g, j) === key) return false;
+  return true;
+}
+// 풀마다 고정덱이 하나씩이다 — **풀 안에서는 같은 덱이라야 짝지은 비교**가 된다.
+// 판마다 덱을 갈아 끼우면 행 사이의 `p` 차이가 「판이 어렵다」인지 「덱이 약하다」인지
+// 안 갈린다.
+const POOL_DECK = {
+  // 35덱 풀. **바꾸면 S1~S6 행이 통째로 움직인다** — 이 파일의 래칫과 DESIGN 의
+  // 실측표가 전부 이 덱 값이다(#37 문단이 「덱을 안 적으면 다른 표와 못 가른다」로
+  // 적어 둔 그 덱이다).
+  '35덱': ['shredder', 'arc', 'mint'],
+  // 4덱 풀. **고른 게 아니라 유일하다.** 허용 목록이 `[그 판이 강제하는 공격 타워,
+  // 파쇄자, 침식자, 서리탑]` 이고 공격 타워가 판마다 다르므로, 4덱 판 전부가 받는
+  // 덱은 오라 3종 하나뿐이다(허용 목록 교집합이 정확히 셋).
+  //
+  // 그 덱은 강제 게이트가 「클리어 0%」를 요구하는 바로 그 덱이라 이 풀의 `clears`
+  // 열은 정의상 0 에 눌린다. **계단이 보는 자가 `p` 인 이유가 여기서 한 번 더 붙는다.**
+  '4덱': ['shredder', 'eroder', 'frost'],
+  // **1덱 풀은 여기 없다 — 적을 것이 없어서다** (#56). 덱이 판마다 하나뿐이고 그게
+  // 곧 허용 목록이라, 아래 `poolDeck` 이 판 정의에서 그대로 읽는다. 세 판(⑦⑧⑨)의
+  // 허용 목록 교집합은 서리탑 **하나**라 애초에 공통 덱이 없다 — 4덱 판과 1덱 판을
+  // 같은 풀로 묶을 수 없는 이유가 이것이고, 그래서 풀이 셋이다.
+};
+// **1덱 풀만 판마다 덱이 다르다.** 위 「같은 덱이라야 짝지은 비교」의 예외로 보이지만
+// 그렇지 않다 — 그 판들에서 덱은 **자유 변수가 아니다.** 플레이어에게 선택지가 없고
+// 덱이 곧 판의 일부라, 두 행의 `p` 차이는 「판+덱 묶음」의 난이도 차이다. 그게 실제로
+// 플레이어가 겪는 것이다. (덱을 고를 수 있는 풀에서 덱을 갈아 끼우면 그 말이 안 된다.)
+function poolDeck(g, st) {
+  const decks = poolDecks(g, st);
+  if (decks.length === 1) return decks[0];
+  return POOL_DECK[poolKey(g, st)] || null;
+}
+
+// ── 강제 (#54 · 허용 3종은 #56) ───────────────────────────────
 // 위 블록이 **기계**를 재고(목록이 있으면 걸리는가), 여기는 **판**을 잰다 —
 // 「이 판은 정말 그 타워라야 풀리는가」. 두 방향을 따로 묻는다:
 //
@@ -1475,6 +1532,16 @@ function known(name, worse, detail, why) {
 // 때는 통과였는데, 이 게이트가 무시드로 돌면서 오라덱 클리어를 잡아냈다. 뒤이어
 // 800판으로 다시 재니 참값이 1~7% 였다 — **그 판은 그래서 빠졌다**(DESIGN §강제 덱 판).
 //
+// ── 허용이 3종이면 「필요」를 시뮬로 못 잰다 — 구조가 대신 선다 (#56) ──
+// **덱이 유일한 판에는 「그 타워 없는 덱」이 아예 없다.** 위 「필요」는 그 덱을 돌려
+// 0% 를 확인하는 자인데, 돌릴 덱이 없으므로 잴 것도 없다 — 그리고 **없다는 것 자체가
+// 강제의 증명**이다(허용 3종 = `DECK_SIZE` → C(3,3) = 1 → 그 타워가 반드시 들어간다).
+// 그래서 아래 구조 단언이 판마다 갈린다:
+//   허용 = DECK_SIZE      덱이 유일하다. 「그 타워 없는 덱」이 0 개인 것을 단언한다
+//   허용 = DECK_SIZE + 1  그 덱이 정확히 하나(오라 3종)다. 그 덱을 시뮬이 잰다
+// **어느 쪽이든 「나머지는 전부 오라」는 그대로다** — 조폐소를 끼워 넣으면 골드가
+// 늘어 오라만으로도 물량이 나오고 「필요」가 조용히 무너진다.
+//
 // ── 구조를 먼저 본다 ──────────────────────────────────────────
 // 아래 시뮬 두 줄은 **`allowKinds` 를 지워도 통과한다.** 목록이 없으면 오라 3종은
 // 여전히 못 깨고 공격덱은 여전히 깨기 때문이다 — 즉 시뮬만으로는 「제약이 걸려
@@ -1485,56 +1552,127 @@ function known(name, worse, detail, why) {
   const TRIALS = 20;
   const AURA = ['shredder', 'eroder', 'frost'];
   const g0 = load();
+  const D = g0.CFG.DECK_SIZE;
   const forced = g0.STAGES.map((s, i) => ({ s, i })).filter(o => o.s.allowKinds);
 
   ok('제약 판이 있다', forced.length > 0, forced.length + '판');
+
+  // **덱이 유일한 판이 둘 이상이라야 그 풀의 계단을 잰다.** 판이 하나뿐인 풀은
+  // 견줄 상대가 없어 밸런스 블록이 `SKIP` 으로 찍는데(#54 의 4덱 풀이 그 상태다),
+  // #56 이 1덱 판을 **둘** 붙인 이유가 그 SKIP 을 없애는 것이었다. 허용 목록에
+  // 오라를 하나 더하면 그 판이 4덱 풀로 옮겨 가면서 이 줄이 먼저 빨간불이 된다.
+  const solo = forced.filter(o => poolKey(g0, o.i) === '1덱');
+  ok('  덱이 유일한 판이 둘 이상이다 (그 풀의 계단을 재려면)', solo.length >= 2,
+    solo.map(o => 'S' + (o.i + 1) + ' ' + o.s.name).join(' · ') || '없음');
 
   for (const { s, i } of forced) {
     const allow = g0.allowedKinds(i);
     const atk = allow.filter(k => g0.KINDS[k].group === 'attack');
     const rest = allow.filter(k => g0.KINDS[k].group !== 'attack');
+    const decks = poolDecks(g0, i);
+    const without = decks.filter(d => !d.includes(atk[0]));
     // **공격 타워가 정확히 하나.** 둘이면 「그 타워라야」가 성립하지 않고, 셋을
     // 허용하면 제약이 이름만 남는다.
     ok(`[S${i + 1} ${s.name}] 공격 타워가 정확히 하나`, atk.length === 1,
       atk.map(k => g0.KINDS[k].name).join(',') || '없음');
-    // **나머지는 오라 3종 그대로.** 조폐소(경제)를 끼워 넣으면 여기서 걸린다 —
-    // 골드가 늘면 오라만으로도 물량이 나와 「필요」가 조용히 무너진다.
-    ok(`  나머지 셋이 오라 3종이다`, rest.length === 3 && AURA.every(k => rest.includes(k)),
+    // **나머지는 전부 오라다.** 개수는 판마다 다르다(3종 판은 둘 · 4종 판은 셋).
+    ok(`  나머지는 전부 오라다 (${rest.length}종)`,
+      rest.length > 0 && rest.every(k => AURA.includes(k)),
       rest.map(k => g0.KINDS[k].name).join(',') + ' (허용 ' + allow.length + '종)');
     // 덱을 못 채우면 판이 성립하지 않는다. `CFG.DECK_SIZE` 를 건드렸을 때 여기서 난다.
-    ok(`  허용 종류로 덱을 채울 수 있다`, allow.length >= g0.CFG.DECK_SIZE,
-      allow.length + ' >= ' + g0.CFG.DECK_SIZE);
+    ok(`  허용 종류로 덱을 채울 수 있다`, allow.length >= D, allow.length + ' >= ' + D);
+
+    if (allow.length === D) {
+      // 1덱 판. **강제가 구조로 선다** — 덱이 하나뿐이라 그 타워를 뺄 방법이 없다.
+      ok(`  덱이 유일하다 (허용 ${allow.length}종 = DECK_SIZE ${D} · [${poolKey(g0, i)}])`,
+        decks.length === 1 && without.length === 0,
+        '덱 ' + decks.length + '개 · 그 타워 없는 덱 ' + without.length + '개');
+    } else {
+      // 4덱 판. 그 타워 없는 덱이 **정확히 하나**(오라 3종)라야 아래 「필요」가 그
+      // 덱 하나를 재는 것으로 끝난다.
+      ok(`  허용이 ${D + 1}종이고 그 타워 없는 덱이 정확히 하나다 (오라 3종 · [${poolKey(g0, i)}])`,
+        allow.length === D + 1 && rest.length === 3 && AURA.every(k => rest.includes(k))
+        && without.length === 1,
+        '허용 ' + allow.length + '종 · 그 타워 없는 덱 ' + without.length + '개');
+    }
   }
 
   // ── 시뮬 ──
+  // **`clear` 와 「마지막 웨이브 도달」을 따로 센다.** 총웨이브까지 간 것을 클리어로
+  // 되세면 마지막 웨이브에서 죽은 판이 클리어가 된다 — `tools/affinity.js:99` 가 적어
+  // 둔 함정이고 #54 의 지형 탐색이 그대로 밟아 실측이 3배 부풀었다. 도달 수는
+  // **게이트가 아니라 출력**이다(아래 「클리어를 못 잠그는 판」에서 이유를 적는다).
   const run = (st, deck) => {
-    let clears = 0;
+    let clears = 0, reach = 0;
+    const waveMax = g0.STAGES[st].waves;
     for (let t = 0; t < TRIALS; t++) {
       const g = load();
-      if (greedy(g, { stage: st, deck }).result === 'clear') clears++;
+      const r = greedy(g, { stage: st, deck });
+      if (r.result === 'clear') clears++;
+      if (Math.min(r.wave, waveMax) === waveMax) reach++;
     }
-    return clears;
+    return { clears, reach };
   };
-  const combos = (a, k) => k === 0 ? [[]] : a.length < k ? []
-    : combos(a.slice(1), k - 1).map(c => [a[0], ...c]).concat(combos(a.slice(1), k));
 
   for (const { s, i } of forced) {
     const allow = g0.allowedKinds(i);
     const must = allow.find(k => g0.KINDS[k].group === 'attack');
+    // **구조가 깨진 판은 시뮬을 안 돌린다.** 공격 타워가 없으면 아래가 `undefined` 를
+    // 들고 던지고, 그러면 이 블록 아래가 통째로 안 돈다 — 밸런스 블록의 `badDeck`
+    // 가드와 같은 이유다(게이트 하나가 무너져서 나머지 스무 줄이 같이 사라지면
+    // 원인을 못 읽는다). 위 구조 단언이 이미 빨간불이므로 여기서는 건너뛰기만 한다.
+    if (!must) {
+      console.log(`  SKIP  [S${i + 1} ${s.name}] 시뮬 — 허용에 공격 타워가 없다. 위 구조 단언을 볼 것`);
+      continue;
+    }
+    const decks = poolDecks(g0, i);
+    const withMust = decks.filter(d => d.includes(must));
+    const without = decks.filter(d => !d.includes(must));
     const name = `[S${i + 1} ${s.name}/${g0.KINDS[must].name}]`;
+    const tag = d => d.map(x => g0.KINDS[x].tag).join('');
 
-    const auraClears = run(i, AURA);
-    ok(`${name} 오라 3종은 한 판도 못 깬다 (${TRIALS}시행)`, auraClears === 0,
-      auraClears + '/' + TRIALS);
+    // ── 필요 ──
+    if (without.length) {
+      const per = without.map(d => run(i, d));
+      const auraClears = per.reduce((a, b) => a + b.clears, 0);
+      ok(`${name} 그 타워 없는 덱은 한 판도 못 깬다 (${without.length}덱 x ${TRIALS}시행)`,
+        auraClears === 0,
+        per.map((v, k) => tag(without[k]) + ' ' + v.clears).join(' · '));
+    } else {
+      // 못 재는 것을 초록으로 세지 않는다 — **잴 것이 없다**고 적는다.
+      console.log(`  SKIP  ${name} 필요 — 그 타워 없는 덱이 **아예 없다**`
+        + `(허용 ${allow.length}종 = DECK_SIZE ${D}). 위 구조 단언이 그 자리다`);
+    }
 
-    // 그 타워를 든 덱은 `C(3,2) = 3` 개다(나머지 오라 셋 중 둘).
-    const atkDecks = combos(AURA, 2).map(c => [must, ...c]);
-    const per = atkDecks.map(d => run(i, d));
-    const pooled = per.reduce((a, b) => a + b, 0);
-    ok(`  ${g0.KINDS[must].name} 를 든 세 덱은 깬다 (합쳐 ${atkDecks.length * TRIALS}판)`,
-      pooled >= 1,
-      per.map((v, k) => atkDecks[k].map(x => g0.KINDS[x].tag).join('') + ' ' + v).join(' · ')
-      + '  합계 ' + pooled + '/' + atkDecks.length * TRIALS);
+    // ── 충분 ──
+    const per = withMust.map(d => run(i, d));
+    const clears = per.reduce((a, b) => a + b.clears, 0);
+    const reach = per.reduce((a, b) => a + b.reach, 0);
+    const n = withMust.length * TRIALS;
+    const detail = per.map((v, k) => tag(withMust[k]) + ' ' + v.clears).join(' · ')
+      + '  합계 ' + clears + '/' + n + ' · 마지막웨이브 도달 ' + reach + '/' + n;
+
+    // **클리어를 20시행으로 못 잠그는 판이 있다** (#56). 그 판이 자기 풀의 마지막이고
+    // 밸런스 블록이 **같은 덱으로** 그 판을 재면, 거기 걸린 「마지막 스테이지는 안
+    // 깨진다」(8판 중 클리어 2 이하)와 여기 「20판에 1 이상」이 같은 덱에 붙는다.
+    // 둘은 동시에 못 선다:
+    //   8판에 2 이하가 0.1%/런 아래이려면 참값이 **3% 아래**여야 하고
+    //   20판에 1 이상이 0.1%/런 아래이려면 참값이 **29% 위**여야 한다
+    // 그래서 그런 판은 **클리어 수를 찍기만 한다.** 「깰 수 있는가」의 근거는 수백 판
+    // 표본이고 판 정의 주석에 있다(⑨ 두겹 고리 16/900). 게이트가 못 잡는 것을 잡는
+    // 척하지 않는 쪽을 고르는 것은 위 「덱마다 깨는지는 여기서 안 잠근다」와 같은 규칙이다.
+    const sameDeck = a => a.length === (poolDeck(g0, i) || []).length
+      && a.every(k => (poolDeck(g0, i) || []).includes(k));
+    const capped = poolLast(g0, i) && withMust.some(sameDeck);
+    if (capped) {
+      console.log(`  SKIP  ${name} 클리어 게이트 — 이 판은 자기 풀([${poolKey(g0, i)}])의 `
+        + `마지막이라 「안 깨진다」(8판 중 2 이하)를 같은 덱으로 받는다. `
+        + `두 요구는 동시에 못 선다 (참값 3% 아래 vs 29% 위)`);
+      console.log(`        ${detail}`);
+    } else {
+      ok(`  ${g0.KINDS[must].name} 를 든 ${withMust.length}덱은 깬다 (합쳐 ${n}판)`,
+        clears >= 1, detail);
+    }
   }
 }
 
@@ -1650,26 +1788,11 @@ function known(name, worse, detail, why) {
   //   · 허용 오차는 같은 값(STAIR_EPS)이다
   // 풀 안에 판이 하나뿐이면 견줄 상대가 없어 계단은 못 재지만, 그때도 그 판은 아래
   // 「마지막 스테이지는 안 깨진다」·「초반 전멸」·「5성 도달률」을 그대로 받는다.
-  const POOL_OPEN = '35덱', POOL_FORCED = '4덱';
-
-  // 풀마다 고정덱이 하나씩이다. **풀 안에서는 같은 덱이라야 짝지은 비교가 된다** —
-  // 판마다 덱을 갈아 끼우면 행 사이의 `p` 차이가 「판이 어렵다」인지 「덱이 약하다」인지
-  // 안 갈린다.
-  const POOL_DECK = {
-    // 35덱 풀. **바꾸면 S1~S6 행이 통째로 움직인다** — 이 파일의 래칫과 DESIGN 의
-    // 실측표가 전부 이 덱 값이다(#37 문단이 「덱을 안 적으면 다른 표와 못 가른다」로
-    // 적어 둔 그 덱이다).
-    [POOL_OPEN]: ['shredder', 'arc', 'mint'],
-    // 4덱 풀. **고른 게 아니라 유일하다.** 제약 판의 허용 목록은
-    // `[그 판이 강제하는 공격 타워, 파쇄자, 침식자, 서리탑]` 이고 공격 타워가 판마다
-    // 다르므로, 제약 판 전부가 받는 덱은 **오라 3종 하나뿐**이다(허용 목록 교집합이
-    // 정확히 이 셋). 다른 덱을 쓰면 판마다 덱이 달라져 위의 짝짓기가 깨진다.
-    //
-    // 그 덱은 강제 게이트가 「클리어 0%」를 요구하는 바로 그 덱이라 이 풀의 `clears`
-    // 열은 정의상 0 에 눌린다. **계단이 보는 자가 `p` 인 이유가 여기서 한 번 더 붙는다**
-    // — 눌린 지표로 순서를 재면 아무것도 안 재는 것이다(아래 #37 문단과 같은 근거).
-    [POOL_FORCED]: ['shredder', 'eroder', 'frost'],
-  };
+  //
+  // [2026-08 #56] **풀이 셋이 됐다** — 허용을 3종(= `DECK_SIZE`)으로 줄인 판이 붙으면서
+  // 덱이 **하나뿐인** 풀이 생겼다. 풀 이름·고정덱·마지막 판 판정은 이제 이 파일 위쪽
+  // §덱 풀 이 한 곳에서 만든다(`poolKey`·`poolDeck`·`poolLast`) — 강제 블록이 같은 자를
+  // 써야 「어느 덱으로 잰 수인가」가 두 블록에서 갈리지 않는다.
   const rows = [];
   const n = 8;
   // **명단은 배열 전체다.** 한때 계단 밖의 도전 판이 배열 뒤에 붙어 있어 여기서
@@ -1679,21 +1802,25 @@ function known(name, worse, detail, why) {
   // 어느 판이 어느 풀인지는 판 정의(`allowKinds`)에서 읽지 여기 적지 않는다.
   const g0 = load();
   const stageIdx = g0.STAGES.map((_, i) => i);
-  const poolOf = st => (g0.STAGES[st].allowKinds ? POOL_FORCED : POOL_OPEN);
+  const poolOf = st => poolKey(g0, st);
 
   // **먼저 잠근다.** 제약 판이 자기 풀의 고정덱을 안 받으면 `greedy` 가 던지고
   // (tools/sim.js 「오용은 시끄럽게 죽는다」), 그러면 이 블록 아래가 통째로 안 돈다.
   // 던지기 전에 빨간불로 잡고 그 판만 건너뛴다 — 게이트 하나가 무너져서 나머지
-  // 스무 줄이 같이 사라지면 원인을 못 읽는다.
-  const badDeck = stageIdx.filter(st => POOL_DECK[poolOf(st)].some(k => !g0.kindAllowed(k, st)));
+  // 스무 줄이 같이 사라지면 원인을 못 읽는다. 고정덱이 아예 없는 풀(위 표에 안 적힌
+  // 덱 수)도 여기서 걸린다 — `poolDeck` 이 `null` 을 낸다.
+  const badDeck = stageIdx.filter(st => {
+    const deck = poolDeck(g0, st);
+    return !deck || deck.some(k => !g0.kindAllowed(k, st));
+  });
   ok('풀마다 고정덱이 그 풀의 판 전부에서 유효하다', badDeck.length === 0,
     badDeck.map(st => 'S' + (st + 1) + ' [' + poolOf(st) + '] '
-      + POOL_DECK[poolOf(st)].join(',') + ' vs ' + g0.allowedKinds(st).join(',')).join('  |  ')
+      + (poolDeck(g0, st) || ['(고정덱 없음)']).join(',') + ' vs ' + g0.allowedKinds(st).join(',')).join('  |  ')
     || stageIdx.length + '판');
 
   for (const st of stageIdx) {
     if (badDeck.includes(st)) continue;
-    const DECK = POOL_DECK[poolOf(st)];
+    const DECK = poolDeck(g0, st);
     const w = [];
     // `max` 는 그 판의 총웨이브다. **판을 실제로 돌린 게임에서 그대로 읽는다** —
     // 여기 상수를 베껴 두면 `waves` 가 바뀌었을 때 p 만 조용히 틀린다.
@@ -1858,9 +1985,10 @@ function known(name, worse, detail, why) {
 
   // 풀 목록도 판 정의에서 만든다(위 「명단은 배열 전체다」와 같은 규칙). 빈 풀은
   // 아예 안 나오므로, 제약 판이 하나도 없으면 이 루프는 지금까지와 정확히 같은 일을 한다.
-  const pools = [POOL_OPEN, POOL_FORCED]
-    .map(key => ({ key, rows: rows.filter(r => r.pool === key) }))
-    .filter(p => p.rows.length > 0);
+  // **이름을 여기 안 적는다**(#56) — 행에 붙은 풀에서 그대로 모은다. 풀 이름을 배열로
+  // 박아 두면 새 풀(1덱)이 생겼을 때 이 루프만 조용히 그 판들을 안 본다.
+  const pools = [...new Set(rows.map(r => r.pool))]
+    .map(key => ({ key, rows: rows.filter(r => r.pool === key) }));
 
   for (const pool of pools) {
     const pr = pool.rows;
@@ -1903,9 +2031,9 @@ function known(name, worse, detail, why) {
   }
 
   // 인접 쌍을 왜 게이트로 못 만드는지는 35덱 풀에서 재 둔 것이 정본이다. **이 KNOWN 은
-  // 풀마다 찍지 않는다** — 아래 근거가 S3↔S4 실측이라 4덱 풀에 대면 아무 뜻이 없고,
-  // 근거 없는 KNOWN 을 풀 수만큼 늘리면 「알려진 미해결」 칸이 값싸진다. 4덱 풀의 Δp 는
-  // 위 루프가 매 런 찍으므로 값을 못 보는 것은 아니다.
+  // 풀마다 찍지 않는다** — 아래 근거가 S3↔S4 실측이라 제약 풀(4덱·1덱)에 대면 아무
+  // 뜻이 없고, 근거 없는 KNOWN 을 풀 수만큼 늘리면 「알려진 미해결」 칸이 값싸진다.
+  // 그 풀들의 Δp 는 위 루프가 매 런 찍으므로 값을 못 보는 것은 아니다.
   //
   // 이름을 「두 끝을 뺀」으로 좁힌 이유: **S4→S5 는 바로 위 게이트가 하드로 잠근다.**
   // 「인접 쌍은 못 가른다」로 두면 매번 −0.09 로 시원하게 갈리는 그 쌍까지 못 가르는
@@ -1914,8 +2042,8 @@ function known(name, worse, detail, why) {
   // **위 게이트가 동률 허용으로 풀린 뒤에도 이 줄은 그대로다**(#44). 허용 오차 0.10 은
   // 「순서가 뒤집혔는지」를 못 보게 하는 값이 아니라 **8판 표본의 흔들림을 견디는** 값이고,
   // 가운데 쌍을 가르려면 여전히 시행수를 올려 신뢰구간을 붙여야 한다.
-  known('두 끝을 뺀 인접 쌍은 아직 못 가른다 [' + POOL_OPEN + ']', false,
-    '위 [' + POOL_OPEN + '] 인접 쌍 Δp 줄',
+  known('두 끝을 뺀 인접 쌍은 아직 못 가른다 [35덱]', false,
+    '위 [35덱] 인접 쌍 Δp 줄',
     'S3↔S4 는 **세대마다 순서가 뒤집힌다** — 전체평균 기준 #31 이전 25.5 대 27.8(3 이 '
     + '어렵다) · #31 후 30.1 대 28.6(4 가 어렵다) · #35 후 28.3 대 30.5(3 이 어렵다). '
     + '차이가 1~2웨이브로 같은 덱 반복 노이즈와 같은 자리수다. 게다가 표본이 바뀌면 '
