@@ -486,6 +486,98 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 제약 판의 덱 화면 (#54) ─────────────────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
+  // md5 가 통째로 갈린다).
+  //
+  // **이 화면은 지금까지 한 번도 안 찍혔다.** `allowKinds` 기계는 #50 에 들어왔지만
+  // 그걸 쓰는 판이 없어서 회색 카드도 안내 줄도 실물로는 안 그려졌다. 여기서 볼 것은
+  // 헤드리스가 못 보는 것들이다:
+  //   ① 금지 카드 셋이 회색으로 죽고 「이 판 금지」가 카드마다 붙는가
+  //   ② 안내 줄(「박격포를 반드시 쓰는 판이다 …」)이 카드와 안 겹치고 안 잘리는가
+  //   ③ 허용 카드 넷은 평소대로 사거리까지 그려지는가
+  //   ④ 정원(3종)이 안 찼을 때 시작 버튼이 죽어 있는가
+  //
+  // `npm test` 의 「덱 제약」 블록이 이 셋을 전부 상태로 잠그고 있지만, 상태가
+  // 맞으면서 그림이 깨지는 것이 정확히 이 리포가 세 번 데인 자리다.
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // **인덱스를 못 박는다.** 제약이 걸린 첫 판을 성질로 찾는다 — 판이 앞뒤로
+    // 늘어도 이 컷이 조용히 다른 판을 찍지 않는다(#33 의 S4 래칫과 같은 실패모드).
+    pickStage(STAGES.findIndex(s => s.allowKinds));
+    // 한 장만 골라 둔다. 0장이면 안내가 안 뜬 화면과 구분이 안 되고, 3장을 채우면
+    // 시작 버튼이 살아나 ④ 를 못 본다.
+    toggleDeckPick('shredder');
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('12-forceddeck', () => {
+    if (state.phase !== 'deck') return '덱 화면이 아니다: ' + state.phase;
+    const def = STAGES[state.stage];
+    if (!def.allowKinds) return '제약 판이 아니다: ' + def.name;
+    // 카드는 7장 그대로여야 한다. 금지 종류를 빼 버리면 「왜 못 고르는가」가 안 읽힌다.
+    if (deckCardRects().length !== KIND_KEYS.length)
+      return '카드가 7장이 아니다: ' + deckCardRects().length;
+    if (!deckLimitNote()) return '안내 줄이 비었다';
+    if (state.deckPick.length !== 1) return '한 장만 고른 상태가 아니다: ' + state.deckPick.length;
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // ── 9x12 보드 (강제 판 · #54) ───────────────────────────────
+  // **맨 뒤에 둔다** — 위와 같은 이유다.
+  //
+  // 이 게임에서 **처음 나오는 h = 12** 다. 폭 9 는 ⑤ 분수령과 같아 셀도 41.1px 로
+  // 같지만, 세로가 14 → 12 로 줄면서 보드가 위아래로 남는다. 여기서 볼 것은 둘이다:
+  //   ① 보드가 세로로 가운데 정렬되어 상단 HUD·하단 버튼과 안 겹치는가
+  //   ② 개방 행이 8 이라 잠긴 행이 4 줄뿐인데 안내가 그 위에 제대로 얹히는가
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // 9x12 는 이 판뿐이다. **성질로 찾는다** — 인덱스를 박으면 판이 밀릴 때 조용히 어긋난다.
+    pickStage(STAGES.findIndex(s => s.h === 12));
+    // 이 판은 박격포를 강제한다. 덱은 허용 목록에서 고른다 — 박아 두면 목록이
+    // 바뀌었을 때 startRun 이 조용히 거절하고 컷이 덱 화면으로 남는다.
+    const allow = allowedKinds();
+    [allow.find(k => KINDS[k].group === 'attack'), 'shredder', 'frost']
+      .forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 8600;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 4~11. 경로(행 7 의 x4~8 · 행 10 의 x1~8)를 피한다.
+    put('mortar',   5, 1, 4);         // 2x2. 열 1~2 x 행 4~5
+    put('shredder', 4, 5, 4);
+    put('frost',    3, 6, 5);
+    put('shredder', 2, 1, 6);
+    put('mortar',   1, 6, 6);
+    put('frost',    2, 0, 8);
+    put('mortar',   3, 6, 8);
+    put('shredder', 5, 1, 8);         // 2x2. 열 1~2 x 행 8~9
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('13-knot', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 9 || CFG.BOARD_H !== 12)
+      return '9x12 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (!STAGES[state.stage].allowKinds) return '제약 판이 아니다';
+    if (lanes.length !== 2) return '2레인이 아니다: ' + lanes.length;
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (!state.towers.some(t => t.star >= 5)) return '5성(2x2)이 없다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };
