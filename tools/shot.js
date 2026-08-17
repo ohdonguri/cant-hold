@@ -578,6 +578,52 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 덱이 유일한 판의 덱 화면 (#56) ──────────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
+  // md5 가 통째로 갈린다).
+  //
+  // 12-forceddeck 과 **같은 화면이 아니다.** 저기는 허용 4종이라 회색 카드가 셋이고,
+  // 여기는 허용 3종이라 **넷**이다. 그러면서 안내 줄이 금지 종류를 전부 세므로
+  // 문구가 한 종류만큼 길어진다(「… 침식자 · 박격포 · 마력로 · 조폐소는 못 고른다」).
+  // 그 줄은 `fitText` 가 폭에 맞춰 글자를 줄이다 하한 9px 에서 말줄임으로 넘어가는데,
+  // **어디서 잘렸는지는 헤드리스가 못 본다** — `npm test` 는 `deckLimitNote()` 문자열이
+  // 그려졌는지만 보고, 말줄임이 되면 그 단언이 빨간불이 되지만 「줄었지만 안 잘린」
+  // 상태(글자가 9px 로 뭉개짐)는 통과한다. 여기서 볼 것이 그것이다:
+  //   ① 안내 줄이 안 잘리고 읽히는가 (셋일 때보다 확실히 작아진다)
+  //   ② 회색 카드가 **넷**이고 「이 판 금지」가 넷 다 붙는가
+  //   ③ 남은 석 장이 곧 덱 전부라 「고르는 화면」이 아니라 「받는 화면」으로 읽히는가
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // **인덱스를 못 박는다.** 허용이 정확히 `DECK_SIZE` 인 판을 성질로 찾는다 —
+    // 그게 곧 「덱이 유일한 판」이고, 판이 앞뒤로 늘어도 이 컷이 안 밀린다.
+    pickStage(STAGES.findIndex(s => s.allowKinds && s.allowKinds.length === CFG.DECK_SIZE));
+    // 한 장만 골라 둔다. 12-forceddeck 과 같은 이유다 — 0장이면 안내가 안 뜬 화면과
+    // 구분이 안 되고, 정원을 채우면 시작 버튼이 살아나 「덜 골랐다」 상태를 못 본다.
+    toggleDeckPick(allowedKinds()[0]);
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('14-uniquedeck', () => {
+    if (state.phase !== 'deck') return '덱 화면이 아니다: ' + state.phase;
+    const def = STAGES[state.stage];
+    if (!def.allowKinds) return '제약 판이 아니다: ' + def.name;
+    if (def.allowKinds.length !== CFG.DECK_SIZE)
+      return '허용이 ' + def.allowKinds.length + '종이다 (덱이 유일한 판이 아니다)';
+    if (deckCardRects().length !== KIND_KEYS.length)
+      return '카드가 7장이 아니다: ' + deckCardRects().length;
+    // 금지 종류가 넷이라야 이 컷이 12-forceddeck 과 다른 것을 본다.
+    const blocked = KIND_KEYS.filter(k => !kindAllowed(k));
+    if (blocked.length !== KIND_KEYS.length - CFG.DECK_SIZE)
+      return '금지 종류가 ' + blocked.length + '종이다';
+    if (!deckLimitNote()) return '안내 줄이 비었다';
+    if (state.deckPick.length !== 1) return '한 장만 고른 상태가 아니다: ' + state.deckPick.length;
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };
