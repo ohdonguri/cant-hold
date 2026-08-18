@@ -265,24 +265,60 @@ function seedRandom() {
 //      51 → 3 으로 나빠졌다. 시드 하나짜리 판이라 이 두 줄로 밸런스를 판정하지
 //      않는다 — 이 수정이 난이도를 얼마나 움직였는지는 별도로 재서 PR 에 적었다
 //      (8판 꼬리 게이트가 크게 흔들린다. 난이도 재조정은 이 티켓이 아니다)
+// [2026-08 눈금 재조정 (#64)] **여섯 줄 중 다섯을 새로 떴다. 0·1번의 퇴화값만
+// 비트 단위로 그대로이고, 그게 이 티켓의 범위 증거다.**
+//
+// 이번에는 `tools/sim.js` 와 `index.html` 을 **같이** 고쳤다. 나눌 수 없어서다 —
+// 두 변경이 서로를 상쇄하는 쌍이라 중간 상태에서는 스위트가 안 선다:
+//
+//   tools/sim.js    SUMMON_SAMPLES  2 → 6      배치 표본(꼬리를 재우는 최소 k)
+//   tools/test.js   백분위 상한  0.72 → 0.90   위 k 를 허용하는 임계(유저 승인)
+//   index.html      ④ 역류  hpMult 0.8 → 0.95  k 가 쉽게 만든 만큼 되돌린다
+//   index.html      ⑤ 분수령 hpMult 0.8 → 0.72 ⑥ 과 계단이 갈리게
+//
+// **난수 소비량이 `k` 배로 바뀐다 — `rand 303 → 903` 이 그것이다.** 소환 자리는
+// 소환마다 정확히 `k` 회를 뽑으므로(`pickSpot`), k 가 2 → 6 이면 그 지점만 3배가 된다.
+//
+// 지점별로 갈라 센 표(앞 세대들과 같은 방식):
+//
+//   케이스   소환 자리        7성 특성 롤   관측 치명      합계         소환 횟수
+//     0      300 → 900       3 → 3        0 → 0        303 → 903     150 → 150
+//     1      302 → 906       3 → 3        0 → 0        305 → 909     151 → 151
+//     3      436 → 1308      9 → 9      360 → 386      805 → 1703    218 → 218
+//
+//   ① **소환 자리가 정확히 3배다**(900 = 3 x 300 · 906 = 3 x 302 · 1308 = 3 x 436).
+//      그리고 여전히 소환 횟수의 정확히 `k` 배다(900 = 6 x 150 · 906 = 6 x 151 ·
+//      1308 = 6 x 218). 소비 규칙은 `k` 회 그대로고 `k` 만 움직였다
+//   ② **소환 횟수가 세 줄 다 한 번도 안 변했다**(150 / 151 / 218). 늘어난 난수가
+//      전부 「자리를 몇 군데 보는가」에서 나왔다는 가장 깨끗한 증거다 — 판이 길어져서
+//      더 지은 것이 아니다
+//   ③ 7성 특성 롤은 세 줄 다 그대로(3 / 3 / 9). 배치도 배율도 특성 롤을 안 건드린다
+//   ④ 3번의 관측 치명만 360 → 386 으로 움직였다. **이 케이스만 stage 3(④ 역류)이라
+//      hpMult 0.8 → 0.95 를 정면으로 맞는 유일한 케이스**다. 적 HP 가 19% 늘어 같은
+//      웨이브를 더 많은 발수로 넘긴다 — 방향이 예측과 같다
+//   ⑤ **방향을 「좋아졌으니 맞다」로 안 쓴다.** 3번은 `over w30` → `clear w30` 으로
+//      좋아졌고 1번은 `clear w25` → `over w25` 로 나빠졌다. 시드 하나짜리 판이라
+//      이 세 줄로 밸런스를 판정하지 않는다 — 판정하는 자는 210판짜리 `npm run curve`
+//      와 8판 x 40런짜리 `npm test` 밸런스 블록이고, 근거는 DESIGN §난이도의 눈금에 있다
+//
 const CASES = [
   {
     name: '0 / 파쇄·관측·조폐',
     opts: { stage: 0, deck: ['shredder', 'marksman', 'mint'] },
-    expect: '{"result":"clear","wave":20,"life":8,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
-    rand: 303,
+    expect: '{"result":"clear","wave":20,"life":9,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
+    rand: 903,
   },
   {
     name: '1 / 서리·박격·마력',
     opts: { stage: 1, deck: ['frost', 'mortar', 'arc'] },
-    expect: '{"result":"clear","wave":25,"life":5,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":988}',
-    rand: 305,
+    expect: '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
+    rand: 909,
   },
   {
     name: '3 / 침식·마력·관측 (B,B1)',
     opts: { stage: 3, deck: ['eroder', 'arc', 'marksman'], branch3: 'B', branch5: 'B1' },
-    expect: '{"result":"over","wave":30,"life":0,"towers":["arc7","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":3}',
-    rand: 805,
+    expect: '{"result":"clear","wave":30,"life":5,"towers":["arc7","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":1605}',
+    rand: 1703,
   },
 ];
 
@@ -334,7 +370,7 @@ for (const c of CASES) {
 const DEGENERATE = [
   '{"result":"clear","wave":20,"life":9,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
   '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
-  '{"result":"over","wave":30,"life":0,"towers":["arc7","eroder2","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":41}',
+  '{"result":"over","wave":29,"life":0,"towers":["arc7","eroder3","eroder4","eroder7","marksman7"],"maxStar":7,"gold":51}',
 ];
 // 지점별로 갈라 센 값(위 CASES 표와 같은 방식):
 //   케이스   소환 자리      7성 특성 롤   관측 치명      합계
@@ -347,7 +383,24 @@ const DEGENERATE = [
 // 근거는 위 CASES 의 [#60] 문단에 있다 — 4스테이지가 정의대로 8행을 열고 시작하게
 // 되면서 2x2 자리가 생겼고, 그래서 판이 `over w24` → `over w30` 으로 길어졌다.
 // 0·1번은 6행짜리 판이라 한 글자도 안 바뀐다.
-const DEGENERATE_RAND = [153, 154, 621];
+//
+// **[#64] 0·1번은 한 글자도 안 바뀌었다(153 · 154). 3번만 621 → 625 다.**
+// 이 블록의 계약이 정확히 그대로 성립한 자리라 근거로 그대로 쓴다:
+//   · `sim.js` 의 `SUMMON_SAMPLES` 2 → 6 은 **퇴화값에서 정의상 안 보인다**(k=1 로
+//     덮어쓰므로). 0·1번은 stage 0·1 이라 hpMult 도 안 건드렸다 → **비트 단위 동일**.
+//     즉 이번 `k` 변경은 배치 말고 아무 데도 안 샜다
+//   · 3번은 stage 3(④ 역류)이라 `hpMult` 0.8 → 0.95 를 맞는다 → **움직여야 맞다**
+//     (움직이지 않았다면 퇴화 경로가 실제 게임을 안 태우고 있다는 뜻이다)
+//
+//   블록        소환 자리      7성 특성 롤   관측 치명      합계        소환 횟수
+//   퇴화 k=1    220 → 204     9 → 9        392 → 412     621 → 625    220 → 204
+//
+// 자리 난수는 여기서 소환 횟수와 **정확히 1:1** 이다(204). `k=1` 이므로 그래야 한다.
+// **두 블록이 같은 변경의 두 성분을 따로 보여준다** — 퇴화 블록은 배치 개선이 빠져
+// hpMult 강화만 남으므로 판이 `over w30` → `over w29` 로 **나빠지고**, 출시 블록은
+// k=6 의 배치 개선이 그걸 덮어 `over w30` → `clear w30` 이 된다. 한쪽만 움직였으면
+// 그때가 회귀다.
+const DEGENERATE_RAND = [153, 154, 625];
 
 console.log('\n  ── 노브를 퇴화값(SUMMON_SAMPLES = 1)으로 두면 #35 이전과 같아야 한다 ──');
 CASES.forEach((c, i) => {
