@@ -4709,6 +4709,50 @@ function update(dt) {
 // ═════════════════════════════════════════════════════════════
 // 렌더
 // ═════════════════════════════════════════════════════════════
+
+// ── 관문 ──────────────────────────────────────────────────────
+// 레인이 보드를 빠져나가는 자리다. **레인의 마지막 점 위에 그리면 안 된다** —
+// 그 점은 정의상 보드 밖이고(거기가 「나가는 곳」이다) render() 는 보드 rect 로
+// 클립한 뒤 drawBoard() 를 부르므로 통째로 잘린다. 셀 중심에서 0.4칸 물러나도
+// 여전히 밖이라 아홉 판 어디서도 한 번도 안 보였다 — 그리는 코드가 있으니
+// 아무도 없는 줄 몰랐고, 스크린샷 수용 기준에 「보인다」로 적히기까지 했다(#58).
+//
+// 그래서 **보드 경계 안쪽에 붙여** 그린다. 나가는 면 위에 얹되 굵기의 절반만큼
+// 안으로 민다 — 면 위에 정확히 얹으면 절반이 클립 밖이라 반만 보인다.
+// **클립을 넓히는 쪽은 안 된다** — 보드 밖은 HUD·버튼 자리다.
+//
+// 좌표를 px 로 돌려주는 함수로 뺀 이유는 하나다: 검사가 **어디에 그었는지**를
+// 볼 수 있어야 한다. 그리는 코드 안에만 있으면 잘리는 자리에 그어도 검사가
+// 전부 통과한다(tools/test.js 「관문」이 이 함수와 실제 그리기 호출을 대조한다).
+const GATE_W = 4;              // 선 굵기. 절반이 밖으로 나가면 반만 보인다
+function gateLines() {
+  const { cell, ox, oy } = view;
+  const h = GATE_W / 2;
+  const out = [];
+  const seen = new Set();
+  for (const L of lanes) {
+    const a = L.points[L.points.length - 2], b = L.points[L.points.length - 1];
+    const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+    // 보드 안에서 마지막으로 밟는 칸. b 는 거기서 딱 한 칸 밖이다.
+    const gx = b.x - dx, gy = b.y - dy;
+    // ③⑤⑥⑧ 은 두 레인이 **같은 점**에서 나간다. 접지 않으면 같은 선을 두 번 긋는다.
+    const key = gx + ',' + gy + ',' + dx + ',' + dy;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const half = cell * 0.4;
+    if (dx) {   // 좌우로 나간다 (④ 역류의 둘째 레인)
+      const x = ox + (gx + (dx > 0 ? 1 : 0)) * cell - dx * h;
+      const cy = oy + (gy + 0.5) * cell;
+      out.push({ x1: x, y1: cy - half, x2: x, y2: cy + half });
+    } else {    // 위아래로 나간다
+      const y = oy + (gy + (dy > 0 ? 1 : 0)) * cell - dy * h;
+      const cx = ox + (gx + 0.5) * cell;
+      out.push({ x1: cx - half, y1: y, x2: cx + half, y2: y });
+    }
+  }
+  return out;
+}
+
 function drawBoard() {
   const { cell, ox, oy } = view;
   const open = firstOpenRow();
@@ -4792,16 +4836,13 @@ function drawBoard() {
     ctx.textBaseline = 'top';
   }
 
-  // 관문. 레인마다 하나씩이고, 겹치면 한 번만 그려진다.
+  // 관문. 레인마다 하나씩이고, 겹치면 한 번만 그려진다(gateLines 가 접는다).
   ctx.strokeStyle = '#f85149';
-  ctx.lineWidth = 4;
-  for (const L of lanes) {
-    const a = L.points[L.points.length - 2], b = L.points[L.points.length - 1];
-    const cx = ox + (b.x + 0.5) * cell, cy = oy + (b.y + 0.5) * cell;
-    const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+  ctx.lineWidth = GATE_W;
+  for (const ln of gateLines()) {
     ctx.beginPath();
-    ctx.moveTo(cx - dy * cell * 0.4 - dx * cell * 0.4, cy - dx * cell * 0.4 - dy * cell * 0.4);
-    ctx.lineTo(cx + dy * cell * 0.4 - dx * cell * 0.4, cy + dx * cell * 0.4 - dy * cell * 0.4);
+    ctx.moveTo(ln.x1, ln.y1);
+    ctx.lineTo(ln.x2, ln.y2);
     ctx.stroke();
   }
 }

@@ -66,12 +66,22 @@ const { RANGE: COVER_RANGE } = require('./paths.js');
 // 문구를 통째로 딴 것으로 바꿔도 통과한다 — 「막힌 이유를 보여준다」처럼 **글자가
 // 곧 기능인 자리**를 잠그려면 무엇을 그렸는지가 필요하다. 나머지 메서드는 그대로
 // 이름만 센다(인자를 전부 남기면 도트 굽기 한 판에 수천 줄이 쌓인다).
-function stubCtx(log, texts) {
+//
+// **선 긋기는 좌표까지 남긴다**(#58). 이름만 세면 「선을 그었다」까지밖에 못 보고,
+// **보드 클립 밖에 그어도 통과한다** — 관문 선이 정확히 그랬다. 아홉 판 어디서도
+// 화면에 없었는데 그리는 코드는 멀쩡히 있었고 검사는 전부 통과했다. 어디에
+// 그었는지가 있어야 「그렸다」와 「보인다」가 갈린다.
+// `beginPath`/`stroke` 도 같이 남기는 것은 **한 번의 stroke 로 그은 선분 하나**를
+// 복원하기 위해서다 — moveTo/lineTo 만 모으면 여러 점을 이은 경로와 구분이 안 된다.
+// 도트 굽기는 fillRect 라 여기 안 걸린다(한 판에 몇십 줄이다).
+const GEOM = ['beginPath', 'moveTo', 'lineTo', 'stroke'];
+function stubCtx(log, texts, geom) {
   return new Proxy({}, {
     get(_, p) {
       if (p === 'measureText') return () => ({ width: 10 });
       if (p === 'canvas') return {};
       if (texts && p === 'fillText') return s => { log.push(p); texts.push(String(s)); };
+      if (geom && GEOM.includes(p)) return (...a) => { log.push(p); geom.push({ m: p, a }); };
       if (log) return () => { log.push(p); };
       return () => {};
     },
@@ -168,6 +178,10 @@ const EXPOSE = [
   'shake', 'shakeOffset', 'bumpShake', 'bumpHitstop', 'decayShake', 'resetImpact',
   'hitstopState', 'leakWarnState', 'setHitstop',
   'setShakeEnabled', 'pxToCell', 'cellToPx', 'view',
+  // 관문 선(#58). 좌표를 돌려주는 함수와 굵기를 **둘 다** 내보낸다 — 검사가 좌표식을
+  // 베끼면 자가 두 벌이 되고, 굵기 4 를 베끼면 굵기만 고쳤을 때 검사가 옛 값으로
+  // 「굵기 전체가 보드 안」을 재게 된다.
+  'gateLines', 'GATE_W',
   'BLAST_SHAKE_AMP', 'BLAST_SHAKE_DUR', 'BLAST_SHAKE_CD', 'KILL_SHAKE_AMP', 'KILL_SHAKE_DUR',
   'HITSTOP', 'LEAK_WARN_DUR',
   // 사운드(2.9). SFX 와 SFX_VOICE_CAP 까지 내보내는 건 위 상수들과 같은 이유다 —
@@ -210,7 +224,8 @@ function load(overrides) {
   // 처음 그릴 때 굽는 도트 수백 줄이 섞여서 못 쓴다.
   const drawLog = [];
   const drawTexts = [];
-  const canvas = { getContext: () => stubCtx(drawLog, drawTexts), addEventListener: () => {}, width: 0, height: 0, style: {} };
+  const drawGeom = [];
+  const canvas = { getContext: () => stubCtx(drawLog, drawTexts, drawGeom), addEventListener: () => {}, width: 0, height: 0, style: {} };
 
   const store = new Map();
   const localStorageStub = {
@@ -243,8 +258,23 @@ function load(overrides) {
   api.draws = {
     log: drawLog,
     text: drawTexts,
-    reset() { drawLog.length = 0; drawTexts.length = 0; },
+    geom: drawGeom,
+    reset() { drawLog.length = 0; drawTexts.length = 0; drawGeom.length = 0; },
     count(...names) { return drawLog.filter(n => names.includes(n)).length; },
+    // 한 번의 stroke 로 그은 **직선 하나**만 골라 낸다. beginPath → moveTo → lineTo →
+    // stroke 가 정확히 그 모양이고, 점이 더 붙은 경로(roundRect 등)는 안 걸린다.
+    segments() {
+      const out = [];
+      for (let i = 0; i + 3 < drawGeom.length; i++) {
+        const [p, m, l, s] = drawGeom.slice(i, i + 4).map(e => e.m);
+        if (p !== 'beginPath' || m !== 'moveTo' || l !== 'lineTo' || s !== 'stroke') continue;
+        out.push({
+          x1: drawGeom[i + 1].a[0], y1: drawGeom[i + 1].a[1],
+          x2: drawGeom[i + 2].a[0], y2: drawGeom[i + 2].a[1],
+        });
+      }
+      return out;
+    },
   };
   // 오디오 시계를 앞으로 감는 창. 큐 쿨다운은 게임 dt 가 아니라 이 시계로 잰다.
   //   g.sfxUnlock(); g.audio.advance(0.06); g.sfx('shot')
