@@ -2678,6 +2678,122 @@ function poolDeck(g, st) {
   ok('이어할 판은 더 나아간 쪽', merged.run.stage === 1, 'stage ' + merged.run.stage);
 }
 
+// ── 시작 시 열린 행 (#60) ─────────────────────────────────────
+// 시작 시 열린 행 수가 **직전에 한 판**을 따라다녔다. `restart()` 가 `openRows` 를
+// 되돌렸는데 그 자리는 판을 고르기 **전**이라 거기 있는 `CFG.OPEN_ROWS` 는 아직
+// 직전 판의 값이고, `pickStage → loadStage` 가 `CFG` 를 갈아끼운 뒤에는 아무도
+// 안 고쳤다. ① 외곽(정의 6)을 ⑥ 합수(정의 8) 뒤에 하면 2행이 더 열려 쉬워졌고
+// 반대로 하면 2행이 덜 열려 어려워졌다 — **난이도가 직전 판을 탔다.**
+//
+// **시뮬은 이걸 정의상 못 본다.** `greedy` 는 판마다 새 `load()` 를 써서 늘 첫 판
+// 상태이고 `shot` 은 매 컷 새 페이지다. 그래서 `curve`·`affinity`·기존 `npm test`
+// 어디에도 안 걸렸다. 여기서는 **한 `load()` 안에서 판을 오간다** — `laneCursor`
+// 를 재는 방식과 같은 이유이고, 이 파일이 그걸 잴 수 있는 유일한 자리다.
+{
+  console.log('시작 시 열린 행');
+  const g = load();
+  const { state, CFG } = g;
+  const N = g.STAGES.length;
+  // 판을 전부 열어 둔다. `pickStage` 는 잠긴 판이면 토스트만 내고 통째로 no-op 이라,
+  // 이 줄이 없으면 아홉 판을 도는 척하며 1스테이지만 여든한 번 잰다(레인 배정
+  // 블록이 오래 그 함정에 빠져 있었다 — 위 주석 참고).
+  g.applyBundle({ v: 1, unlocked: N, best: g.STAGES.map(s => s.waves), run: null });
+
+  // 유저가 실제로 겪은 것은 「열린 행 수」가 아니라 **놓을 수 있는 칸 수**다.
+  // `openRows` 만 보면 `firstOpenRow()` 가 딴 값을 베끼기 시작해도 안 걸린다.
+  const cells = () => {
+    const occ = g.occupancy();
+    let n = 0;
+    for (let y = 0; y < CFG.BOARD_H; y++)
+      for (let x = 0; x < CFG.BOARD_W; x++)
+        if (g.canPlace(x, y, 1, occ)) n++;
+    return n;
+  };
+
+  // 기준 칸 수. **`state.openRows` 를 판 정의에서 손으로 세워 놓고 잰다** —
+  // 고친 줄이 내는 값으로 기준을 만들면 그 줄을 지웠을 때 기준까지 같이 틀려서
+  // 검사가 조용히 통과한다(자가 두 벌). 여기서 자는 `STAGES[i].openRows` 하나다.
+  const wantCells = [];
+  for (let i = 0; i < N; i++) {
+    g.loadStage(i);
+    state.towers.length = 0;
+    state.openRows = g.STAGES[i].openRows;
+    wantCells.push(cells());
+  }
+
+  // 판에 들어가는 정문. 덱은 **그 판이 허용하는 것에서** 고른다 — 목록을 여기
+  // 베끼면 `allowKinds` 를 고쳤을 때 `startRun` 이 조용히 거절하고(phase 가 deck 에
+  // 멈춘다) 검사는 그대로 통과한다.
+  let notBuilt = 0;
+  const enter = i => {
+    g.pickStage(i);
+    state.deckPick = [];
+    g.allowedKinds(i).slice(0, CFG.DECK_SIZE).forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    if (state.phase !== 'build') notBuilt++;
+  };
+
+  // ── 아홉 판의 **모든 순서쌍**(81). 「어느 순서로 오가도」가 조항이므로 표본을
+  // 고르지 않는다 — 81 판이라고 해 봐야 loadStage 뿐이라 순식간이다.
+  let badRows = 0, badCells = 0, crossed = 0, firstBad = '';
+  for (let a = 0; a < N; a++) {
+    for (let b = 0; b < N; b++) {
+      g.restart(); enter(a);
+      g.restart(); enter(b);
+      const want = g.STAGES[b].openRows;
+      if (state.openRows !== want) {
+        badRows++;
+        if (!firstBad) firstBad = `${a + 1}→${b + 1}: openRows ${state.openRows} 정의 ${want}`;
+      }
+      if (g.firstOpenRow() !== CFG.BOARD_H - want) badRows++;
+      if (cells() !== wantCells[b]) badCells++;
+      if (g.STAGES[a].openRows !== want) crossed++;
+    }
+  }
+  ok('어느 순서로 오가도 정의대로 열린다', badRows === 0, badRows ? firstBad : `${N}x${N}쌍`);
+  ok('  배치 가능 칸도 정의대로', badCells === 0, badCells ? badCells + '쌍 어긋남' : `${N}x${N}쌍`);
+  ok('  아홉 판 전부 실제로 시작됐다', notBuilt === 0, notBuilt + '판이 준비 단계에 못 갔다');
+  // 표본에 **열린 행 수가 다른 판끼리**가 없으면 위 두 줄은 아무것도 안 잠근다.
+  // 판 정의가 언젠가 전부 같은 값이 되면 여기서 먼저 걸린다.
+  ok('  열린 행이 다른 판끼리(6↔8)가 표본에 있다', crossed > 0, crossed + '쌍');
+
+  // ── 목록을 안 거치는 경로. `restart()` 는 목록으로 가는 문일 뿐이고, 판을
+  // 갈아끼우는 것은 `loadStage` 다. 도구(tools/*)와 이어하기가 이 경로로 온다.
+  // **웨이브가 지나 행이 열린 뒤**가 제일 크게 어긋나는 자리다.
+  let badDirect = 0;
+  for (let a = 0; a < N; a++) {
+    for (const b of [0, N - 1]) {
+      g.restart(); enter(a);
+      state.openRows = CFG.BOARD_H;                // 다 열릴 때까지 갔다
+      enter(b);                                    // 목록을 안 거치고 다음 판
+      if (state.openRows !== g.STAGES[b].openRows) badDirect++;
+    }
+  }
+  ok('  다 열린 판 뒤에 와도 정의대로', badDirect === 0, String(badDirect));
+
+  // ── 이어하기는 스냅샷 값을 그대로 쓴다 ──
+  // `loadStage` 가 정의값으로 맞춘 **뒤에** `restoreRun` 이 덮는다. 순서가 뒤집히면
+  // 중간에 저장한 런이 열린 행부터 처음으로 되감긴다 — 세이브 계약(#45·#46)이
+  // 「어중간하게 복원하지 않는다」인 것과 같은 조항이다.
+  {
+    const S = 4;                                   // ⑤ 분수령 (9x14, 정의 8)
+    g.restart(); enter(S);
+    state.wave = 12;
+    state.openRows = g.STAGES[S].openRows + 2;     // 웨이브가 지나며 두 줄 열렸다
+    const grown = state.openRows, grownCells = cells();
+    const snap = g.snapshotRun();
+    ok('  스냅샷에 자란 값이 실린다', !!snap && snap.openRows === grown,
+      (snap && snap.openRows) + ' vs ' + grown);
+    g.restart(); enter(0);                         // 다른 판(정의 6)을 한 판 하고
+    g.restart();
+    const back = g.restoreRun(snap);
+    ok('  이어하기는 스냅샷 값을 쓴다', back === true && state.openRows === grown,
+      state.openRows + ' vs ' + grown + ' (정의 ' + g.STAGES[S].openRows + ')');
+    ok('  이어한 판의 배치 칸도 그대로', cells() === grownCells,
+      cells() + ' vs ' + grownCells);
+  }
+}
+
 // ── 클리어 기록 (#45) ─────────────────────────────────────────
 // `best[i]`(그 판에서 도달한 최고 웨이브)와 「깼다」는 **다른 사실**이다. 한 칸으로
 // 겸하던 시절에는 마지막 웨이브 **도중에 죽어도** `best[i] === waves` 가 찍혔고

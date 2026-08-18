@@ -226,6 +226,45 @@ function seedRandom() {
 //      좋고 나쁨을 판정하지 않는다 — 퇴화값 블록의 3번은 오히려 `w28` → `w24` 로
 //      나빠졌다. 판정하는 자는 210판짜리 `npm run curve` 와 35덱짜리
 //      `npm run affinity` 이고, 그 표는 DESIGN §판이 어느 타워를 좋아하는가에 있다
+// [2026-08 시작 시 열린 행 (#60)] **3번 케이스만 새로 떴다. 0·1번은 비트 단위로
+// 그대로이고, 그것이 이 티켓의 범위 증거다.**
+//
+// 고친 것은 밸런스가 아니라 **상태 하나**다. `state.openRows` 를 `restart()` 가
+// 되돌리고 있었는데 그 자리는 판을 고르기 전이라, `loadStage` 가 `CFG.OPEN_ROWS` 를
+// 갈아끼운 뒤에도 아무도 안 고쳤다. 그래서 **이 시뮬은 지금까지 4~9스테이지를
+// 전부 `openRows` 6 으로 재고 있었다** — `load()` 가 부팅 때 `loadStage(0)` 을
+// 밟고 `state.openRows` 가 그 값(6)에서 한 번도 안 움직였기 때문이다. 판 정의는
+// 8 이다(index.html STAGES · DESIGN §4스테이지는 지형이 2스테이지와 같지만).
+//
+//   0번 stage 0 (정의 6) · 1번 stage 1 (정의 6)   → **한 글자도 안 바뀐다**
+//   3번 stage 3 (정의 8)                          → 2행이 실제로 열린다
+//
+// 0·1번이 안 움직이는 것은 우연이 아니라 정의상 그렇다. 새 값이 「통과시키려고 맞춘
+// 숫자」가 아니라는 근거가 그것이다 — 자가 다른 데로 샜다면 6짜리 판이 먼저 걸린다.
+//
+// 지점별로 갈라 센 표(앞 세대들과 같은 방식. 3번만 적는다):
+//
+//   블록        소환 자리      7성 특성 롤   관측 치명      합계        소환 횟수
+//   출시 k=2    444 → 436     0 → 9        286 → 360     730 → 805    222 → 218
+//   퇴화 k=1    139 → 220     3 → 9        242 → 392     384 → 621    139 → 220
+//
+//   ① **소환 자리는 여전히 소환 횟수의 정확히 2배**(436 = 2 x 218)이고, 퇴화
+//      블록에서는 정확히 1배(220)다. 소비 규칙(`k` 회)은 한 줄도 안 건드렸다 —
+//      규칙이 바뀌었다면 이 비가 안 맞는다
+//   ② 바뀐 방향이 예측과 같다. **2행이 열려 2x2 자리가 생기니 합성이 이어진다.**
+//      옛 값의 towers 를 보라 — `eroder4` 가 **12대** 쌓여 최고 성급이 6 에서
+//      멈춰 있었고, 바로 위 [#52] 문단이 그것을 「2x2 자리가 없어 짝이 다 맞아
+//      버린 상태」라고 적어 뒀다. 이제 towers 가 19 → 6 대, maxStar 6 → **7** 이다
+//   ③ 7성 특성 롤 0 → 9 가 ② 를 그대로 센다. 옛 값은 7성 타워가 아예 없어서 0
+//      이었다. 관측 치명 286 → 360 도 같은 원인이다(관측이 6성 → 7성)
+//   ④ **퇴화 블록이 같이 움직인 것이 맞다.** 아래 「퇴화값 동일성」이 적어 둔
+//      계약은 「`sim.js` 만 고쳤는데 여기가 움직이면 회귀 · `index.html` 을
+//      고쳤는데 여기가 안 움직이면 퇴화 경로가 실제 게임을 안 태우는 것」이다.
+//      이번에 고친 것은 `index.html` 이고 두 블록이 같이 움직였다
+//   ⑤ **「좋아졌으니 맞다」로 안 쓴다.** 판은 여전히 `over w30` 이고 남은 골드는
+//      51 → 3 으로 나빠졌다. 시드 하나짜리 판이라 이 두 줄로 밸런스를 판정하지
+//      않는다 — 이 수정이 난이도를 얼마나 움직였는지는 별도로 재서 PR 에 적었다
+//      (8판 꼬리 게이트가 크게 흔들린다. 난이도 재조정은 이 티켓이 아니다)
 const CASES = [
   {
     name: '0 / 파쇄·관측·조폐',
@@ -242,8 +281,8 @@ const CASES = [
   {
     name: '3 / 침식·마력·관측 (B,B1)',
     opts: { stage: 3, deck: ['eroder', 'arc', 'marksman'], branch3: 'B', branch5: 'B1' },
-    expect: '{"result":"over","wave":30,"life":0,"towers":["arc6","eroder2","eroder3","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder4","eroder5","eroder6","marksman6"],"maxStar":6,"gold":51}',
-    rand: 730,
+    expect: '{"result":"over","wave":30,"life":0,"towers":["arc7","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":3}',
+    rand: 805,
   },
 ];
 
@@ -295,7 +334,7 @@ for (const c of CASES) {
 const DEGENERATE = [
   '{"result":"clear","wave":20,"life":9,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
   '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
-  '{"result":"over","wave":24,"life":0,"towers":["arc1","arc2","arc4","arc6","eroder7","marksman6"],"maxStar":7,"gold":64}',
+  '{"result":"over","wave":30,"life":0,"towers":["arc7","eroder2","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":41}',
 ];
 // 지점별로 갈라 센 값(위 CASES 표와 같은 방식):
 //   케이스   소환 자리      7성 특성 롤   관측 치명      합계
@@ -303,7 +342,12 @@ const DEGENERATE = [
 //     1      128 → 151     3 → 3        0 → 0        131 → 154
 //     3      190 → 139     6 → 3      399 → 242      595 → 384
 // 여기서도 소환 자리는 소환 횟수와 1:1 이다(`k=1` 이므로 2배가 아니라 같은 수다).
-const DEGENERATE_RAND = [153, 154, 384];
+//
+// **3번만 한 번 더 움직였다(#60).** `139 → 220 · 3 → 9 · 242 → 392 · 합 384 → 621`.
+// 근거는 위 CASES 의 [#60] 문단에 있다 — 4스테이지가 정의대로 8행을 열고 시작하게
+// 되면서 2x2 자리가 생겼고, 그래서 판이 `over w24` → `over w30` 으로 길어졌다.
+// 0·1번은 6행짜리 판이라 한 글자도 안 바뀐다.
+const DEGENERATE_RAND = [153, 154, 621];
 
 console.log('\n  ── 노브를 퇴화값(SUMMON_SAMPLES = 1)으로 두면 #35 이전과 같아야 한다 ──');
 CASES.forEach((c, i) => {
