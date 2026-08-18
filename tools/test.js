@@ -4596,6 +4596,114 @@ function poolDeck(g, st) {
   }
 }
 
+// ── 관문 ──────────────────────────────────────────────────────
+// #58. 관문 선은 **아홉 판 어디서도 화면에 나온 적이 없었다.** 레인의 마지막 점 위에
+// 그렸는데 그 점은 정의상 보드 밖이고(거기가 「나가는 곳」이다), render() 는 보드 rect
+// 로 클립한 뒤 drawBoard() 를 부르므로 통째로 잘렸다. 그리는 코드는 멀쩡히 있었고
+// #33 의 스크린샷 수용 기준에는 「관문 선 셋이 잘리지 않고 보인다」가 통과로 적혔다 —
+// **한 번도 존재한 적 없는 것을 「보인다」고 적은 것이다.**
+//
+// 그래서 여기서 잠근다. 「그리는 코드가 있는데 화면엔 없는」 함정은 이 리포에서
+// 두 번째라(첫 번째가 draws 를 만든 계기다) 상태도 개수도 아닌 **좌표**를 본다:
+//
+//   ① 관문 개수 — `lanes` 에서 **따로** 센다. gateLines 의 접는 규칙을 안 베낀다
+//   ② 굵기 전체가 보드 rect 안 — 굵기의 절반이 밖이면 반만 보인다
+//   ③ 관문 칸이 경로 칸이고 선이 그 칸을 안 벗어난다 — 타워 배치 칸을 안 가린다
+//   ④ **render() 가 그 좌표로 실제로 긋는다** — draws.segments() 로 대조한다.
+//      ①②③ 만 있으면 gateLines() 만 맞고 drawBoard 가 딴 데 긋거나 아예 안 그어도
+//      전부 통과한다. 그게 정확히 #58 이 통과했던 방식이다
+//   ⑤ gateLines 가 기대는 계약(마지막 구간이 축에 나란하고 b 가 딱 한 칸 밖)
+{
+  console.log('관문');
+  const g = load();
+  const { state, CFG } = g;
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+
+  let total = 0;
+  for (let i = 0; i < g.STAGES.length; i++) {
+    const name = `${i + 1} ${g.STAGES[i].name}`;
+    g.loadStage(i);
+    state.openRows = CFG.OPEN_ROWS;
+    state.phase = 'build';
+    g.draws.reset();
+    g.render();
+
+    const { cell, ox, oy } = g.view;
+    const bx2 = ox + cell * CFG.BOARD_W, by2 = oy + cell * CFG.BOARD_H;
+    const gates = g.gateLines();
+    const drawn = g.draws.segments();
+    const h = g.GATE_W / 2;
+    total += gates.length;
+
+    // ⑤ 계약부터. 이게 깨지면 아래 셋은 맞는 것을 재고 있어도 뜻이 없다.
+    const contract = g.lanes.every(L => {
+      const a = L.points[L.points.length - 2], b = L.points[L.points.length - 1];
+      const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+      if (Math.abs(dx) + Math.abs(dy) !== 1) return false;          // 축에 나란하다
+      const out = b.x < 0 || b.x >= CFG.BOARD_W || b.y < 0 || b.y >= CFG.BOARD_H;
+      const inb = b.x - dx >= 0 && b.x - dx < CFG.BOARD_W && b.y - dy >= 0 && b.y - dy < CFG.BOARD_H;
+      return out && inb;                                            // b 는 딱 한 칸 밖
+    });
+    ok(`${name} 출구가 보드 밖 한 칸 · 축에 나란하다`, contract);
+
+    // ① 개수. 「마지막 점이 같으면 한 관문」을 lanes 에서 다시 뽑는다.
+    const exits = new Set(g.lanes.map(L => {
+      const p = L.points[L.points.length - 1];
+      return p.x + ',' + p.y;
+    }));
+    ok(`  관문 ${exits.size}개 (레인 ${g.lanes.length})`, gates.length === exits.size,
+      gates.length + '/' + exits.size);
+
+    const edges = [];
+    let allIn = true, allOnPath = true, allDrawn = true;
+    for (const l of gates) {
+      // butt cap 이라 획의 경계는 정확히 이 사각형이다(index.html 은 lineCap 을
+      // 한 번도 안 건드린다). 굵기는 선에 **수직**으로만 붙는다.
+      const vert = near(l.x1, l.x2);
+      const x0 = Math.min(l.x1, l.x2) - (vert ? h : 0);
+      const x1 = Math.max(l.x1, l.x2) + (vert ? h : 0);
+      const y0 = Math.min(l.y1, l.y2) - (vert ? 0 : h);
+      const y1 = Math.max(l.y1, l.y2) + (vert ? 0 : h);
+
+      // ② 굵기 전체가 보드 안
+      if (!(x0 >= ox - 0.01 && x1 <= bx2 + 0.01 && y0 >= oy - 0.01 && y1 <= by2 + 0.01)) allIn = false;
+
+      // ③ 어느 칸 위인가. 경로 칸이라야 타워를 안 가린다(경로 위에는 못 짓는다).
+      const c = g.pxToCell((x0 + x1) / 2, (y0 + y1) / 2);
+      if (!c || !g.isPath(c.gx, c.gy)) allOnPath = false;
+      else {
+        const p = g.cellToPx(c.gx, c.gy);
+        if (!(x0 >= p.x - 0.01 && x1 <= p.x + cell + 0.01
+          && y0 >= p.y - 0.01 && y1 <= p.y + cell + 0.01)) allOnPath = false;
+      }
+
+      // ④ render() 가 이 좌표로 실제로 그었는가
+      if (!drawn.some(s => near(s.x1, l.x1) && near(s.y1, l.y1) && near(s.x2, l.x2) && near(s.y2, l.y2)))
+        allDrawn = false;
+
+      edges.push(vert ? (near(x0, ox) ? '왼' : '오른') : (near(y0, oy) ? '위' : '아래'));
+    }
+    ok(`  굵기 전체가 보드 안`, gates.length > 0 && allIn,
+      `보드 [${ox},${oy}]~[${bx2},${by2}] · ` + gates.map(l =>
+        `(${l.x1.toFixed(0)},${l.y1.toFixed(0)})-(${l.x2.toFixed(0)},${l.y2.toFixed(0)})`).join(' '));
+    ok(`  경로 칸 위에만 있다 (타워 자리를 안 가린다)`, gates.length > 0 && allOnPath);
+    ok(`  render 가 그 좌표로 실제로 긋는다`, gates.length > 0 && allDrawn,
+      `관문 ${gates.length} / 화면에 그은 직선 ${drawn.length} · ${edges.join('·')}`);
+  }
+
+  // ④ 역류만 입구가 위·아래 반대다. 두 관문이 **다른 변**에 붙어야 한다 —
+  // 한 변만 보고 있으면 반대쪽 끝이 안 그려져도 위 단언이 전부 통과한다.
+  g.loadStage(3);
+  const back = g.gateLines();
+  const vertical = back.filter(l => near(l.x1, l.x2)).length;
+  ok('④ 역류는 두 관문이 서로 다른 변에 붙는다',
+    back.length === 2 && vertical === 1, `세로 ${vertical} / 가로 ${back.length - vertical}`);
+
+  // 합계는 **단언하지 않는다.** 숫자를 박으면 판을 붙일 때 이 줄만 빨간불이 되고,
+  // 「판마다 레인 수만큼(겹치면 접어서)」은 위 판별 단언이 이미 판 수와 같이 자란다.
+  console.log(`       (참고) 아홉 판 관문 ${total}개 — 단언은 판마다 따로 한다`);
+}
+
 // ── 렌더 경로 ────────────────────────────────────────────────
 // 그림이 맞는지는 못 보지만, 상태마다 render() 가 터지지 않는지는 확인할 수 있다.
 {
