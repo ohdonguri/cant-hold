@@ -567,6 +567,18 @@ function loadStage(index) {
   CFG.UNLOCK_AT = def.unlockAt;
   CFG.WAVE_MAX = def.waves;
 
+  // 열린 행 수. **`CFG.OPEN_ROWS` 를 갈아끼우는 바로 이 자리에서 같이 맞춘다.**
+  // 예전에는 `restart()` 가 되돌렸는데, 그건 목록으로 돌아가는 순간이라 **판을
+  // 고르기 전**이고 거기 있는 `CFG.OPEN_ROWS` 는 아직 직전 판의 값이다. 그래서
+  // 시작 시 열린 행 수가 직전에 한 판을 따라다녔다 — ① 외곽(6)을 ⑥ 합수(8) 뒤에
+  // 하면 2행이 더 열려 배치 칸이 늘고, 반대로 하면 2행이 덜 열렸다(#60).
+  // `state.openRows` 는 판 정의에서 나와 웨이브가 지나며 자라는 파생값이라
+  // **정의가 바뀌는 자리 말고는 되돌릴 곳이 없다.** 바로 아래 `laneCursor` 와
+  // 같은 종류의 함정이고 같은 방식으로 막는다.
+  // 이어하기는 이 뒤에 스냅샷 값으로 덮는다(`restoreRun` 이 loadStage 를 먼저
+  // 부른다) — **그 순서가 중간 저장한 런이 처음부터 다시 시작되지 않는 근거다.**
+  state.openRows = CFG.OPEN_ROWS;
+
   // 레인 배정 커서. **판을 실을 때마다 0 으로 되돌린다.** 모듈 전역이라 한 판을
   // 끝내고 다시 시작하면 앞판이 남긴 값에서 이어져, 같은 판인데 첫 적이 나오는
   // 레인이 판마다 달라진다. 2레인에서는 패리티(짝수/홀수)라 안 보였고 3레인이
@@ -3832,7 +3844,9 @@ function restart() {
   state.gold = CFG.START_GOLD;
   state.essence = 0;
   state.life = CFG.START_LIFE;
-  state.openRows = CFG.OPEN_ROWS;
+  // **`openRows` 는 여기서 안 되돌린다.** 위의 `wave`·`gold`·`life` 와 달리 판에
+  // 딸린 값이라, 판을 고르기 전인 여기서 되돌리면 직전 판의 `CFG.OPEN_ROWS` 가
+  // 들어간다. 주인은 `loadStage()` 다 — 이유는 그쪽 주석에 있다(#60).
   state.summonedThisWave = 0;
   state.towers.length = 0;
   state.enemies.length = 0;
