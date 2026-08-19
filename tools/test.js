@@ -1136,7 +1136,16 @@ function known(name, worse, detail, why) {
     ok('  열두 장 · 658px 은 스크롤로만 들어간다', m.maxScroll > 0,
       '스크롤 범위 ' + m.maxScroll.toFixed(0) + 'px');
     // 스크롤이 필요 없는 화면에는 막대를 안 그린다. 늘 그리면 안 움직이는 장식이 된다.
+    //
+    // **[#62] 표본을 여섯으로 자른다 — 이 줄이 진짜 판 수를 재고 있었다.** 위 여섯 장
+    // 블록의 [#54] 문단이 적어 둔 것과 **똑같은 사고가 이 한 줄에 남아 있었다**:
+    // 이름은 「여섯 장」인데 `load()` 가 준 배열을 안 자르고 그대로 썼다. 아홉 장까지는
+    // 844px 에서 우연히 `maxScroll === 0` 이라 통과했고, 열 장에서 24px 이 되며 빨간불이
+    // 됐다. **이 줄이 묻는 것은 「목록이 다 들어가는 화면에서 막대를 안 그리는가」이지
+    // 「지금 판 수가 844 에 들어가는가」가 아니다** — 후자는 바로 위 `narrow(g, …)` 가
+    // 이미 재고 있고, 열 장이 스크롤 24 로 도는 것은 #50 이 넣은 정상 동작이다.
     const g6b = load();
+    g6b.STAGES.length = SIX;
     g6b.view.h = 844;
     g6b.setStageScroll(0);
     ok('  여섯 장 · 844px 은 스크롤이 없다', g6b.stageListMetrics().maxScroll === 0,
@@ -1322,13 +1331,23 @@ function known(name, worse, detail, why) {
     const withList = g.STAGES.filter(s => s.allowKinds).map(s => s.name);
     // 이름을 박는다. 판을 붙이면서 옛 판에 목록을 얹으면 그 판의 덱이 조용히 좁아지는데,
     // 개수만 세면 「새 판이 셋 붙었으니 셋이 맞다」로 통과한다.
-    const LEGACY = ['외곽 도로', '이중 병목', '갈래길', '역류', '분수령', '합수'];
+    //
+    // **[#62] ⑩ 세물머리를 넣었다 — 이 목록은 「옛 판」이 아니라 「35덱 풀」이다.**
+    // 그 판은 배열의 마지막이면서 35덱 풀의 마지막이라, 목록이 붙는 순간 다른 풀로
+    // 옮겨 가고 **35덱 풀의 마지막이 ⑥ 합수로 조용히 되돌아간다.** 게이트는 그래도
+    // 돌지만 그 판을 만든 이유(그 풀의 새 마지막)가 아무 말 없이 사라진다 — #33 에서
+    // S4 래칫이 새 판으로 옮겨 간 것과 같은 실패모드라 이름으로 박는다.
+    const LEGACY = ['외곽 도로', '이중 병목', '갈래길', '역류', '분수령', '합수', '세물머리'];
     const dirty = LEGACY.filter(n => {
       const d = g.STAGES.find(s => s.name === n);
       return d && d.allowKinds;
     });
-    ok('기존 여섯 판에는 허용 목록이 없다', dirty.length === 0,
+    ok(`35덱 ${LEGACY.length}판에는 허용 목록이 없다`, dirty.length === 0,
       dirty.join(',') || ('목록 있는 판: ' + (withList.join(',') || '없음')));
+    // 이름이 하나라도 사라지면(판 이름을 고치면) 위 줄은 **아무것도 안 잰다** —
+    // 없는 이름은 `dirty` 에도 안 들어오므로 조용히 초록이 된다.
+    const missing = LEGACY.filter(n => !g.STAGES.some(s => s.name === n));
+    ok('  그 이름이 전부 살아 있다', missing.length === 0, missing.join(',') || LEGACY.length + '판');
     for (let i = 0; i < g.STAGES.length; i++) {
       if (g.STAGES[i].allowKinds) continue;
       ok(`  [S${i + 1}] 목록이 없으면 7종 전부 허용`,
@@ -2794,7 +2813,7 @@ function poolDeck(g, st) {
   }
   ok('어느 순서로 오가도 정의대로 열린다', badRows === 0, badRows ? firstBad : `${N}x${N}쌍`);
   ok('  배치 가능 칸도 정의대로', badCells === 0, badCells ? badCells + '쌍 어긋남' : `${N}x${N}쌍`);
-  ok('  아홉 판 전부 실제로 시작됐다', notBuilt === 0, notBuilt + '판이 준비 단계에 못 갔다');
+  ok(`  ${N}판 전부 실제로 시작됐다`, notBuilt === 0, notBuilt + '판이 준비 단계에 못 갔다');
   // 표본에 **열린 행 수가 다른 판끼리**가 없으면 위 두 줄은 아무것도 안 잠근다.
   // 판 정의가 언젠가 전부 같은 값이 되면 여기서 먼저 걸린다.
   ok('  열린 행이 다른 판끼리(6↔8)가 표본에 있다', crossed > 0, crossed + '쌍');
@@ -4859,7 +4878,7 @@ function poolDeck(g, st) {
 
   // 합계는 **단언하지 않는다.** 숫자를 박으면 판을 붙일 때 이 줄만 빨간불이 되고,
   // 「판마다 레인 수만큼(겹치면 접어서)」은 위 판별 단언이 이미 판 수와 같이 자란다.
-  console.log(`       (참고) 아홉 판 관문 ${total}개 — 단언은 판마다 따로 한다`);
+  console.log(`       (참고) ${g.STAGES.length}판 관문 ${total}개 — 단언은 판마다 따로 한다`);
 }
 
 // ── 렌더 경로 ────────────────────────────────────────────────
