@@ -688,6 +688,112 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 방사형 소환 · 가운데 칸 (#68) ──────────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
+  // md5 가 통째로 갈린다).
+  //
+  // 카드 석 장이 사라지고 아이콘 셋이 칸 둘레로 올라온 화면이다. 헤드리스는
+  // 좌표만 보고 **읽히는가는 못 본다.** 이 컷에서 볼 것이 그것이다.
+  //   ① 아이콘 셋이 10시·12시·2시로 읽히는가 — 세 개가 「부채꼴」로 보여야 한다
+  //   ② 지름 48px 원 안에서 스프라이트와 비용(10px)이 서로 안 뭉개지는가
+  //   ③ 길게 누른 하나의 사거리 사각형이 딤(0.78) 위에서 읽히는가
+  //   ④ 안내 두 줄이 칸 아래에 들어가고 아이콘과 안 겹치는가
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    pickStage(0);
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    for (let i = 0; i < 6; i++) summon(state.deck[i % 3]);
+    state.selected = null;
+    // 보드 한가운데 근처의 빈 칸. 가장자리 컷(아래)과 갈리는 자리라 **가운데라야** 한다.
+    const occ = occupancy();
+    const mx = CFG.BOARD_W >> 1, my = (firstOpenRow() + CFG.BOARD_H) >> 1;
+    let best = null, bestD = Infinity;
+    for (let y = firstOpenRow(); y < CFG.BOARD_H; y++)
+      for (let x = 0; x < CFG.BOARD_W; x++) {
+        if (!canPlace(x, y, 1, occ)) continue;
+        const d = Math.abs(x - mx) + Math.abs(y - my);
+        if (d < bestD) { bestD = d; best = { gx: x, gy: y }; }
+      }
+    state.picker = { mode: 'summon', gx: best.gx, gy: best.gy, press: null };
+    // 12시 아이콘을 길게 누른 상태로 얼린다. `pickerHold` 는 frame() 이 계속 감지만
+    // 문턱을 넘은 뒤로는 그림이 안 바뀐다(불리언 하나만 본다) — 그래서 정지가 유효하다.
+    const ic = pickerLayout().icons[1];
+    pickerPressDown(ic.cx, ic.cy);
+    pickerHold(PICK_HOLD + 0.01);
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('16-summonfan', () => {
+    const s = pickerState();
+    if (!s.open) return '소환 부채꼴이 안 열렸다';
+    const L = pickerLayout();
+    if (L.icons.length !== CFG.DECK_SIZE) return '아이콘이 ' + L.icons.length + '개다';
+    const p = cellToPx(s.gx, s.gy);
+    const cy = p.y + view.cell / 2;
+    if (!L.icons.every(ic => ic.cy < cy)) return '부채꼴이 위쪽이 아니다 (가운데 칸인데 돌았다)';
+    if (!s.peek) return '길게 누른 상태가 아니다 (사거리가 안 그려진다)';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // ── 방사형 소환 · 가장자리 칸 (⑩ 세물머리 0열 · #68) ────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다.
+  //
+  // **이 티켓의 진짜 일이 이 컷이다.** 10열 판의 0열 칸은 중심이 보드 왼쪽 끝에서
+  // `cell/2 = 18.5px` 밖에 안 떨어져 있어서, 돌리지 않으면 10시 아이콘이 화면 밖으로
+  // 50px 나간다. `npm test` 는 좌표가 화면 안인지까지만 보고 **그림이 어떻게 읽히는지
+  // 못 본다.** 여기서 볼 것이 그것이다.
+  //   ① 돌아간 부채꼴이 여전히 「이 칸의 것」으로 읽히는가 — 셋이 칸을 감싸는가
+  //   ② 아이콘이 보드 왼쪽 테두리를 물고 나가는 자리에서 잘려 보이지 않는가
+  //   ③ 비용이 오른 상태(10G 초과)의 안내 세 줄이 칸 아래에 다 들어가는가
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // **인덱스를 못 박지 않는다.** 3레인 10열 판을 성질로 찾는다(15-trimerge 와 같은 자).
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3));
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    // 행을 끝까지 연다. 0열이 배치 가능해지는 것은 행이 다 열린 뒤고, 거기가 이 컷의 목적지다.
+    state.openRows = Math.min(CFG.BOARD_H, CFG.OPEN_ROWS + CFG.UNLOCK_AT.length);
+    for (let i = 0; i < 6; i++) summon(state.deck[i % 3]);   // 소환값을 10G 위로 올린다
+    state.selected = null;
+    const occ = occupancy();
+    let spot = null;
+    for (let y = firstOpenRow(); y < CFG.BOARD_H && !spot; y++)
+      if (canPlace(0, y, 1, occ)) spot = { gx: 0, gy: y };
+    state.picker = { mode: 'summon', gx: spot.gx, gy: spot.gy, press: null };
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('17-summonedge', () => {
+    const s = pickerState();
+    if (!s.open) return '소환 부채꼴이 안 열렸다';
+    if (s.gx !== 0) return '0열 칸이 아니다: ' + s.gx;
+    if (CFG.BOARD_W !== 10) return '10열 판이 아니다: ' + CFG.BOARD_W;
+    const L = pickerLayout();
+    const p = cellToPx(s.gx, s.gy);
+    const cx = p.x + view.cell / 2;
+    // 돌아갔는가. 안 돌면 10시 아이콘이 칸 중심보다 50px 왼쪽에 있다.
+    if (L.icons.some(ic => ic.cx < cx - 1)) return '부채꼴이 안 돌았다 (왼쪽으로 나간 아이콘이 있다)';
+    const lo = 6 + PICK_ICON_R;
+    if (!L.icons.every(ic => ic.cx >= lo && ic.cx <= view.w - lo && ic.cy >= lo && ic.cy <= view.h - lo))
+      return '아이콘이 화면 밖이다';
+    if (summonCost() <= 10) return '소환값이 안 올랐다 (안내 세 줄이 안 나온다): ' + summonCost();
+    if (s.peek) return '길게 누른 상태다 (이 컷은 기본 상태여야 한다)';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };
