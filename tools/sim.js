@@ -107,7 +107,10 @@ const { RANGE: COVER_RANGE } = require('./paths.js');
 // `beginPath`/`stroke` 도 같이 남기는 것은 **한 번의 stroke 로 그은 선분 하나**를
 // 복원하기 위해서다 — moveTo/lineTo 만 모으면 여러 점을 이은 경로와 구분이 안 된다.
 // 도트 굽기는 fillRect 라 여기 안 걸린다(한 판에 몇십 줄이다).
-const GEOM = ['beginPath', 'moveTo', 'lineTo', 'stroke'];
+// `arc` 도 좌표를 남긴다(#68). 방사형 소환 아이콘이 관문 선과 같은 함정 자리다 —
+// 이름만 세면 「원을 그렸다」까지밖에 못 보고, 보드 밖이나 화면 밖에 그려도 통과한다.
+// 반지름까지 남겨야 「그 아이콘」인지 튜토리얼 링인지 갈린다.
+const GEOM = ['beginPath', 'moveTo', 'lineTo', 'stroke', 'arc'];
 function stubCtx(log, texts, geom) {
   return new Proxy({}, {
     get(_, p) {
@@ -225,6 +228,14 @@ const EXPOSE = [
   'sfx', 'sfxUnlock', 'sfxStats', 'SFX', 'SFX_VOICE_CAP', 'setSoundEnabled', 'toggleSound', 'fxState',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
+  // 방사형 소환(#68). 핸들러(pointerdown/move/up)에 로직을 안 남기고 이 함수들만
+  // 부르므로, 헤드리스가 손가락 없이 「눌렀다 · 밀었다 · 오래 눌렀다 · 뗐다」를
+  // 전부 밟을 수 있다 — mergePlace 와 같은 규칙이다. pickerHold 는 실시간 시계를
+  // 감는 유일한 통로다(frame 은 시뮬에 안 새게 일부러 안 내보낸다 — decayShake 와 같은 사정).
+  // 치수 상수까지 내보내는 건 PARTICLE_LIFE 와 같은 이유다 — 검사가 58·24·28·0.3 을
+  // 손으로 베끼면 값을 고쳤을 때 검사만 옛 값을 지키며 통과한다.
+  'pickerPressDown', 'pickerPressMove', 'pickerPressUp', 'pickerHold', 'pickerPeek', 'pickerState',
+  'PICK_R', 'PICK_ICON_R', 'PICK_HIT_R', 'PICK_HOLD', 'PICK_STEP',
   // 판이 덱을 제한하는 기계(#50). **계측 도구가 이걸 안 보면 제약 판을 못 잰다** —
   // `tools/affinity.js`·`tools/curve.js` 는 35덱을 고정으로 돌던 것이라 제약 판에서는
   // 못 고르는 덱을 재게 된다. 허용 목록을 도구 쪽에 베끼면 자가 두 벌이 되므로
@@ -307,6 +318,12 @@ function load(overrides) {
         });
       }
       return out;
+    },
+    // 화면에 그린 **원**을 전부 골라 낸다(#68). segments() 와 같은 취지고,
+    // 여기서는 순서를 안 본다 — 원 하나가 arc 한 번이라 그 호출이 곧 그 원이다.
+    circles() {
+      return drawGeom.filter(e => e.m === 'arc')
+        .map(e => ({ x: e.a[0], y: e.a[1], r: e.a[2] }));
     },
   };
   // 오디오 시계를 앞으로 감는 창. 큐 쿨다운은 게임 dt 가 아니라 이 시계로 잰다.

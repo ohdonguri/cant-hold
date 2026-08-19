@@ -1695,48 +1695,227 @@ function poolDeck(g, st) {
   }
 }
 
-// ── 빈 칸 소환 (2단계) ────────────────────────────────────────
+// ── 빈 칸 소환 (방사형 · #68) ─────────────────────────────────
+// 「그리는 코드는 멀쩡히 있는데 화면엔 없는」 함정이 이 리포에서 세 번째다(#58 이 그
+// 자리다). 그래서 상태도 개수도 아닌 **좌표**를 본다. 잠그는 것은 다섯이다.
+//   ① 아이콘이 칸 중심에서 `PICK_R` 만큼 떨어진 10시·12시·2시에 있다
+//   ② 히트박스가 서로 안 겹친다 — 겹치면 「어느 쪽이 눌렸나」가 좌표 몇 px 에 달리고,
+//      즉시 배치라 그건 곧 골드가 나가는 오조작이다
+//   ③ **탭 한 번**(눌렀다 뗀다)에 그 칸에 타워가 서고 골드가 나간다
+//   ④ 길게 누르면 **그 하나의** 사거리만 뜨고, 떼도 안 지어진다
+//   ⑤ **render() 가 그 좌표로 실제로 원을 그린다** — `draws.circles()` 로 대조한다.
+//      ①~④ 만 있으면 `pickerLayout` 만 맞고 `drawPicker` 가 딴 데 그리거나 아예 안
+//      그려도 전부 통과한다. 그게 정확히 #58 이 통과했던 방식이다
 {
-  console.log('빈 칸 소환');
+  console.log('빈 칸 소환 (방사형)');
   const g = load();
-  const { state } = g;
+  const { state, view } = g;
   g.pickStage(0);
   ['shredder', 'marksman', 'arc'].forEach(k => g.toggleDeckPick(k));
   g.startRun();
   state.gold = 500;
+  const near = (a, b) => Math.abs(a - b) < 0.01;
 
-  // 빈 칸을 골라 피커를 연다
+  // 빈 칸을 골라 부채꼴을 연다
   const occ = g.occupancy();
   let spot = null;
-  for (let y = g.firstOpenRow(); y < g.CFG.BOARD_H && !spot; y++)
-    for (let x = 0; x < g.CFG.BOARD_W && !spot; x++)
+  for (let y = g.firstOpenRow() + 1; y < g.CFG.BOARD_H - 1 && !spot; y++)
+    for (let x = 1; x < g.CFG.BOARD_W - 1 && !spot; x++)
       if (g.canPlace(x, y, 1, occ)) spot = { gx: x, gy: y };
 
-  state.picker = { ...spot, kind: null };
-  ok('1단계엔 배치 버튼이 없다', g.pickerLayout().actions.length === 0);
-  ok('카드가 덱 수만큼', g.pickerRects().length === g.CFG.DECK_SIZE);
+  state.picker = { mode: 'summon', ...spot, press: null };
+  const L = g.pickerLayout();
+  ok('아이콘이 덱 수만큼', L.icons.length === g.CFG.DECK_SIZE, String(L.icons.length));
+  ok('  pickerRects 가 그 아이콘을 그대로 준다', g.pickerRects().length === L.icons.length);
+  ok('배치 버튼이 없다 (탭 두 번)', L.actions.length === 0, String(L.actions.length));
 
-  // 카드 하나를 고른다
-  const card = g.pickerRects()[0];
-  const hit = g.pickerHit(card.x + 5, card.y + 5);
-  ok('카드가 눌린다', hit && hit.k === card.k, hit ? String(hit.k) : 'null');
-  state.picker.kind = card.k;
-  ok('2단계엔 배치/취소가 뜬다', g.pickerLayout().actions.length === 2);
-  ok('고르기만 해선 안 지어진다', state.towers.length === 0, String(state.towers.length));
+  // ① 10시·12시·2시. 각도를 게임 코드에서 안 베끼고 **시계 방향으로 직접 적는다** —
+  //    베끼면 `fanPoints` 를 통째로 지워도 같이 통과한다.
+  const p0 = g.cellToPx(spot.gx, spot.gy);
+  const cx = p0.x + view.cell / 2, cy = p0.y + view.cell / 2;
+  const CLOCK = [10, 12, 2];
+  let posOk = true, posWhy = [];
+  L.icons.forEach((ic, i) => {
+    const want = (CLOCK[i] % 12) * 30 - 90;                       // 12시 = -90°
+    const got = Math.atan2(ic.cy - cy, ic.cx - cx) * 180 / Math.PI;
+    const d = Math.hypot(ic.cx - cx, ic.cy - cy);
+    if (!near(d, g.PICK_R) || Math.abs(((got - want + 540) % 360) - 180) > 0.01) posOk = false;
+    posWhy.push(`${CLOCK[i]}시 ${got.toFixed(0)}° r${d.toFixed(0)}`);
+  });
+  ok('① 칸 중심 기준 10시·12시·2시 · 반경 PICK_R', posOk, posWhy.join(' / '));
+  ok('  손가락 이동이 60px 안', g.PICK_R <= 60, g.PICK_R + 'px');
 
-  // 취소
-  const cancel = g.pickerLayout().actions.find(a => a.act === 'cancel');
-  ok('취소 버튼이 잡힌다', g.pickerHit(cancel.x + 5, cancel.y + 5).act === 'cancel');
+  // ② 히트박스가 이웃과 안 겹친다. 이웃 간 거리는 60° 벌어진 두 반지름이라 PICK_R 이다.
+  ok('② 히트박스가 이웃과 안 겹친다', g.PICK_HIT_R * 2 <= g.PICK_R,
+    `지름 ${g.PICK_HIT_R * 2} vs 간격 ${g.PICK_R}`);
+  ok('  히트박스가 보이는 원보다 넉넉하다', g.PICK_HIT_R > g.PICK_ICON_R,
+    `${g.PICK_HIT_R} > ${g.PICK_ICON_R}`);
+  const mid = L.icons[1];
+  ok('  아이콘 한복판이 잡힌다', (g.pickerHit(mid.cx, mid.cy) || {}).k === mid.k);
+  ok('  히트박스 밖은 안 잡힌다', g.pickerHit(mid.cx, mid.cy - g.PICK_HIT_R - 2) === null);
+  // 두 원의 딱 중간. 겹치면 여기가 어느 한쪽으로 잡힌다.
+  ok('  이웃 사이 한복판은 안 잡힌다',
+    g.pickerHit((L.icons[0].cx + mid.cx) / 2, (L.icons[0].cy + mid.cy) / 2) === null);
 
-  // 배치
-  const place = g.pickerLayout().actions.find(a => a.act === 'place');
-  ok('배치 버튼이 잡힌다', g.pickerHit(place.x + 5, place.y + 5).act === 'place');
+  // ⑤ render() 가 그 좌표로 실제로 원을 그리는가. 좌표를 대조하지 않으면
+  //    drawPicker 를 통째로 지워도 위 단언이 전부 통과한다.
+  g.draws.reset();
+  g.render();
+  const circles = g.draws.circles();
+  ok('⑤ render 가 아이콘 셋을 그 좌표로 그린다',
+    L.icons.every(ic => circles.some(c => near(c.x, ic.cx) && near(c.y, ic.cy) && near(c.r, ic.r))),
+    `아이콘 ${L.icons.length} / 화면에 그린 원 ${circles.length}`);
+  ok('  비용이 아이콘마다 적힌다',
+    g.draws.text.filter(t => t === g.summonCost() + 'G').length === g.CFG.DECK_SIZE,
+    g.draws.text.filter(t => /G$/.test(t)).join(' '));
+  ok('  취소 경로를 알려 준다', g.draws.text.some(t => t.includes('밖을 누르면 취소')));
+
+  // ④ 길게 누르기. 누른 채로 시간을 감으면 그 하나의 사거리가 뜬다.
+  const holdK = L.icons[2].k;
+  g.pickerPressDown(L.icons[2].cx, L.icons[2].cy);
+  ok('④ 누르기만 해선 사거리가 안 뜬다', g.pickerPeek() === null);
+  g.draws.reset(); g.render();
+  const clipBare = g.draws.count('clip');
+  g.pickerHold(g.PICK_HOLD / 2);
+  ok('  문턱 전에는 아직 안 뜬다', g.pickerPeek() === null, String(g.pickerState().held));
+  g.pickerHold(g.PICK_HOLD / 2 + 0.001);
+  ok('  문턱을 넘으면 누른 그 하나만 뜬다', g.pickerPeek() === holdK, String(g.pickerPeek()));
+  g.draws.reset(); g.render();
+  // 사거리는 보드 rect 로 클립한 안쪽에 그린다. 셋을 겹쳐 그리면 여기가 +3 이 된다.
+  ok('  사거리 원이 정확히 하나 는다 (셋을 겹쳐 안 그린다)',
+    g.draws.count('clip') - clipBare === 1, `클립 ${clipBare} → ${g.draws.count('clip')}`);
+  ok('  들여다보는 중이라고 말해 준다', g.draws.text.some(t => t.includes('떼면 안 지어진다')));
+  ok('  길게 누른 채로는 아직 안 지어진다', state.towers.length === 0, String(state.towers.length));
+  const goldPeek = state.gold;
+  g.pickerPressUp();
+  ok('  떼도 안 지어진다 (조회는 골드를 안 쓴다)',
+    state.towers.length === 0 && state.gold === goldPeek, `${state.towers.length}대 ${state.gold}G`);
+  ok('  창은 그대로 열려 있다', g.pickerState().open === true);
+
+  // 밀어서 빠져나오기. 8px 은 #50 의 타워 드래그 문턱과 같은 값이라 여기서도 같이 잰다.
+  g.pickerPressDown(mid.cx, mid.cy);
+  g.pickerPressMove(mid.cx + 5, mid.cy);
+  ok('8px 안은 아직 탭이다', g.pickerState().moved === false);
+  g.pickerPressMove(mid.cx + 20, mid.cy);
+  ok('  8px 넘게 밀면 취소된다', g.pickerState().moved === true);
+  g.pickerPressUp();
+  ok('  밀고 떼면 안 지어진다', state.towers.length === 0, String(state.towers.length));
+  ok('  창은 그대로 열려 있다', g.pickerState().open === true);
+
+  // 밖을 누르면 아무 아이콘도 안 잡힌다 (핸들러가 그때 창을 닫는다)
+  ok('밖을 누르면 아이콘이 안 잡힌다', g.pickerPressDown(4, 4) === null);
+
+  // 골드 부족. 아이콘이 회색이 되고 이유가 뜨며, 눌러도 안 지어진다.
+  const keep = state.gold;
+  state.gold = g.summonCost() - 1;
+  g.draws.reset(); g.render();
+  ok('골드가 모자라면 이유가 뜬다', g.draws.text.some(t => t.includes('골드 부족')),
+    g.draws.text.filter(t => t.includes('G')).join(' '));
+  g.pickerPressDown(mid.cx, mid.cy);
+  g.pickerPressUp();
+  ok('  눌러도 안 지어진다', state.towers.length === 0, String(state.towers.length));
+  ok('  창도 안 닫힌다', g.pickerState().open === true);
+  state.gold = keep;
+
+  // ③ 탭 한 번에 타워가 선다
   const before = state.gold;
-  g.summon(state.picker.kind, spot.gx, spot.gy);
-  ok('배치하면 그 칸에 생긴다',
-    state.towers.length === 1 && state.towers[0].gx === spot.gx && state.towers[0].gy === spot.gy,
-    state.towers.length ? state.towers[0].gx + ',' + state.towers[0].gy : 'none');
-  ok('골드가 나간다', state.gold < before, before + ' -> ' + state.gold);
+  g.pickerPressDown(mid.cx, mid.cy);
+  g.pickerPressUp();
+  ok('③ 아이콘을 눌렀다 떼면 그 칸에 선다',
+    state.towers.length === 1 && state.towers[0].gx === spot.gx && state.towers[0].gy === spot.gy
+    && state.towers[0].kind === mid.k,
+    state.towers.length ? `${state.towers[0].kind} ${state.towers[0].gx},${state.towers[0].gy}` : 'none');
+  ok('  골드가 나간다', state.gold < before, before + ' -> ' + state.gold);
+  ok('  창이 닫힌다', g.pickerState().open === false);
+
+  // 못 놓는 칸은 이유를 말한다 — 부채꼴이 안 뜨는 것과 「반응이 없다」가 같아 보이면 안 된다.
+  ok('잠긴 구역·경로 칸은 애초에 못 연다',
+    !g.canPlace(0, 0, 1, g.occupancy()) || g.firstOpenRow() === 0);
+}
+
+// ── 소환 부채꼴의 가장자리 (#68) ──────────────────────────────
+// **이 티켓의 진짜 일이 여기다.** 가운데 칸은 12시면 끝이고 모서리가 어렵다.
+// ⑩ 세물머리(10열)는 0열 칸 중심이 보드 왼쪽 끝에서 18.5px 밖에 안 떨어져 있어서,
+// 돌리지 않으면 10시 아이콘이 화면 밖으로 50px 나간다.
+//
+// **열 판의 배치 가능한 칸을 전수로 돈다.** 잠그는 것은 셋이다.
+//   ① 원 **전체**가 화면 안 — 어느 칸에서도 안 잘린다. 이게 유일한 불변식이다
+//   ② 중심이 보드 밖으로 나가는 칸은 **맨 아랫줄의 좌우 끝 칸뿐**이다.
+//      기하학적으로 그 자리만 안 되기 때문이다 — 아래·옆이 동시에 막히면 안쪽으로
+//      열린 부채가 90°대인데 아이콘 셋은 120° 를 쓴다. 그 칸에서는 아이콘 하나가
+//      보드 아래 어두운 배경으로 조금 나가고, 그건 잘리는 것과 다르다
+//   ③ 손가락 이동이 어느 칸에서도 정확히 `PICK_R` — 밀어 넣기 보루로 안 빠졌다는 뜻이다
+{
+  console.log('소환 부채꼴 가장자리');
+  const g = load();
+  const { state, CFG, view } = g;
+  const lo = 6 + g.PICK_ICON_R;                     // index.html PICK_EDGE + PICK_ICON_R
+  let cut = [], odd = [], far = [], cells = 0, offBoard = 0;
+
+  for (let i = 0; i < g.STAGES.length; i++) {
+    g.loadStage(i);
+    state.phase = 'build';
+    state.deck = ['shredder', 'frost', 'marksman'];
+    // **게임이 실제로 도달할 수 있는 최대 개방 행에서 잰다.** 행이 다 열린 뒤가
+    // 맨 윗줄이 배치 가능해지는 순간이고, 거기가 이 검사의 목적지다.
+    state.openRows = Math.min(CFG.BOARD_H, CFG.OPEN_ROWS + CFG.UNLOCK_AT.length);
+    const occ = g.occupancy();
+    const bx2 = view.ox + view.cell * CFG.BOARD_W, by2 = view.oy + view.cell * CFG.BOARD_H;
+    const name = `${i + 1} ${g.STAGES[i].name}`;
+    let n = 0, out = 0;
+    const cutHere = [];          // 판마다 따로 모은다 — 합쳐 두면 실패 메시지가 딴 판을 가리킨다
+
+    for (let y = 0; y < CFG.BOARD_H; y++) for (let x = 0; x < CFG.BOARD_W; x++) {
+      if (!g.canPlace(x, y, 1, occ)) continue;
+      n++; cells++;
+      state.picker = { mode: 'summon', gx: x, gy: y, press: null };
+      const L = g.pickerLayout();
+      const p = g.cellToPx(x, y);
+      const cx = p.x + view.cell / 2, cy = p.y + view.cell / 2;
+      for (const ic of L.icons) {
+        if (!(ic.cx >= lo && ic.cx <= view.w - lo && ic.cy >= lo && ic.cy <= view.h - lo))
+          cutHere.push(`${name} (${x},${y}) ${ic.k} → ${ic.cx.toFixed(0)},${ic.cy.toFixed(0)}`);
+        if (!(ic.cx >= view.ox && ic.cx <= bx2 && ic.cy >= view.oy && ic.cy <= by2)) {
+          out++; offBoard++;
+          const corner = (x === 0 || x === CFG.BOARD_W - 1) && y === CFG.BOARD_H - 1;
+          if (!corner) odd.push(`${name} (${x},${y}) ${ic.k}`);
+        }
+        if (Math.abs(Math.hypot(ic.cx - cx, ic.cy - cy) - g.PICK_R) > 0.01)
+          far.push(`${name} (${x},${y}) ${Math.hypot(ic.cx - cx, ic.cy - cy).toFixed(1)}px`);
+      }
+    }
+    cut = cut.concat(cutHere);
+    ok(`${name} ${CFG.BOARD_W}x${CFG.BOARD_H} 칸 ${n} — 아이콘이 안 잘린다`,
+      n > 0 && cutHere.length === 0, cutHere.slice(0, 3).join(' · '));
+    if (out) console.log(`       (참고) ${name}: 보드 밖으로 조금 나간 아이콘 ${out}개 (맨 아랫줄 끝 칸)`);
+  }
+
+  ok('① 열 판 전수 — 어느 칸에서도 안 잘린다', cut.length === 0, cut.slice(0, 5).join(' · '));
+  ok('② 보드 밖은 맨 아랫줄 좌우 끝 칸뿐', odd.length === 0, odd.slice(0, 5).join(' · '));
+  ok('③ 손가락 이동이 어느 칸에서도 PICK_R', far.length === 0, far.slice(0, 5).join(' · '));
+  console.log(`       (참고) 배치 가능 칸 ${cells}개 · 그중 보드 밖 아이콘 ${offBoard}개`);
+
+  // 가장자리에서 render 가 실제로 그 좌표에 그리는가. 기하만 맞고 그림이 딴 데
+  // 있으면 #58 과 같은 통과가 된다 — 10열 판의 좌우 끝 칸에서 좌표를 대조한다.
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+  g.loadStage(g.STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3));
+  state.phase = 'build';
+  state.deck = ['shredder', 'frost', 'marksman'];
+  state.openRows = Math.min(CFG.BOARD_H, CFG.OPEN_ROWS + CFG.UNLOCK_AT.length);
+  const occ2 = g.occupancy();
+  for (const x of [0, CFG.BOARD_W - 1]) {
+    let y = -1;
+    for (let yy = g.firstOpenRow(); yy < CFG.BOARD_H; yy++) if (g.canPlace(x, yy, 1, occ2)) { y = yy; break; }
+    if (y < 0) { ok(`⑩ ${x}열에 배치 가능한 칸이 있다`, false); continue; }
+    state.picker = { mode: 'summon', gx: x, gy: y, press: null };
+    const L = g.pickerLayout();
+    g.draws.reset();
+    g.render();
+    const circles = g.draws.circles();
+    ok(`④ ⑩ 세물머리 ${x}열 (${x},${y}) — render 가 그 좌표로 그린다`,
+      L.icons.every(ic => circles.some(c => near(c.x, ic.cx) && near(c.y, ic.cy) && near(c.r, ic.r))),
+      L.icons.map(ic => `${ic.cx.toFixed(0)},${ic.cy.toFixed(0)}`).join(' '));
+  }
 }
 
 // ── 밸런스 ────────────────────────────────────────────────────
@@ -4921,8 +5100,13 @@ function poolDeck(g, st) {
     ok('  분기가 저장됨', t.b3 === 'B', String(t.b3));
     ok('  모달이 닫힘', state.choice === null);
   });
-  safe('소환 피커 1단계', () => { state.picker = { gx: 2, gy: 8, kind: null }; });
-  safe('소환 피커 2단계', () => { state.picker.kind = state.deck[0]; });
+  safe('소환 부채꼴', () => { state.picker = { mode: 'summon', gx: 2, gy: 8, press: null }; });
+  safe('소환 부채꼴 · 길게 누르는 중', () => {
+    const ic = g.pickerLayout().icons[0];
+    g.pickerPressDown(ic.cx, ic.cy);
+    g.pickerHold(g.PICK_HOLD + 0.01);
+  });
+  safe('소환 부채꼴 · 골드 부족', () => { g.pickerPressUp(); state.gold = 0; });
   safe('일시정지', () => {
     state.picker = null;
     state.paused = true;
