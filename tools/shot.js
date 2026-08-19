@@ -794,6 +794,76 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 자음 모티프 보드 (⑪ 빗장 10x14) ──────────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
+  // md5 가 통째로 갈린다).
+  //
+  // **이 컷이 있는 이유는 지형이 아니라 글자다.** 위 15-trimerge 와 보드 크기도
+  // 레인 수도 같아서 헤드리스 단언은 둘을 거의 못 가른다 — 갈리는 것은 **그림이
+  // ㅂ 으로 읽히는가** 하나뿐이고 그건 사람이 봐야 한다. 볼 것:
+  //   ① 세로 획 둘(x0 · x8)이 **판을 세로로 가르는 두 기둥**으로 읽히는가
+  //   ② 가로 획 둘(행 3 · 행 11)이 그 둘을 **가로지르는 빗장**으로 읽히는가 —
+  //      행 13 은 출구지 글자가 아니다. 셋이 한 덩어리로 뭉쳐 보이면 실패다
+  //   ③ 기둥 사이 빈 상자(행 4~10)가 **놓을 자리로** 보이는가. 이 판의 편차 2.07 이
+  //      전부 거기서 나온다 — 벽에 붙이면 값이 있고 한복판은 아무 데도 못 닿는다
+  //
+  // **판을 성질로 찾는다.** 3레인 판이 둘이라 `lanes.length === 3` 만으로는 ⑩ 이
+  // 걸린다 — 입구가 **위쪽 변에 둘**인 것이 이 판뿐이라(⑩ 은 하나) 그걸로 가른다.
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+      && s.lanes.filter(L => L[0].y < 0).length === 2));
+    ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 9600;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 경로(x0 세로 · x8 세로 · 행 11 · 행 13)를 피한다.
+    //
+    // **다섯 대만 놓는다 — 위 컷들보다 적고 그게 의도다.** 이 컷이 답해야 하는
+    // 질문은 「글자가 읽히는가」인데, 타워를 열 대 깔면 사거리 칠이 판을 덮어
+    // 경로선이 안 보인다(15-trimerge 를 나란히 놓으면 그 차이가 바로 보인다).
+    // 2x2 는 둘 다 남긴다 — 글자와 5성 자리의 크기 관계도 같이 봐야 한다.
+    put('arc',      5, 1, 7);         // 2x2. 열 1~2 x 행 7~8 — 왼 기둥에 붙인 자리
+    put('shredder', 5, 5, 9);         // 2x2. 열 5~6 x 행 9~10 — 아래 빗장에 붙인 자리
+    put('frost',    2, 9, 7);         // 오른 기둥 바깥 — 기둥 하나만 보는 자리
+    put('shredder', 3, 3, 12);        // 두 가로대 사이 — 아래 빗장과 출구를 같이 본다
+    put('frost',    1, 4, 6);         // 상자 한복판 — 아무 데도 안 닿는 자리
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('18-glyph', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
+      return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
+    // ⑩ 이 아니라 이 판인가. 위쪽 변 입구가 둘인 것이 이 판의 표식이다.
+    const top = lanes.filter(L => L.points[0].y < 0).length;
+    if (top !== 2) return '위쪽 변 입구가 ' + top + '개다 (⑩ 을 집었다)';
+    // 35덱 판이라야 한다. 제약이 붙으면 위 덱 세 장이 조용히 거절돼 덱 화면에 남는다.
+    if (STAGES[state.stage].allowKinds) return '제약 판이다: ' + STAGES[state.stage].name;
+    // 빗장 둘이 실제로 있는가. 가로로 이어진 경로 칸이 폭의 절반을 넘는 행을 센다 —
+    // 이 판은 행 3 · 11 · 13 이라 셋이고, 그중 둘이 글자다.
+    const bars = [];
+    for (let y = 0; y < CFG.BOARD_H; y++) {
+      let n = 0;
+      for (let x = 0; x < CFG.BOARD_W; x++) if (isPath(x, y)) n++;
+      if (n > CFG.BOARD_W / 2) bars.push(y);
+    }
+    if (bars.length !== 3) return '가로 획이 ' + bars.length + '줄이다 (빗장 둘 + 출구 하나라야 한다): ' + bars;
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (state.towers.filter(t => t.star >= 5).length !== 2) return '5성(2x2)이 둘이 아니다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };
