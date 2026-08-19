@@ -452,7 +452,11 @@ const capture = async (browser) => {
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
     // **인덱스를 못 박지 않는다.** 10열 판을 성질로 찾는다 — 판이 또 붙어도 안 밀린다.
-    pickStage(STAGES.findIndex(s => s.w === 10));
+    // **[#62] 레인 수까지 본다.** ⑩ 세물머리가 붙으면서 10열 판이 둘이 됐다.
+    // `w === 10` 만으로는 배열 순서에 기대는 셈이라(앞의 것을 집는다) 아래 확인
+    // 함수의 「2레인이 아니다」가 순서에 딸린 값이 된다 — 아래 15-trimerge 가 그
+    // 짝이고, 둘이 같은 성질로 갈려야 어느 쪽이 밀려도 조용히 안 바뀐다.
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 2));
     ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
     startRun();
     tuteMerged = true;
@@ -620,6 +624,66 @@ const capture = async (browser) => {
       return '금지 종류가 ' + blocked.length + '종이다';
     if (!deckLimitNote()) return '안내 줄이 비었다';
     if (state.deckPick.length !== 1) return '한 장만 고른 상태가 아니다: ' + state.deckPick.length;
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // ── 3레인 보드 (⑩ 세물머리 10x14) ─────────────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
+  // md5 가 통째로 갈린다).
+  //
+  // **이 게임에서 레인이 셋인 판은 이것뿐이다.** 11-tenwide 와 셀 크기(37.0px)는
+  // 같고 그림이 다르다. 헤드리스가 못 보는 것이 여기 셋이다:
+  //   ① 세 갈래가 서로 구분되게 그려지는가 — 두 갈래를 견주던 눈이 셋에서도 되는가
+  //   ② `(4,10)` 합류 지점이 **한 곳으로** 읽히는가 (셋이 한 칸에 겹쳐 들어온다)
+  //   ③ 입구가 세 변(왼·위·오른)에 하나씩 붙는데 세 갈래가 각자 제 변에서 들어오는
+  //      것으로 읽히는가 — 관문(출구)은 반대로 **한 곳뿐**이라, 「셋이 들어와 하나로
+  //      나간다」가 그림 하나에 같이 보여야 한다
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // **인덱스를 못 박는다.** 3레인 판을 성질로 찾는다 — 판이 앞뒤로 늘어도 안 밀린다.
+    pickStage(STAGES.findIndex(s => s.lanes.length === 3));
+    ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 9400;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 세 갈래와 합류 꼬리(행 10 의 x0~7 · 행 13 의 x0~3)를 피한다.
+    put('marksman', 5, 1, 7);         // 2x2. 열 1~2 x 행 7~8
+    put('shredder', 4, 4, 6);
+    put('frost',    3, 5, 6);
+    put('shredder', 2, 7, 6);
+    put('frost',    1, 8, 6);
+    put('marksman', 4, 8, 9);
+    put('shredder', 3, 9, 9);
+    put('frost',    2, 1, 11);
+    put('marksman', 1, 2, 12);
+    put('shredder', 5, 6, 11);        // 2x2. 열 6~7 x 행 11~12
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('15-trimerge', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
+      return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
+    // 35덱 판이라야 한다. 제약이 붙으면 위 덱 세 장이 조용히 거절돼 덱 화면에 남는다.
+    if (STAGES[state.stage].allowKinds) return '제약 판이다: ' + STAGES[state.stage].name;
+    // 합류가 실제로 있는가. 세 레인의 출구가 한 칸이라야 「셋이 하나로」가 그림이 된다.
+    const exits = new Set(lanes.map(L => {
+      const p = L.points[L.points.length - 1];
+      return p.x + ',' + p.y;
+    }));
+    if (exits.size !== 1) return '출구가 ' + exits.size + '곳이다 (합류가 없다)';
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (!state.towers.some(t => t.star >= 5)) return '5성(2x2)이 없다';
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });
