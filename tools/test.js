@@ -1316,6 +1316,317 @@ function known(name, worse, detail, why) {
   ok('덱 밖 타워는 안 나옴', outside.length === 0, outside.join(',') || '없음');
 }
 
+// ── 뒤로 가기 (#74) ───────────────────────────────────────────
+// 판에 들어가면 나갈 길이 없었다 — 유저 신고가 「브라우저를 종료해야 된다」였다.
+// 이 블록이 잠그는 것은 셋이다:
+//   ① 덱 화면에서 목록으로 가는 길이 **셋 다** 있는가 (버튼 · ESC · 브라우저 뒤로가기)
+//   ② 뒤로가기가 **목록에서만** 페이지를 나가는가
+//   ③ history 항목이 **한 개를 안 넘는가** (넘으면 뒤로가기를 두 번 눌러야 나간다)
+//
+// **셋 다 그림과 이벤트로 잰다.** 상태만 보면 버튼을 안 그려도, window 리스너를
+// 통째로 안 달아도 전부 통과한다 — `g.draws` 와 `g.key`/`g.nav` 가 그 창이다.
+{
+  console.log('뒤로 가기');
+
+  const enterDeck = (g) => { g.restart(); g.nav.flush(); g.pickStage(0); };
+  const enterRun = (g) => {
+    enterDeck(g);
+    ['shredder', 'frost', 'marksman'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+  };
+
+  // ① 덱 화면에 **버튼이 실제로 그려진다.** 좌표만 있고 안 그리면 모바일에는 길이 없다.
+  {
+    const g = load();
+    const { state } = g;
+    enterDeck(g);
+    state.toast = null;
+    g.draws.reset();
+    g.render();
+    ok('덱 화면에 뒤로 버튼을 그린다', g.draws.text.includes('뒤로'),
+      g.draws.text.slice(-4).join(' | '));
+
+    // 시작 버튼과 **겹치면 안 된다.** 겹치면 나가려다 판이 시작된다 — 이 티켓이
+    // 고치려는 사고와 정확히 같은 사고다.
+    const bk = g.deckBackRect(), st = g.deckStartRect();
+    ok('  뒤로와 시작이 안 겹친다', bk.x + bk.w <= st.x, `${bk.x + bk.w} <= ${st.x}`);
+    ok('  둘 다 화면 안', bk.x >= 0 && st.x + st.w <= 390 && bk.y + bk.h <= 844,
+      `${Math.round(bk.x)}+${Math.round(bk.w)} / ${Math.round(st.x)}+${Math.round(st.w)}`);
+    ok('  같은 줄이다', bk.y === st.y && bk.h === st.h, `${bk.y} / ${st.y}`);
+    // 카드 목록은 1px 도 안 뺏긴다. 이 줄이 없으면 뒤로 버튼을 넣느라 카드를 얇게
+    // 만들어도 아무것도 안 걸린다.
+    const last = g.deckLayout()[g.deckLayout().length - 1];
+    ok('  마지막 카드가 여전히 버튼 줄 위', last.y + last.h < bk.y, `${last.y + last.h} < ${bk.y}`);
+  }
+
+  // ② 셋 다 목록으로 간다. **각각 새 판에서 재야 한다** — 한 판에서 이어 재면
+  //    앞의 것이 이미 목록으로 보낸 뒤라 뒤의 둘이 무조건 통과한다.
+  for (const [name, go] of [
+    ['버튼', g => g.navBack()],            // pointerdown 의 뒤로 상자가 부르는 것
+    ['ESC', g => g.key('Escape')],
+    ['브라우저 뒤로가기', g => g.nav.pressBack()],
+  ]) {
+    const g = load();
+    enterDeck(g);
+    ok(`덱 화면 · ${name} 로 목록에 간다`, (go(g), g.nav.flush(), g.state.phase === 'stage'),
+      g.state.phase);
+    ok(`  ${name} 뒤에 항목이 안 남는다`, g.navState().pushed === 0 && g.nav.depth() === 0,
+      JSON.stringify(g.navState()) + ' depth ' + g.nav.depth());
+  }
+
+  // ③ 목록에서만 페이지를 나간다. 모바일에서 뒤로가기는 반사적으로 눌리는 버튼이라
+  //    이 한 줄이 이 티켓의 실제 원인이다.
+  {
+    const g = load();
+    g.nav.pressBack();
+    ok('목록에서 뒤로가기는 페이지를 나간다', g.nav.exited());
+
+    const h = load();
+    enterDeck(h);
+    h.nav.pressBack();
+    ok('덱 화면에서는 페이지를 안 나간다', !h.nav.exited() && h.state.phase === 'stage', h.state.phase);
+
+    const r = load();
+    enterRun(r);
+    r.nav.pressBack();
+    ok('판에서는 페이지를 안 나간다', !r.nav.exited() && r.state.phase === 'build', r.state.phase);
+  }
+
+  // ④ 판 중의 뒤로가기는 **진행을 절대 안 버린다.** 정지 화면(=나가기가 있는 화면)을
+  //    열고, 한 번 더 누르면 도로 닫는다. 그 사이에 타워가 한 대도 안 사라져야 한다.
+  {
+    const g = load();
+    const { state } = g;
+    enterRun(g);
+    state.gold = 9999;
+    for (let i = 0; i < 6; i++) g.summon();
+    const n = state.towers.length;
+    ok('판에 타워를 깔았다', n >= 6, String(n));
+
+    g.nav.pressBack();
+    ok('판에서 뒤로 = 정지 화면', state.paused === true && state.phase === 'build', state.phase);
+    ok('  판은 그대로다', state.towers.length === n, `${n} → ${state.towers.length}`);
+    g.nav.pressBack();
+    ok('한 번 더 누르면 정지가 풀린다', state.paused === false && state.phase === 'build');
+    ok('  그래도 판은 그대로다', state.towers.length === n, `${n} → ${state.towers.length}`);
+
+    // 웨이브 중에도 같다. 여기서 바로 나가지면 확인 없이 진행을 버리는 것이 된다.
+    state.phase = 'wave';
+    g.nav.pressBack();
+    ok('웨이브 중 뒤로도 정지 화면까지만', state.paused === true && state.phase === 'wave',
+      state.phase + ' paused=' + state.paused);
+    ok('  적도 타워도 그대로다', state.towers.length === n);
+  }
+
+  // ⑤ 열려 있는 것을 먼저 닫는다. ESC 가 이미 그 규칙이라(#24 · #68) 뒤로가기가
+  //    다른 순서로 움직이면 같은 화면에서 두 키가 다른 뜻이 된다.
+  {
+    const g = load();
+    const { state } = g;
+    enterRun(g);
+    state.gold = 9999;
+
+    state.picker = { mode: 'summon', gx: 3, gy: 9, press: null };
+    g.nav.pressBack();
+    ok('소환 피커를 먼저 닫는다', state.picker === null && !state.paused && state.phase === 'build',
+      state.phase + ' paused=' + state.paused);
+
+    // 2x2 배치 모드. **커밋 전이라 판은 아직 안 바뀐 상태**여서 지우는 것으로 닫힌다.
+    state.towers.length = 0;
+    const put = (kind, star, gx, gy) => {
+      const t = { id: 900 + state.towers.length, gx, gy, kind, star, b3: null, b5: null, t7: null,
+        cd: 0, angle: 0, flash: 0, streak: 0, lastTarget: null, arcKills: 0 };
+      state.towers.push(t);
+      return t;
+    };
+    const a = put('marksman', 4, 1, 8), b = put('marksman', 4, 3, 8);
+    g.beginMergePlace(a, b);
+    ok('  2x2 배치 모드가 열렸다', g.mergePlaceState().open);
+    const before = state.towers.length;
+    g.nav.pressBack();
+    ok('배치 모드를 먼저 닫는다',
+      !g.mergePlaceState().open && !state.paused && state.towers.length === before,
+      `paused=${state.paused} 타워 ${before} → ${state.towers.length}`);
+
+    // 분기 선택은 되돌릴 수 없다 — ESC 와 같이 안 닫는다.
+    g.openChoice(state.towers[0], 3);
+    g.nav.pressBack();
+    ok('분기 선택은 뒤로가기로 안 닫힌다', !!state.choice && !state.paused);
+    g.clearChoices();
+  }
+
+  // ⑥ 판 나가기 — 준비 단계는 **통째로 이어하기로 남는다.**
+  {
+    const g = load();
+    const { state } = g;
+    enterRun(g);
+    state.gold = 9999;
+    for (let i = 0; i < 6; i++) g.summon();
+    const n = state.towers.length;
+
+    g.togglePause();
+    state.toast = null;
+    g.draws.reset();
+    g.render();
+    ok('정지 화면에 나가기를 그린다', g.draws.text.includes('판 나가기'),
+      g.draws.text.filter(s => s.includes('나가')).join(' | ') || '(안 그림)');
+    ok('  나가기가 눌리는 자리를 세운다', !!g.exitRunState().rect,
+      JSON.stringify(g.exitRunState().rect));
+    // **잃는 것을 누르기 전에 적는다.** 이 줄이 「미리 알린다」의 전부다.
+    const note = g.exitRunNote();
+    ok('  잃는 것을 화면에 적는다', g.draws.text.includes(note), note);
+    ok('  준비 단계는 이어하기로 남는다고 적는다', note.includes('이어하기'), note);
+
+    g.exitRunTap();
+    // 브라우저는 back() 의 popstate 를 나중에 준다. 여기서 흘려 보내는 것이 **실제
+    // 순서다** — 사람은 목록이 뜬 다음에 이어하기를 누른다.
+    g.nav.flush();
+    ok('준비 단계는 한 번에 나간다', state.phase === 'stage', state.phase);
+    ok('  나가면 정지도 풀린다', state.paused === false);
+    ok('  나가면 항목이 안 남는다', g.nav.depth() === 0 && g.navState().pushed === 0,
+      'depth ' + g.nav.depth());
+
+    // 목록에 이어하기가 실제로 떠야 한다. 안 뜨면 판을 버린 것과 같다.
+    g.draws.reset();
+    g.render();
+    ok('  목록에 이어하기가 뜬다', g.draws.text.includes('이어하기'),
+      g.draws.text.slice(0, 8).join(' | '));
+    g.resumeRun();
+    ok('  이어하면 그 판이 그대로 돌아온다',
+      state.phase === 'build' && state.towers.length === n,
+      `${state.phase} 타워 ${n} → ${state.towers.length}`);
+    ok('  이어하기도 항목은 하나다', g.nav.depth() === 1 && g.navState().pushed === 1,
+      'depth ' + g.nav.depth());
+  }
+
+  // ⑦ 웨이브 중 나가기는 **두 번 눌러야 한다.** 정지 화면은 아무 데나 눌러도
+  //    재개되는 화면이라, 한 번에 나가지면 재개하려다 스친 손가락이 판을 버린다.
+  {
+    const g = load();
+    const { state } = g;
+    enterRun(g);
+    state.gold = 9999;
+    for (let i = 0; i < 6; i++) g.summon();
+    state.phase = 'wave';
+    state.wave = 1;
+
+    g.togglePause();
+    g.exitRunTap();
+    ok('웨이브 중 첫 탭은 확인만 받는다', state.phase === 'wave' && g.exitRunState().armed,
+      state.phase);
+    state.toast = null;
+    g.draws.reset();
+    g.render();
+    ok('  확인을 화면으로 말한다', g.draws.text.includes('한 번 더 누르면 나갑니다'),
+      g.draws.text.filter(s => s.includes('누르면')).join(' | '));
+
+    // 정지를 껐다 켜면 무장이 풀려야 한다. 안 그러면 **다음 화면의 첫 탭이 곧 나가기**다.
+    g.togglePause();
+    g.togglePause();
+    ok('  정지를 껐다 켜면 확인이 풀린다', !g.exitRunState().armed);
+
+    g.exitRunTap();
+    g.exitRunTap();
+    ok('두 번 누르면 나간다', state.phase === 'stage', state.phase);
+  }
+
+  // ⑧ 경고 문구가 **사실인가.** 「이 판은 처음부터다」는 첫 웨이브 중에만 참이다 —
+  //    한 웨이브라도 넘겼으면 endWave 가 찍어 둔 기록이 남아 있어서 거기서 이어진다.
+  //    거짓말을 적어 두면 나가기를 안 누르게 되고, 그러면 출구가 없는 것과 같다.
+  {
+    const g = load();
+    const { state } = g;
+    enterRun(g);
+    state.phase = 'wave';
+    state.wave = 1;
+    ok('첫 웨이브 중이면 판이 처음부터다', g.exitRunNote() === '이 판은 처음부터입니다',
+      g.exitRunNote());
+
+    // 한 웨이브를 넘긴다. endWave 가 준비 단계 스냅샷을 찍는다.
+    g.endWave();
+    state.phase = 'wave';
+    state.wave = 2;
+    const note = g.exitRunNote();
+    ok('한 웨이브를 넘겼으면 그 웨이브만 잃는다',
+      !note.includes('처음부터입니다') && note.includes('웨이브 2'), note);
+
+    // 나가도 그 기록을 **안 지운다.** 지우면 위 문구가 거짓이 된다.
+    g.exitRunTap(); g.exitRunTap();
+    ok('  나가도 직전 웨이브 기록이 남는다', (g.draws.reset(), g.render(),
+      g.draws.text.includes('이어하기')), g.draws.text.slice(0, 6).join(' | '));
+  }
+
+  // ⑨ **항목은 한 개를 안 넘는다.** 화면 깊이만큼 쌓으면 판에서 목록으로 나갈 때
+  //    두 번 눌러야 한다 — 이 티켓이 만들 수 있는 가장 나쁜 회귀다.
+  {
+    const g = load();
+    const { state } = g;
+    ok('목록에서는 항목이 없다', g.nav.depth() === 0 && g.navState().pushed === 0);
+    g.pickStage(0);
+    ok('덱에서 항목 하나', g.nav.depth() === 1, 'depth ' + g.nav.depth());
+    ['shredder', 'frost', 'marksman'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    ok('판에서도 항목 하나', g.nav.depth() === 1, 'depth ' + g.nav.depth());
+
+    // 뒤로를 여러 번 눌러도 안 늘어난다(소비하고 곧바로 다시 쌓으므로 늘 하나다).
+    for (let i = 0; i < 6; i++) g.nav.pressBack();
+    ok('여러 번 눌러도 항목은 하나', g.nav.depth() <= 1 && !g.nav.exited(),
+      'depth ' + g.nav.depth());
+
+    // **걷고 다시 쌓기가 한 태스크에 겹치는 경우**(tools/shot.js 가 컷마다 그렇게
+    // 한다). popstate 는 나중에 오는데 그 사이에 쌓아 둔 항목을 그 이벤트가 먹으면
+    // 화면이 한 칸 더 뒤로 간다.
+    g.restart();
+    g.pickStage(0);
+    ['shredder', 'frost', 'marksman'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    g.nav.flush();
+    ok('걷고 곧바로 다시 쌓아도 화면이 안 밀린다',
+      state.phase === 'build' && !state.paused && g.nav.depth() === 1,
+      `${state.phase} paused=${state.paused} depth ${g.nav.depth()}`);
+  }
+
+  // ⑪ **새로고침은 쌓아 둔 항목 위에서 다시 시작한다.** 모바일에서 탭이 배경으로
+  //    내려갔다 오면 흔히 그렇게 된다. 페이지는 목록부터 시작하는데 항목은 남아 있으므로,
+  //    그걸 모른 척하면 **목록에서 뒤로가기를 한 번 헛눌러야** 나간다 — 이 티켓이 만들
+  //    수 있는 가장 조용한 회귀다(원래 동작은 늘 한 번에 나가는 것이었다).
+  {
+    const before = load();
+    before.pickStage(0);
+    ok('새로고침 전에 항목이 하나 있다', before.nav.depth() === 1, 'depth ' + before.nav.depth());
+
+    // 항목은 그대로 두고 페이지만 새로 싣는다.
+    const g = load(null, { history: before.nav });
+    ok('  새로고침하면 목록부터 시작한다', g.state.phase === 'stage', g.state.phase);
+    g.nav.pressBack();
+    ok('새로고침 뒤에도 뒤로가기 한 번에 나간다', g.nav.exited(),
+      `phase ${g.state.phase} · depth ${g.nav.depth()}`);
+  }
+
+  // ⑩ 나가기는 **`restart()` 를 지나야 한다.** #60 이 「시작 시 열린 행 수가 직전
+  //    판을 따라간다」를 고치면서 `openRows` 의 주인을 `loadStage` 로 옮겼는데, 새
+  //    출구가 목록을 안 거치고 판을 갈아끼우면 그 버그가 그대로 되살아난다.
+  {
+    const g = load();
+    const { state, CFG } = g;
+    g.applyBundle({ v: 1, unlocked: g.STAGES.length, best: g.STAGES.map(s => s.waves), run: null });
+    const big = g.STAGES.findIndex(s => s.openRows !== g.STAGES[0].openRows);
+    if (big < 0) {
+      ok('나가기 뒤에도 열린 행 수가 판 정의를 따른다', true, '(판 정의가 전부 같다)');
+    } else {
+      enterRun(g);
+      state.openRows = CFG.BOARD_H;          // 행이 다 열린 판을 한 판 하고
+      g.togglePause();
+      g.exitRunTap();                        // 나가기로 나온 뒤
+      g.nav.flush();
+      g.pickStage(big);                      // 다른 판을 고른다
+      ok('나가기 뒤에도 열린 행 수가 판 정의를 따른다',
+        state.phase === 'deck' && state.openRows === g.STAGES[big].openRows,
+        `${state.phase} · ${state.openRows} / 정의 ${g.STAGES[big].openRows}`);
+    }
+  }
+}
+
 // ── 덱 제약 기계 (#50) ────────────────────────────────────────
 // 판이 덱을 제한한다(`allowKinds`). 이 블록이 잠그는 것은 **기계**이지 특정 판이
 // 아니다 — 제약이 걸린 판 자체가 실제로 강제되는지는 아래 「강제」 블록이 잰다.

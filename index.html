@@ -1069,6 +1069,10 @@ function togglePause() {
   // 지난번 정지 화면의 자리가 아직 안 그려진 첫 프레임에 그대로 먹힌다.
   shakeToggleRect = null;
   soundToggleRect = null;
+  // 나가기 확인도 같이 되돌린다. 무장한 채로 정지를 껐다 켜면 **다음 화면의 첫 탭이
+  // 곧 나가기**가 된다 — 확인을 붙인 이유가 통째로 사라지는 자리다.
+  exitRunRect = null;
+  exitArmed = false;
   if (!state.paused) return;
   // 멈추는 순간 손에 들고 있던 것들을 놓는다. 키보드 ESC 로 멈추면
   // 손가락은 아직 타워를 끄는 중일 수 있고, 그대로 두면 재개할 때
@@ -1124,6 +1128,9 @@ function startRun() {
   state.deck = state.deckPick.slice();
   state.phase = 'build';
   state.timer = CFG.WAVE_GAP;
+  // 덱 → 판. 목록에서 들어왔으면 pickStage 가 이미 쌓아 뒀으므로 여기서는 대개
+  // 아무 일도 안 한다 — 항목은 언제나 한 개다(#74).
+  navArm();
 }
 
 // 소환 비용. 웨이브가 넘어갈 때 누적분이 30% 감쇠한다.
@@ -3517,6 +3524,9 @@ function resumeRun() {
   if (!savedRun) return;
   if (!restoreRun(savedRun)) { savedRun = null; persist(); toast('이어할 수 없는 기록'); return; }
   state.selected = null;
+  // 목록에서 **덱을 안 거치고** 바로 판으로 들어간다. 그래도 쌓는 항목은 하나다 —
+  // 뒤로가기 한 번이 정지 화면을 열고, 거기서 나가면 목록이다(#74).
+  navArm();
 }
 
 // 스테이지 화면의 탭 하나. **끌지 않았을 때만** 불린다(pointerup).
@@ -3541,6 +3551,7 @@ function pickStage(i) {
   loadStage(i);
   state.phase = 'deck';
   state.deckPick = [];
+  navArm();   // 목록 → 덱. 뒤로가기 한 번이 여기로 되돌아온다(#74)
 }
 
 // ── 빈 칸 탭 → 소환 ───────────────────────────────────────────
@@ -3961,9 +3972,22 @@ function deckLayout() {
 
 function deckCardRects() { return deckLayout().filter(i => i.type === 'card'); }
 
-function deckStartRect() {
+// 뒤로. **시작 버튼과 같은 줄에 나란히 둔다**(#74). 모바일에는 ESC 가 없고
+// 브라우저 뒤로가기는 손이 화면 밖으로 나가야 닿으므로, 화면 안에 자리가 있어야
+// 한다 — 「잘못 골랐다」가 이 화면에서 가장 흔한 사건이다.
+//
+// **위가 아니라 아래인 이유**: 카드 목록이 `top = 118` 에서 시작하고(deckLayout)
+// 그 위는 안내 세 줄이 이미 쓰고 있다. 위에 줄을 하나 더 내면 일곱 장이 그만큼
+// 얇아진다 — 그 계산은 `deckLayout` 의 `bottomKeep` 이 이미 하고 있고, 이 줄은
+// 그 안에 들어가므로 **카드 높이를 1px 도 안 건드린다.**
+function deckBackRect() {
   const pad = 16;
-  return { x: pad, y: view.h - 74, w: view.w - pad * 2, h: 56 };
+  return { x: pad, y: view.h - 74, w: 76, h: 56 };
+}
+
+function deckStartRect() {
+  const pad = 16, gap = 10, b = deckBackRect();
+  return { x: b.x + b.w + gap, y: b.y, w: view.w - pad - (b.x + b.w + gap), h: 56 };
 }
 
 function drawDeckSelect() {
@@ -4054,6 +4078,21 @@ function drawDeckSelect() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(ready ? '시작' : `${state.deckPick.length} / ${CFG.DECK_SIZE} 선택`, b.x + b.w / 2, b.y + b.h / 2);
+
+  // 뒤로. 시작과 같은 줄이지만 **테두리만 있는 상자**라 눌러야 하는 쪽이 안 헷갈린다.
+  // 글자만 쓰고 화살표 글리프는 안 쓴다 — 정지 버튼 아이콘 주석과 같은 이유로,
+  // 기기에 따라 두부(□)로 떨어지면 확인할 방법이 없는 자리다.
+  const bk = deckBackRect();
+  ctx.fillStyle = '#161b22';
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1.5;
+  roundRect(bk.x, bk.y, bk.w, bk.h, 10);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '600 15px system-ui, sans-serif';
+  ctx.fillText('뒤로', bk.x + bk.w / 2, bk.y + bk.h / 2);
+
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
 }
@@ -4106,6 +4145,7 @@ canvas.addEventListener('pointerdown', e => {
     const onRect = r => r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
     if (onRect(shakeToggleRect)) { toggleShake(); return; }
     if (onRect(soundToggleRect)) { toggleSound(); return; }
+    if (onRect(exitRunRect)) { exitRunTap(); return; }
     state.paused = false;
     return;
   }
@@ -4121,6 +4161,10 @@ canvas.addEventListener('pointerdown', e => {
   if (state.phase === 'deck') {
     const hit = deckCardRects().find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
     if (hit) { toggleDeckPick(hit.k); return; }
+    // 뒤로를 **시작보다 먼저** 본다. 두 상자는 안 겹치지만, 겹치는 날 판에 들어가는
+    // 쪽이 이기면 「나가려다 판이 시작된다」가 된다 — 두 오답 중 나쁜 쪽이다.
+    const bk = deckBackRect();
+    if (px >= bk.x && px <= bk.x + bk.w && py >= bk.y && py <= bk.y + bk.h) { navBack(); return; }
     const b = deckStartRect();
     if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) startRun();
     return;
@@ -4230,9 +4274,122 @@ canvas.addEventListener('pointercancel', () => {
   if (state.picker && state.picker.press) state.picker.press = null;
 });
 
-// ESC 는 열려 있는 창을 먼저 닫는다. 닫을 게 없으면 판을 세운다.
+// ── 뒤로 가기 (#74) ──────────────────────────────────────────
+// 화면은 한 줄이다: **목록 → 덱 → 판.** 「뒤로」는 그 줄을 한 칸 거슬러 오르는 동작
+// 하나뿐이고, 화면의 버튼 · ESC · 브라우저 뒤로가기 셋이 전부 `goBack()` 하나를 부른다.
+// 셋이 각자 판단하면 같은 자리에서 셋이 다른 뜻이 된다 — 덱 화면이 정확히 그랬다
+// (ESC 는 명시적으로 막혀 있었고, 버튼은 없었고, 뒤로가기는 페이지를 나갔다).
+//
+// **history 항목은 한 개를 넘기지 않는다.** 화면 깊이만큼 쌓으면(목록→덱→판 = 2개)
+// 판에서 나갈 때 몇 개를 걷어야 하는지가 경로마다 달라지고, 그 셈이 한 번 어긋나면
+// 「뒤로가기를 두 번 눌러야 나가는 화면」이 된다. 대신 **소비한 즉시 다시 쌓는다**
+// (아래 popstate). 그래서 불변식이 하나로 줄어든다:
+//   목록  항목 0개 → 뒤로가기가 페이지를 나간다 (원래 동작이고, 나가도 되는 유일한 자리다)
+//   그 외 항목 1개 → 뒤로가기가 우리 것을 먹고 goBack() 이 화면을 한 칸 되돌린다
+//
+// **쌓는 문과 걷는 문이 각각 정해져 있다.** 판으로 들어가는 문 셋(pickStage ·
+// startRun · resumeRun)이 `navArm()` 을, 목록으로 나가는 문 하나(restart)가
+// `navDrop()` 을 부른다. 화면을 바꾸는 경로가 나중에 늘어도 이 넷만 지나면 된다 —
+// 화면 전이마다 pushState 를 흩어 놓지 않는 이유가 이것이다.
+const NAV_MARK = 'canthold-screen';
+// 헤드리스(tools/sim.js)에는 history 가 없다. 없으면 화면만 되돌리고 끝낸다 —
+// 그래야 시뮬·테스트가 이 파일을 그대로 실을 수 있다.
+const nav = typeof history !== 'undefined' && typeof history.pushState === 'function' ? history : null;
+let navPushed = 0;       // 우리가 쌓아 둔 항목 수. 0 아니면 1이다
+let navDropping = false; // navDrop 이 부른 back 의 popstate 를 기다리는 중
+
+// **새로고침은 쌓아 둔 항목 위에서 다시 시작할 수 있다.** 판에 들어가 있는 동안 탭이
+// 되살아나면(모바일에서는 배경으로 내려갔다 오면 흔히 그런다) 페이지는 항목 하나를
+// 딛고 선 채로 목록부터 다시 시작한다. 그 항목을 모른 척하면 **목록에서 뒤로가기를 한
+// 번 헛눌러야** 하므로, 여기서 우리 것으로 이어받는다. 표식은 지운다 — 남겨 두면 아래
+// 「앞으로 가기」 분기가 이 항목을 자기 것으로 오해한다.
+if (nav && nav.state && nav.state[NAV_MARK]) {
+  nav.replaceState(null, '');
+  navPushed = 1;
+}
+
+function navArm() {
+  if (navPushed || navDropping || !nav || state.phase === 'stage') return;
+  nav.pushState({ [NAV_MARK]: 1 }, '');
+  navPushed = 1;
+}
+
+// 목록으로 돌아왔다 — 쌓아 둔 항목을 걷는다. **`navPushed` 를 먼저 0 으로 내린다.**
+// 그래야 이 back() 이 되돌려 보내는 popstate 를 아래 핸들러가 「우리가 부른 것」으로
+// 알아보고 화면을 한 칸 더 되돌리지 않는다.
+//
+// `navDropping` 은 **한 태스크 안에서 걷고 다시 쌓는 경우**를 위한 것이다. back() 은
+// 큐에 들어가고 popstate 는 나중에 오는데, 그 사이에 화면이 다시 판으로 들어가 있으면
+// 뒤늦게 도착한 popstate 가 그 화면을 한 칸 더 되돌린다(`tools/shot.js` 가 컷마다
+// `restart(); pickStage(...)` 를 한 번에 부르는 것이 정확히 그 모양이다).
+// **불변식을 지키는 것은 아래 popstate 의 첫 분기다** — 우리가 부른 back 인 줄 알아보고
+// 화면 대신 항목만 다시 맞춘다. 그 한 줄을 지우면 `npm test` 의 「걷고 곧바로 다시
+// 쌓아도 화면이 안 밀린다」가 깨진다.
+//
+// `navArm()` 쪽의 `navDropping` 조건은 **그 위에 덧댄 것이고 관측 가능한 효과가 없다**
+// (지워도 검사가 안 깨진다 — 확인했다). 남겨 두는 이유는 하나다: 큐에 back 이 들어가
+// 있는 동안 `pushState` 를 부르지 않는 쪽이 브라우저마다 덜 위험하고, 그 차이는
+// 헤드리스 스텁이 재현할 수 없는 종류다.
+function navDrop() {
+  if (!navPushed || !nav) { navPushed = 0; return; }
+  navPushed = 0;
+  navDropping = true;
+  nav.back();
+}
+
+// 뒤로 요청 하나. 쌓아 둔 항목이 있으면 **브라우저에게 맡긴다** — 그래야 화면과
+// history 가 같은 경로로 움직인다. 직접 goBack() 을 부르면 화면만 뒤로 가고 항목은
+// 그대로 남아서, 목록에서 뒤로가기를 한 번 헛눌러야 나가게 된다.
+function navBack() {
+  if (navPushed && nav) { nav.back(); return; }
+  goBack();
+}
+
+// 읽기용 게터. 헤드리스가 「지금 항목을 들고 있나」를 볼 유일한 창이다.
+function navState() { return { pushed: navPushed, dropping: navDropping }; }
+
+window.addEventListener('popstate', e => {
+  // navDrop 이 부른 back 이 돌아왔다. 화면은 이미 목록이므로 되돌릴 것이 없고,
+  // 그 사이에 다른 화면으로 들어갔다면 여기서 다시 쌓는다.
+  if (navDropping) { navDropping = false; navArm(); return; }
+  // 앞으로 가기로 우리 항목에 **다시 들어왔다.** 화면은 그대로 두고 소유만 되찾는다.
+  if (e && e.state && e.state[NAV_MARK]) { navPushed = 1; return; }
+  if (!navPushed) return;   // 우리가 쌓은 항목이 아니다
+  navPushed = 0;
+  const was = state.phase;
+  goBack();
+  navArm();                 // 아직 목록이 아니면 다음 한 번을 위해 다시 쌓는다
+  // **목록에서 소비된 항목은 되돌릴 화면이 없다.** 이어받은 새로고침 전 항목이
+  // 그것뿐이다(위 replaceState). 여기서 그냥 끝내면 그 한 번이 아무 일도 안 한 것이
+  // 되므로 — 즉 목록에서 뒤로가기를 두 번 눌러야 나가게 되므로 — **눌린 뜻대로 한 번
+  // 더 뒤로 보낸다.** 항목은 유한하고 한 번에 하나씩 줄어드니 여기서 안 돈다.
+  if (was === 'stage' && nav) nav.back();
+});
+
+// 「뒤로」 한 번이 하는 일. **열려 있는 것을 먼저 닫는다** — ESC 가 이미 그 규칙이라
+// (아래 keydown) 뒤로가기가 다른 순서로 움직이면 같은 화면에서 두 키가 다른 뜻이 된다.
+function goBack() {
+  // mergePlace(#24)·소환 피커(#68) 둘 다 `state.picker` 다. 지우는 것으로 닫는 것은
+  // ESC 와 한 글자도 안 다르다 — 두 모드 다 커밋 전에는 판을 안 건드린다(2.10).
+  if (state.picker) { state.picker = null; return; }
+  if (state.choice) return;                      // 분기 선택은 되돌릴 수 없으니 안 닫는다
+  if (state.paused) { togglePause(); return; }   // 덮개를 먼저 걷는다
+  if (state.phase === 'stage') return;           // 목록이 끝이다. 더 뒤는 페이지 밖이다
+  if (state.phase === 'deck') { restart(); return; }
+  if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
+  // 판 중이다. **여기서 바로 안 나간다.** 나가면 잃는 것이 phase 마다 다르고(준비
+  // 단계는 통째로 이어하기로 남지만 웨이브 중에는 그 웨이브가 날아간다), 그 사실을
+  // 적어 두는 자리가 정지 화면의 나가기 줄이다(exitRunNote). 안드로이드에서 게임 중
+  // 뒤로가기가 정지 메뉴를 여는 것과 같은 동작이고, **뒤로가기만으로는 진행이 절대
+  // 안 날아간다**는 것이 이 한 줄의 값이다.
+  togglePause();
+}
+
+// ESC 는 「뒤로」 키다. p 는 정지 전용이라 화면을 안 옮긴다 — 두 키를 한 함수로 묶으면
+// 덱 화면에서 p 가 목록으로 나가는 화면이 된다.
 window.addEventListener('keydown', e => {
-  if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return;
+  if (e.key === 'Escape') { e.preventDefault(); navBack(); return; }
+  if (e.key !== 'p' && e.key !== 'P') return;
   e.preventDefault();
   if (state.phase === 'stage' || state.phase === 'deck') return;
   if (state.picker) { state.picker = null; return; }
@@ -4241,6 +4398,10 @@ window.addEventListener('keydown', e => {
 });
 
 function restart() {
+  // 목록으로 나가는 **유일한 문**이라 여기서 history 항목을 걷는다(#74 · navDrop).
+  // 나가는 경로가 넷(덱 뒤로 · 판 나가기 · 게임오버 탭 · 뒤로가기)이라 각자 걷게 하면
+  // 하나만 빠뜨려도 목록에서 뒤로가기를 헛눌러야 하는 화면이 된다.
+  navDrop();
   state.phase = 'stage';
   state.paused = false;
   state.deckPick = [];
@@ -6227,6 +6388,50 @@ function pauseHelp() {
   ];
 }
 
+// ── 판 나가기 ────────────────────────────────────────────────
+// 판에 들어가면 나갈 길이 없었다 — 브라우저를 닫는 것이 유일한 출구였다(#74).
+// **출구를 정지 화면에 두는 이유**: 판을 덮고 있는 화면이라 여기서 나가는 것은
+// 「지금 판을 만지는 중」과 절대 안 겹치고, 나가면 무엇을 잃는지를 적을 자리가
+// 화면에 이미 있다.
+let exitRunRect = null;   // 정지 화면의 나가기 줄. drawPause 가 세우고 pointerdown 이 읽는다
+let exitArmed = false;    // 웨이브 중 확인 대기. togglePause 가 되돌린다
+
+// 나가면 무엇을 잃는가. **누르기 전에 화면에 떠 있어야 하는 문장이다.**
+function exitRunNote() {
+  // 준비 단계는 스냅샷을 찍을 수 있으므로 통째로 남는다.
+  if (state.phase === 'build') return '이어하기로 저장됩니다';
+  // 웨이브 중에는 못 찍는다(snapshotRun 이 build 에서만 찍는다). 대신 **직전 웨이브
+  // 경계의 기록이 그대로 남아 있다** — endWave 가 찍어 둔 것이고, 이 판의 것 말고는
+  // 들어올 수 없다(startRun 이 savedRun 을 비우고, 그 뒤로 이 판만 덮어쓴다).
+  // 그래서 잃는 것은 「이 판 전부」가 아니라 **이번 웨이브**다. 첫 웨이브 중이라
+  // 그 기록조차 없을 때만 판이 통째로 처음부터다.
+  if (savedRun && savedRun.stage === state.stage) return `웨이브 ${state.wave} 를 처음부터 다시 합니다`;
+  return '이 판은 처음부터입니다';
+}
+
+// **웨이브 중에는 두 번 눌러야 한다.** 정지 화면은 아무 데나 눌러도 재개되는
+// 화면이라(pointerdown 첫 분기) 한 번에 나가지면 재개하려다 스친 손가락이 진행을
+// 버린다. 확인은 **잃을 것이 있는 phase 에만** 붙인다 — 준비 단계는 통째로 남으므로
+// 거기까지 두 번 누르게 하면 확인이 아니라 통행세가 된다.
+function exitRunTap() {
+  if (state.phase === 'wave' && !exitArmed) { exitArmed = true; return; }
+  exitRun();
+}
+
+// 읽기용 게터. 모듈 레벨 원시값이라 객체처럼 못 넘긴다(hitstopState 와 같은 사정).
+// 헤드리스가 「그 줄이 실제로 화면에 섰나」와 「확인을 기다리는 중인가」를 볼 창이다.
+function exitRunState() { return { armed: exitArmed, rect: exitRunRect }; }
+
+function exitRun() {
+  exitArmed = false;
+  // 준비 단계면 지금 판을 이어하기로 남긴다. 웨이브 중이면 snapshotRun 이 null 을
+  // 돌려주므로 **덮어쓰지 않는다** — 직전 웨이브 경계의 기록을 지우면 exitRunNote 가
+  // 화면에 적어 둔 말이 거짓이 된다.
+  if (state.phase === 'build') savedRun = snapshotRun();
+  persist();
+  restart();
+}
+
 // 배치를 미리 재 본다. 화면 높이가 제각각이라 그려 보기 전에는 넘치는지 알 수 없다.
 function pausePlan(sections, panelW, s) {
   const labelW = Math.round(54 * s);
@@ -6241,6 +6446,9 @@ function pausePlan(sections, panelW, s) {
   // 높이 예산에도 반드시 들어가야 한다. 안 넣으면 마지막 절이 화면 밖으로 밀린다.
   items.push({ t: 'shake', y: h, f: 12 * s }); h += Math.round(27 * s);
   items.push({ t: 'sound', y: h, f: 12 * s }); h += Math.round(27 * s);
+  // 나가기도 절 밖이고 예산에 들어간다 — 위 두 줄과 같은 이유다. 이 줄이 절에
+  // 들어가면 작은 화면에서 사라지는데, **여기가 이 판의 유일한 출구다**(#74).
+  items.push({ t: 'exit', y: h, f: 12 * s }); h += Math.round(27 * s);
 
   for (let i = 0; i < sections.length; i++) {
     if (i) h += Math.round(13 * s);
@@ -6327,6 +6535,31 @@ function drawPause() {
       ctx.fillStyle = '#484f58';
       ctx.font = `${it.f}px system-ui, sans-serif`;
       ctx.fillText('여기를 누르면 바뀝니다', hx, y);
+    } else if (it.t === 'exit') {
+      // 토글 두 줄과 **같은 모양이다**(라벨 · 값 · 안내). 이 화면에서 눌리는 줄은
+      // 셋뿐이고, 셋이 같아 보여야 「눌러도 되는 줄」이 눈에 잡힌다.
+      // 값 자리에 오는 것은 **나가면 무엇을 잃는가**다 — 누르기 전에 읽히는 자리라
+      // 여기가 「미리 알린다」의 전부다.
+      const rh = Math.round(23 * plan.s);
+      const rect = { x: pad - 8, y: y - Math.round(5 * plan.s), w: panelW + 16, h: rh };
+      exitRunRect = rect;
+      ctx.fillStyle = exitArmed ? '#2d1618' : '#161b22';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      const gap = Math.round(12 * plan.s);
+      const label = '판 나가기';
+      ctx.fillStyle = '#c9d1d9';
+      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+      ctx.fillText(label, pad, y);
+      const vx = pad + ctx.measureText(label).width + gap;
+      const note = exitRunNote();
+      // 잃을 것이 없으면(준비 단계) 초록, 있으면 주황이다. 확인을 기다리는 동안만
+      // 빨강 — 색이 바뀌는 것이 「한 번 더 누르면 진짜」의 신호다.
+      ctx.fillStyle = exitArmed ? '#f85149' : state.phase === 'build' ? '#7ee787' : '#d29922';
+      ctx.fillText(note, vx, y);
+      const hx = vx + ctx.measureText(note).width + gap;
+      ctx.fillStyle = exitArmed ? '#f85149' : '#484f58';
+      ctx.font = `${it.f}px system-ui, sans-serif`;
+      ctx.fillText(exitArmed ? '한 번 더 누르면 나갑니다' : '여기를 누르면 목록으로', hx, y);
     } else if (it.t === 'head') {
       ctx.fillStyle = '#58a6ff';
       ctx.font = `700 ${it.f}px system-ui, sans-serif`;
