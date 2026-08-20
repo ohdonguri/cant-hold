@@ -934,6 +934,68 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 정지 화면 = 이 판의 유일한 출구 (#74) ───────────────────
+  // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
+  // md5 가 통째로 갈린다).
+  //
+  // 이 화면은 헤드리스가 「글자를 그렸다」까지밖에 못 본다. 사람이 볼 것:
+  //   ① 나가기 줄이 토글 두 줄과 **같은 모양**인가 — 이 화면에서 눌리는 줄이 셋인데
+  //      하나만 다르게 생기면 나머지 둘도 눌리는 줄로 안 읽힌다
+  //   ② 「이어하기로 저장됩니다」가 **누르기 전에** 읽히는가. 그 줄이 안 보이면
+  //      나가기는 「눌러 봐야 아는 버튼」이 되고, 그러면 아무도 안 누른다
+  //   ③ 아래 도움말 절이 그 줄 때문에 화면 밖으로 밀리지 않았는가(pausePlan 예산)
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    pickStage(0);
+    ['shredder', 'frost', 'mint'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 1200;
+    state.wave = 6;
+    let id = 9800;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: null, b5: null, t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 조폐소를 반드시 한 대 세운다 — 「내 덱」 절의 수입 줄이 그때만 숫자를 낸다.
+    put('mint',     3, 1, 9);
+    put('shredder', 2, 3, 9);
+    put('frost',    1, 5, 9);
+    togglePause();
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('20-pause', () => {
+    if (!state.paused) return '정지 화면이 아니다';
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (!exitRunState().rect) return '나가기 줄이 안 세워졌다';
+    if (!exitRunNote().includes('이어하기')) return '준비 단계인데 이어하기라고 안 적는다: ' + exitRunNote();
+    if (exitRunState().armed) return '확인 대기 상태다 (준비 단계는 한 번에 나간다)';
+    return null;
+  });
+
+  // ── 웨이브 중 나가기 = 확인을 기다리는 줄 ────────────────────
+  // 20-pause 와 **같은 화면인데 줄 하나만 다르다.** 나란히 놓고 볼 것:
+  //   ① 확인 대기가 **색으로 갈리는가**(빨강 바탕 · 빨강 글자). 안 갈리면 두 번째
+  //      탭이 무엇을 하는지가 화면에 없다
+  //   ② 「이 판은 처음부터입니다」가 잃는 것을 **정확히** 말하는가. 이 컷은 첫
+  //      웨이브 중이라 정말 판이 통째로 날아가는 자리다
+  await page.evaluate(() => {
+    state.phase = 'wave';
+    state.wave = 1;
+    exitRunTap();          // 첫 탭 = 확인만 받는다
+  });
+  await page.waitForTimeout(200);
+  await shot('21-pauseexit', () => {
+    if (!state.paused) return '정지 화면이 아니다';
+    if (state.phase !== 'wave') return '웨이브 중이 아니다: ' + state.phase;
+    if (!exitRunState().armed) return '확인 대기가 아니다 (첫 탭이 그냥 나갔다)';
+    if (exitRunNote() !== '이 판은 처음부터입니다')
+      return '첫 웨이브인데 문구가 다르다: ' + exitRunNote();
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };

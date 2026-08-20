@@ -164,6 +164,47 @@ function makeAudio() {
   };
 }
 
+// 세션 히스토리 스텁(#74). 게임이 화면 전이를 `history.pushState` 로 쌓고
+// `popstate` 로 되돌리므로, 그 왕복을 헤드리스가 그대로 밟을 수 있어야 한다 —
+// 상태만 검사하면 pushState 를 통째로 지워도 전부 통과한다(draws 와 같은 취지).
+//
+// **popstate 를 즉시 안 쏜다.** 브라우저에서 `back()` 은 큐에 들어가고 이벤트는
+// 나중에 오는데, 그 사이에 게임이 새 항목을 쌓는 경우가 실제로 있다
+// (`tools/shot.js` 가 컷마다 `restart(); pickStage(...)` 를 한 태스크에 부른다).
+// 여기서 동기로 쏘면 그 순서가 재현이 안 되고, 그 자리에서만 나는 「뒤로가기가
+// 화면을 한 칸 더 먹는」 버그를 검사가 영영 못 본다. `flush()` 가 그 나중이다.
+function makeHistory() {
+  const stack = [{ s: null }];   // 문서가 처음 실린 항목. 그 앞은 이 문서 밖이다
+  let i = 0;
+  const pending = [];
+  let exited = false;            // 항목이 없는데 뒤로 갔다 = 페이지를 나갔다
+  let fire = () => {};           // 지금 실려 있는 페이지의 리스너. 새로고침하면 갈린다
+  const api = {
+    get state() { return stack[i].s; },
+    pushState(s) { stack.length = i + 1; stack.push({ s }); i = stack.length - 1; },
+    replaceState(s) { stack[i].s = s; },
+    back() {
+      if (i > 0) { i--; pending.push(stack[i].s); }
+      else exited = true;
+    },
+  };
+  return {
+    api,
+    ctl: {
+      // 브라우저 뒤로가기 한 번. 우리 문서의 항목이 남아 있으면 popstate 가 오고,
+      // 없으면 페이지를 나간다 — 그 갈림이 이 게임의 요구사항 전부다.
+      pressBack() { api.back(); this.flush(); },
+      flush() { while (pending.length) fire('popstate', { state: pending.shift() }); },
+      depth() { return i; },
+      exited() { return exited; },
+      // **새로고침.** 항목은 그대로 두고 페이지만 새로 싣는다(`load(null, {history})`).
+      // 그 항목 위에서 다시 시작하는 것이 모바일에서 탭이 되살아날 때 실제로 벌어지는
+      // 일이고, 게임이 그걸 이어받는지가 「목록에서 뒤로가기가 한 번에 나가는가」다.
+      bind(f) { fire = f; },
+    },
+  };
+}
+
 // CFG 안의 숫자 상수를 덮어쓴 소스를 만든다.
 function patch(src, overrides) {
   let out = src;
@@ -259,9 +300,25 @@ const EXPOSE = [
   // (헤드리스가 탭 없이 밟는다), `setStageScroll` 은 스크롤을 감는 유일한 통로다 —
   // 모듈 레벨 원시값이라 객체처럼 못 넘긴다(hitstopT 와 같은 사정).
   'stageListMetrics', 'stageCardVisible', 'stageTap', 'setStageScroll', 'stageScrollState',
+  // 뒤로 가기(#74). `navBack` 은 **화면의 뒤로 버튼이 부르는 것 그대로**다 —
+  // pointerdown 에 로직을 안 남기므로 헤드리스가 탭 없이 그 버튼을 누를 수 있다.
+  // (ESC 와 브라우저 뒤로가기는 window 리스너로 들어오므로 `g.key`·`g.nav` 가 그 문이고,
+  // 셋 다 결국 `goBack()` 하나를 지난다.) `navState` 는 「지금 항목을 들고 있나」를 보는
+  // 게터고(모듈 레벨 원시값이라 객체처럼 못 넘긴다), `deckBackRect` 는 좌표식을 검사에
+  // 베끼지 않으려고 내보낸다 — deckStartRect 와 같은 이유다.
+  'navBack', 'navState', 'deckBackRect',
+  // 이어하기. 나갔다 들어오는 왕복을 검사가 끝까지 밟으려면 목록 쪽 문도 필요하다 —
+  // `restoreRun` 만으로는 「목록에서 눌렀을 때」가 안 걸린다(navArm 이 거기 있다).
+  'resumeRun',
+  // 판 나가기. 핸들러(pointerdown)에 로직을 안 남기고 이 함수들만 부르므로 헤드리스가
+  // 탭 없이 「눌렀다 · 한 번 더 눌렀다」를 밟을 수 있다(mergePlace 와 같은 규칙).
+  'exitRun', 'exitRunTap', 'exitRunNote', 'exitRunState',
 ];
 
-function load(overrides) {
+// `opts.history` 는 **새로고침**을 흉내내는 통로다. 앞선 페이지가 쓰던 히스토리를
+// 그대로 물려주면(항목은 남고 페이지만 새로 실린다) 모바일에서 탭이 되살아나는 상황이
+// 그대로 재현된다 — 그 상황에서 목록의 뒤로가기가 한 번에 나가는지가 #74 의 마지막 조항이다.
+function load(overrides, opts) {
   const html = fs.readFileSync(HTML, 'utf8');
   const js = patch(html.split('<script>')[1].split('</' + 'script>')[0], overrides);
   // 본 화면만 기록한다. 스프라이트를 굽는 오프스크린 캔버스까지 세면
@@ -279,7 +336,16 @@ function load(overrides) {
 
   const audio = makeAudio();
 
-  const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame', 'localStorage',
+  // window 리스너를 받아 둔다. 예전에는 no-op 이라 keydown(ESC)·popstate 로 들어오는
+  // 경로를 헤드리스가 **한 줄도 못 밟았다** — 뒤로 가기가 그 둘로 들어온다(#74).
+  const listeners = new Map();
+  const fire = (type, ev) => {
+    for (const fn of listeners.get(type) || []) fn(Object.assign({ preventDefault() {} }, ev));
+  };
+  const history = (opts && opts.history && opts.history.__h) || makeHistory();
+  history.ctl.bind(fire);
+
+  const fn = new Function('document', 'window', 'performance', 'requestAnimationFrame', 'localStorage', 'history',
     js + '\nreturn {' + EXPOSE.join(',') + '};');
   const api = fn(
     {
@@ -288,12 +354,17 @@ function load(overrides) {
       createElement: () => ({ width: 0, height: 0, getContext: () => stubCtx() }),
     },
     {
-      innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener: () => {},
+      innerWidth: 390, innerHeight: 844, devicePixelRatio: 2,
+      addEventListener: (t, fn) => {
+        if (!listeners.has(t)) listeners.set(t, []);
+        listeners.get(t).push(fn);
+      },
       AudioContext: audio.AudioContext,
     },
     { now: () => 0 },
     () => {},
     localStorageStub,
+    history.api,
   );
 
   // 마지막 render 가 본 화면에 무엇을 그렸는지 세는 창.
@@ -329,6 +400,13 @@ function load(overrides) {
   // 오디오 시계를 앞으로 감는 창. 큐 쿨다운은 게임 dt 가 아니라 이 시계로 잰다.
   //   g.sfxUnlock(); g.audio.advance(0.06); g.sfx('shot')
   api.audio = audio.api;
+  // 브라우저 뒤로가기와 키보드(#74). 게임 코드는 window 리스너로만 이 둘을 받으므로
+  // 검사도 같은 문으로 들어가야 한다 — 핸들러 안의 분기를 베끼면 자가 두 벌이 된다.
+  //   g.nav.pressBack();  g.key('Escape');  g.nav.entries()
+  api.nav = history.ctl;
+  // 새로고침 때 이 히스토리를 그대로 물려주기 위한 손잡이(load 의 opts.history).
+  history.ctl.__h = history;
+  api.key = k => fire('keydown', { key: k });
   // 기기 로컬 플래그(cant-hold-shake / -sound / -tute)가 실제로 그 키에 들어갔는지
   // 테스트가 볼 수 있어야 한다. 세이브 번들과 섞이지 않았다는 증거가 이것뿐이다.
   api.storage = localStorageStub;
