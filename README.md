@@ -65,8 +65,30 @@ curl -s "https://eastbirdstudio.com/games/canthold/?cb=$RANDOM" | grep -c toggle
 작품은 대문과 같은 오리진의 경로(`/games/canthold/`)로 서빙한다. 서브도메인을
 따로 두면 Firebase Auth 세션이 갈린다 (`eastbird-studio/docs/sso-migration.md`).
 
-빌드 도구 없음. 의존성 없음. **이미지 파일도 없다** — 도트는 문자열로 적어 캔버스에 굽는다.
-`index.html` 하나가 게임 전부.
+빌드 도구 없음. 의존성 없음. **게임 화면에는 이미지 파일이 하나도 안 쓰인다** — 도트는
+문자열로 적어 캔버스에 굽는다. `index.html` 하나가 게임 전부다.
+
+예외는 홈 화면 아이콘뿐이다. 그건 브라우저·안드로이드가 PNG 로만 받으므로 파일로 둘
+수밖에 없는데, **손으로 만든 PNG 는 두지 않는다** — 원본 `icons/icon.svg` 와 뽑는
+스크립트를 같이 두고 거기서 굽는다. 게임 코드는 이 파일들을 한 번도 안 읽는다.
+
+```
+icons/icon.svg           아이콘 원본. 모티프를 왜 그렇게 골랐는지가 여기 주석에 있다
+icons/icon-maskable.svg  ↑ 에서 생성된다(손으로 고치지 마라)
+icons/*.png              ↑ 에서 생성된다(손으로 고치지 마라)
+manifest.webmanifest     홈 화면 추가. start_url·scope 는 './' 다
+node tools/icons.mjs     SVG → 마스커블 SVG + PNG 여섯 장 (playwright 필요)
+```
+
+`npm run build` 가 이 둘을 `dist/games/canthold/` 로 같이 옮긴다. **SVG 원본은 안 옮긴다** —
+`index.html` 을 압축해 내보내는 것과 같은 이유로, 설계 근거 주석까지 배포할 것은 아니다.
+
+빌드가 세 가지를 막는다. **셋 다 안 막으면 아무 에러 없이 옛것이 그대로 배포되는 사고다.**
+
+- `<head>` 와 manifest 가 가리키는 주소가 배포 폴더에 실제로 있는가
+- 홈 화면에 필요한 네 줄(`theme-color`·`manifest`·`icon`·`apple-touch-icon`)이 살아 있는가
+- **생성물이 `icon.svg` 보다 낡지 않았는가** — 원본 지문을 생성물에 찍어 두고 대조한다.
+  `icon.svg` 만 고치고 `node tools/icons.mjs` 를 안 돌리면 여기서 걸린다
 
 ## 계정 (선택)
 
@@ -135,6 +157,7 @@ npm run verify:build 압축본이 원본과 같은 화면인지 (playwright 필�
 node tools/paths.js       경로 후보 비교
 node tools/stagetune.js N 스테이지 N 의 HP 배율 역산
 npm run sprites          도트 미리보기 (emit 으로 SPR 테이블 출력)
+node tools/icons.mjs     홈 화면 아이콘을 icons/icon.svg 에서 다시 뽑는다 (playwright 필요)
 ```
 
 밸런스 수치를 만지면 `npm test` 를 반드시 다시 돌릴 것. 근거는 [DESIGN.md](DESIGN.md) 참고.

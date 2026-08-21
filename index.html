@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<!-- 배경색을 그대로 쓴다. 강조색을 넣으면 홈 화면에서 띄웠을 때 상단에 다른 색 띠가
+     한 줄 생기고, 이 게임은 #0d1117 로 화면을 끝까지 칠하므로 그 이음매가 그대로 보인다. -->
+<meta name="theme-color" content="#0d1117">
+<!-- 전부 상대 경로다. 이 파일은 배포되면 /games/canthold/ 아래에 놓이는데, 절대 경로로
+     적으면 거기서 전부 빗나간다. manifest 의 start_url·scope 도 같은 이유로 './' 다. -->
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <title>이번 웨이브는 못 막습니다</title>
 <style>
   html, body {
