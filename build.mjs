@@ -9,8 +9,9 @@
 // 얻는 바이트보다 깨질 위험이 크다.
 //
 // 의존성은 두지 않는다. 이 리포는 npm 패키지가 하나도 없는 게 원칙이다.
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -112,7 +113,35 @@ function build() {
 
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(OUT, out);
+  copyAssets();
   return { html, out, minJs };
+}
+
+// ── 아이콘·manifest ───────────────────────────────────────────
+// index.html 의 <head> 가 './manifest.webmanifest' 와 './icons/…' 를 상대 경로로
+// 가리킨다. 압축본은 dist/games/canthold/ 에 놓이므로 그 옆에 같이 있어야 한다.
+// **안 옮기면 아무 에러도 안 난다** — 페이지는 멀쩡히 뜨고 홈 화면 추가만 조용히
+// 기본 아이콘으로 떨어진다. 그래서 아래 verify 가 참조를 실제로 대조한다.
+//
+// **SVG 원본은 안 옮긴다.** 거기엔 왜 그 모티프인지·왜 그 크기인지가 주석으로 길게
+// 들어 있는데, index.html 을 압축해 내보내는 이유와 정확히 같은 이유로 배포할 것이
+// 아니다. manifest 도 <link> 도 PNG 만 가리키므로 빠져도 웹에서는 티가 안 난다.
+function copyAssets() {
+  // **먼저 비운다.** dist 는 실행 사이에 안 지워지므로, 안 비우면 지난 빌드가 남긴
+  // 사본이 그대로 남는다. 그러면 icons/ 에서 파일을 지워도 로컬 빌드는 멀쩡히
+  // 통과하고(옛 사본이 자리를 지킨다) CI 의 깨끗한 클론에서만 터진다.
+  // 아래 verify 의 참조 검사도 그 옛 사본을 보고 속는다 — 실제로 속았다.
+  rmSync(join(OUT_DIR, 'icons'), { recursive: true, force: true });
+  cpSync(join(ROOT, 'icons'), join(OUT_DIR, 'icons'), {
+    recursive: true,
+    filter: (src) => {
+      const name = src.slice(src.lastIndexOf('/') + 1);
+      if (name.startsWith('.')) return false;              // 도구가 남긴 .DS_Store 가 배포된 적이 있다
+      return !src.endsWith('.svg');
+    },
+  });
+  writeFileSync(join(OUT_DIR, 'manifest.webmanifest'),
+    readFileSync(join(ROOT, 'manifest.webmanifest')));
 }
 
 // ── 검사 ──────────────────────────────────────────────────────
@@ -146,6 +175,43 @@ function verify({ html, out, minJs }) {
   // 도트가 통째로 날아가면 게임이 아니라 회색 사각형이 된다
   const dots = (out.match(/'[.01234]{32}'/g) || []).length;
   if (dots < 480) throw new Error('도트 줄이 모자란다: ' + dots);
+
+  // 홈 화면 자산. **이름 목록을 여기 박아 두지 않는다** — 그러면 파일 이름을 바꿀 때
+  // 이 목록만 안 고쳐도 통과하거나, 반대로 목록이 늘 뒤처진다. 압축본과 manifest 가
+  // **실제로 가리키는 주소**를 긁어서 그게 배포 폴더에 있는지만 본다.
+  // (아이콘은 게임 화면에 안 나오므로 렌더 비교로는 절대 안 잡히는 구멍이다.)
+  const refs = new Set();
+  for (const m of out.matchAll(/(?:href|src)="\.\/([^"]+)"/g)) refs.add(m[1]);
+  const mf = JSON.parse(readFileSync(join(OUT_DIR, 'manifest.webmanifest'), 'utf8'));
+  for (const ic of mf.icons) refs.add(ic.src);
+  const gone = [...refs].filter(p => !existsSync(join(OUT_DIR, p)));
+  if (gone.length) throw new Error('배포 폴더에 없는 참조: ' + gone.join(', '));
+
+  // 참조를 긁는 검사만으로는 **링크를 통째로 지운 경우**를 못 잡는다 — 참조가
+  // 없으니 대조할 것도 없어서 조용히 통과한다. 홈 화면 추가에 반드시 있어야 하는
+  // 네 줄은 따로 못 박는다.
+  const head = [
+    ['name="theme-color"',      'theme-color'],
+    ['rel="manifest"',          'manifest 링크'],
+    ['rel="icon"',              'favicon 링크'],
+    ['rel="apple-touch-icon"',  'apple-touch-icon 링크'],
+  ].filter(([needle]) => !out.includes(needle)).map(([, name]) => name);
+  if (head.length) throw new Error('압축본의 <head> 에서 사라진 것: ' + head.join(', '));
+
+  // PNG 는 icons/icon.svg 에서 굽는다. **원본만 고치고 tools/icons.mjs 를 안 돌리면
+  // 아무 에러도 안 나고 옛 그림이 그대로 배포된다.** 생성물에 찍힌 원본 지문을 다시
+  // 계산해 대조해서 그 한 가지를 막는다. (지문이 맞다 = 마지막 실행이 지금의 icon.svg
+  // 를 봤다 = 그때 PNG 여섯 장도 같이 다시 구워졌다.)
+  const svg = readFileSync(join(ROOT, 'icons', 'icon.svg'), 'utf8');
+  const want = createHash('sha256').update(svg).digest('hex').slice(0, 16);
+  const got = /src-sha: ([0-9a-f]+)/.exec(
+    readFileSync(join(ROOT, 'icons', 'icon-maskable.svg'), 'utf8'));
+  if (!got) throw new Error('icons/icon-maskable.svg 에 src-sha 가 없다. node tools/icons.mjs 를 돌려라');
+  if (got[1] !== want) {
+    throw new Error(
+      `아이콘이 원본보다 낡았다 (icon.svg ${want} vs 생성물 ${got[1]}).\n` +
+      '  icons/icon.svg 를 고쳤으면 `node tools/icons.mjs` 를 다시 돌려라.');
+  }
 
   const before = Buffer.byteLength(html), after = Buffer.byteLength(out);
   return { before, after, cut: (1 - after / before) * 100 };
