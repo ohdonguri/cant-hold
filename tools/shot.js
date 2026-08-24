@@ -996,6 +996,132 @@ const capture = async (browser) => {
     return null;
   });
 
+
+  // ── 자음 모티프 셋째·넷째 판 (⑬ 재 · ⑭ 후미) ─────────────────
+  // **18·19 와 나란히 놓고 봐야 하는 두 컷이다.** 10x14 · 3레인이 이제 다섯이고
+  // (⑩⑪⑫⑬⑭) 헤드리스가 가르는 것은 어귀 위치뿐이라, **다섯이 서로 다른 글자로
+  // 읽히는가**는 사람이 봐야 한다.
+  //
+  // **맨 뒤에 붙인다.** 앞에 끼우면 뒤 컷의 fxRand 가 밀려 md5 가 통째로 갈린다
+  // (20·21 이 「맨 뒤에 둔다」로 적어 둔 그 이유이고, 그래서 그 둘 뒤로 간다).
+  //
+  // **판을 성질로 찾는다.** 위쪽 변 어귀는 ⑩ 1 · ⑪ 2 · ⑫ 3 으로 다 찼으므로 이
+  // 두 판은 **위쪽 변 어귀가 0** 이고, 둘을 다시 가르는 것은 옆변의 좌우다.
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+      && s.lanes.filter(L => L[0].y < 0).length === 0
+      && s.lanes.filter(L => L[0].x >= s.w).length === 2));
+    ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 9900;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 경로(x4 목 · x6 곁 · 행 4·10·12·13 · 다리 x1·x8)를 피한다.
+    // **다섯 대만 놓는다** — 18·19 와 같은 이유로 사거리 칠이 획을 덮지 않게 한다.
+    put('arc',      5, 1, 7);         // 2x2. 열 1~2 x 행 7~8 — 목 왼쪽의 빈 주머니
+    put('shredder', 5, 7, 7);         // 2x2. 열 7~8 x 행 7~8 — 곁 갈래 오른쪽
+    put('frost',    2, 5, 8);         // 목(x4)과 곁(x6) 사이 한 칸 — 둘을 같이 본다
+    put('shredder', 3, 0, 11);        // 왼 다리 바깥 — 다리와 바닥을 같이 본다
+    put('frost',    1, 9, 10);        // 오른쪽 끝 — 갈림 띠 끝만 스치는 자리
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('22-jae', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
+      return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
+    // ⑩⑪⑫⑭ 가 아니라 이 판인가. 위쪽 변 0 + 오른쪽 변 둘이 이 판의 표식이다.
+    const top = lanes.filter(L => L.points[0].y < 0).length;
+    if (top !== 0) return '위쪽 변 입구가 ' + top + '개다 (⑩⑪⑫ 중 하나를 집었다)';
+    const right = lanes.filter(L => L.points[0].x >= CFG.BOARD_W).length;
+    if (right !== 2) return '오른쪽 변 입구가 ' + right + '개다 (⑭ 후미를 집었다)';
+    if (STAGES[state.stage].allowKinds) return '제약 판이다: ' + STAGES[state.stage].name;
+    // 가로 획이 넷인가 — 가로획(4) · 갈림(10) · 바닥(12) · 출구(13). 셋이면 목이
+    // 안 그려진 것이고 다섯이면 곁 갈래가 띠가 된 것이다.
+    const bars = [];
+    for (let y = 0; y < CFG.BOARD_H; y++) {
+      let n = 0;
+      for (let x = 0; x < CFG.BOARD_W; x++) if (isPath(x, y)) n++;
+      if (n > CFG.BOARD_W / 2) bars.push(y);
+    }
+    if (bars.length !== 4) return '가로 획이 ' + bars.length + '줄이다 (가로획·갈림·바닥·출구 넷이라야 한다): ' + bars;
+    // 목(x4)이 가로획에서 갈림까지 한 줄로 내려오는가 — 이 판을 ㅈ 으로 읽게 하는 획이다.
+    if (!isPath(4, 7) || isPath(3, 7) || isPath(5, 7)) return '목(x4)이 행 7 에서 한 줄이 아니다';
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (state.towers.filter(t => t.star >= 5).length !== 2) return '5성(2x2)이 둘이 아니다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // 볼 것:
+  //   ① 꼭지(x4 행 0~2) · 가로획(행 3) · 고리(행 9~11 x1~x8)가 **ㅎ 으로** 읽히는가
+  //   ② 고리가 **닫힌 네모**로 보이는가 — 위아래 띠만 보이고 옆이 끊기면 실패다
+  //   ③ 가로획과 고리를 잇는 두 세로줄(x1·x8 행 3~9)이 **글자로 안 읽히는가.**
+  //      그 둘이 기둥처럼 도드라지면 ⑪ 빗장과 같은 판으로 보인다
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+      && s.lanes.filter(L => L[0].y < 0).length === 0
+      && s.lanes.filter(L => L[0].x < 0).length === 2));
+    ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 9950;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 경로(x1·x8 세로 · 행 3·9·11·13)를 피한다. **다섯 대만.**
+    put('arc',      5, 3, 6);         // 2x2. 열 3~4 x 행 6~7 — 고리 위 빈 속
+    put('shredder', 5, 5, 6);         // 2x2. 열 5~6 x 행 6~7 — 그 옆
+    put('frost',    2, 4, 10);        // 고리 **안쪽** — 위아래 띠를 같이 본다
+    put('shredder', 3, 0, 7);         // 고리 바깥 왼쪽 — 세로줄 하나만 본다
+    put('frost',    1, 9, 12);        // 오른쪽 아래 — 출구만 스치는 자리
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('23-humi', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
+      return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
+    const top = lanes.filter(L => L.points[0].y < 0).length;
+    if (top !== 0) return '위쪽 변 입구가 ' + top + '개다 (⑩⑪⑫ 중 하나를 집었다)';
+    const left = lanes.filter(L => L.points[0].x < 0).length;
+    if (left !== 2) return '왼쪽 변 입구가 ' + left + '개다 (⑬ 재를 집었다)';
+    if (STAGES[state.stage].allowKinds) return '제약 판이다: ' + STAGES[state.stage].name;
+    // 가로 획이 넷인가 — 가로획(3) · 고리 위(9) · 고리 아래(11) · 출구(13).
+    const bars = [];
+    for (let y = 0; y < CFG.BOARD_H; y++) {
+      let n = 0;
+      for (let x = 0; x < CFG.BOARD_W; x++) if (isPath(x, y)) n++;
+      if (n > CFG.BOARD_W / 2) bars.push(y);
+    }
+    if (bars.length !== 4) return '가로 획이 ' + bars.length + '줄이다 (가로획·고리 위아래·출구 넷이라야 한다): ' + bars;
+    // 고리가 **닫혀** 있는가. 위아래 띠 사이(행 10)에 옆벽 둘이 있고 속은 비어야 한다.
+    if (!isPath(1, 10) || !isPath(8, 10)) return '고리 옆벽(x1·x8)이 행 10 에 없다 — 고리가 안 닫혔다';
+    if (isPath(4, 10)) return '고리 속(4,10)이 막혀 있다 — 고리로 안 읽힌다';
+    // 꼭지가 있는가. 이 획 하나가 ⑭ 를 ㅁ 이 아니라 ㅎ 으로 읽게 한다.
+    if (!isPath(4, 0)) return '꼭지(4,0)가 없다';
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (state.towers.filter(t => t.star >= 5).length !== 2) return '5성(2x2)이 둘이 아니다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   await page.close();
   return { hashes, errors, bad };
 };
