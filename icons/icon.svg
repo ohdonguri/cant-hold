@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    앱 아이콘 원본. PNG 여섯 장은 전부 이 파일에서 뽑는다 — `node tools/icons.mjs`.
+    **PNG 를 직접 고치지 마라.** 다음 사람이 색 하나 바꾸려 할 때 재현이 안 된다.
+    `icon-maskable.svg` 도 이 파일에서 만들어진다(손으로 복제한 사본이 아니다).
+
+    ── 모티프: 웨이브 → 타워 → 관문 ────────────────────────────
+    제목이 「이번 웨이브는 못 막습니다」다. 화면을 그대로 축소한 그림은 48px 에서
+    죽으므로(7x10 격자가 회색 죽으로 뭉갠다), 판 대신 **판의 구조**를 세로로 세웠다.
+
+      위    내려오는 웨이브        겹친 갈매기 세 줄
+      중앙  타워                   톱니 왕관 성탑(파쇄자) 실루엣
+      아래  관문                   빨간 선 — #58 에서 되살린 「못 막는다」의 상징
+
+    셋을 위아래로 쌓은 이유는 48px 에서 남는 것이 **가로 띠 세 개**뿐이기 때문이다.
+    좌우로 벌리면 그 크기에서 서로 먹는다.
+
+    대비로 서열을 준다. 타워(#f0883e)와 관문(#f85149)만 배경과 크게 갈리고,
+    갈매기는 통로 색이라 작은 크기에서는 질감으로 물러난다 — 셋이 같은 세기면
+    아이콘이 아니라 그림이 된다.
+
+    타워와 관문이 둘 다 따뜻한 색이라 작은 크기에서 붙어 보일 수 있다. 그래서
+    ① 사이에 배경색 틈(32px = 48px 아이콘에서 3px)을 두고
+    ② 타워는 덩어리, 관문은 선으로 **모양의 역할을 갈랐다**.
+    색만으로 구분하게 두지 않는다.
+
+    ── 색은 전부 게임에서 그대로 가져왔다 ────────────────────────
+      #0d1117 #1d2533 #222b3a   배경·보드 바닥          (index.html)
+      #4d5867 #697484 #8b949e   통로 얼룩·진행 점선·보병 (index.html)
+      #f85149 관문 선            (index.html drawBoard)
+      #f0883e 파쇄자 타워 색      (index.html KINDS.shredder)
+    타워의 명암 네 단계는 index.html 의 shade() 사다리를 그대로 계산한 값이다.
+      0 외곽선 #301b0c · 1 그늘 #6c3d1c · 2 본색 #f0883e · 3 하이라이트 #f6ba8f · 4 #ffffff
+
+    ── BLEED / ART 표시를 지우지 마라 ──────────────────────────
+    tools/icons.mjs 가 이 두 표시로 파일을 가른다. BLEED 는 마스커블에서도 화면 끝까지
+    깔리고(안드로이드가 원형·물방울로 잘라내므로 여백이 있으면 안 된다), ART 만
+    중앙 80% 안으로 줄인다. 표시가 없으면 스크립트가 죽는다 — 조용히 넘어가지 않는다.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2533"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <!-- 관문 주변의 붉은 기운. 선 하나만 있으면 「밑줄」로 읽힌다 -->
+    <linearGradient id="gateGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"    stop-color="#f85149" stop-opacity="0"/>
+      <stop offset="0.5"  stop-color="#f85149" stop-opacity="0.30"/>
+      <stop offset="1"    stop-color="#f85149" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!--BLEED-->
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- 격자. 48px 에서는 안 보이고 192px 부터 「보드」로 읽히는 질감이다 -->
+  <g stroke="#222b3a" stroke-width="2" opacity="0.7">
+    <path d="M64 0V512M128 0V512M192 0V512M256 0V512M320 0V512M384 0V512M448 0V512"/>
+    <path d="M0 64H512M0 128H512M0 192H512M0 256H512M0 320H512M0 384H512M0 448H512"/>
+  </g>
+  <!--/BLEED-->
+
+  <!--ART-->
+  <!-- 웨이브. **두 줄이다.** 세 줄로 그렸더니 48px 에서 사이 틈(0.5px)이 사라져
+       회색 덩어리 하나로 뭉갰다. 줄을 하나 빼고 굵기·간격을 키워 「겹화살표」
+       한 글자로 읽히게 했다. 아래 줄이 밝다 — 다가오는 순서가 곧 밝기다 -->
+  <g fill="none" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M172 50 L256 96 L340 50"   stroke="#697484"/>
+    <path d="M172 102 L256 148 L340 102" stroke="#8b949e"/>
+  </g>
+
+  <!-- 타워. 실루엣을 한 번에 깔아 외곽선을 만들고 그 위에 명암을 얹는다.
+       조각마다 테두리를 두르면 이음매에서 두 번 겹쳐 두꺼워진다.
+
+       **받침(224) > 관(200) > 몸통(128)** 으로 폭을 벌렸다. 셋이 비슷하면 48px 에서
+       주황 막대가 쌓인 그림이 되고 성탑으로 안 읽힌다. 아래로 갈수록 넓어져야
+       서 있는 것으로 보인다. 톱니도 61px 로 세웠다 — 짧으면 그 크기에서 관에 먹힌다 -->
+  <path fill="#301b0c" stroke="#301b0c" stroke-width="12" stroke-linejoin="round" d="
+    M163 193 H193 V254 H215 V193 H245 V254 H267 V193 H297 V254 H319 V193 H349 V254
+    H356 V292 H320 V360 H368 V401 H144 V360 H192 V292 H156 V254 H163 Z"/>
+
+  <!-- 톱니 넷 -->
+  <g fill="#f0883e">
+    <rect x="163" y="193" width="30" height="61"/>
+    <rect x="215" y="193" width="30" height="61"/>
+    <rect x="267" y="193" width="30" height="61"/>
+    <rect x="319" y="193" width="30" height="61"/>
+  </g>
+  <g fill="#f6ba8f">
+    <rect x="163" y="193" width="30" height="12"/>
+    <rect x="215" y="193" width="30" height="12"/>
+    <rect x="267" y="193" width="30" height="12"/>
+    <rect x="319" y="193" width="30" height="12"/>
+  </g>
+
+  <!-- 관 -->
+  <rect x="156" y="254" width="200" height="38" fill="#f0883e"/>
+  <rect x="156" y="254" width="200" height="12" fill="#f6ba8f"/>
+  <rect x="156" y="286" width="200" height="6"  fill="#301b0c"/>
+
+  <!-- 몸통과 창 -->
+  <rect x="192" y="292" width="128" height="68" fill="#f0883e"/>
+  <rect x="192" y="292" width="128" height="8"  fill="#f6ba8f"/>
+  <rect x="192" y="344" width="128" height="10" fill="#6c3d1c"/>
+  <rect x="192" y="354" width="128" height="6"  fill="#301b0c"/>
+  <rect x="214" y="304" width="84"  height="34" rx="4" fill="#ffffff"/>
+
+  <!-- 받침 -->
+  <rect x="144" y="360" width="224" height="41" fill="#f0883e"/>
+  <rect x="144" y="360" width="224" height="10" fill="#f6ba8f"/>
+  <rect x="144" y="387" width="224" height="14" fill="#6c3d1c"/>
+
+  <!-- 관문. 타워 바닥(401)에서 29px 띄운다 — 붙이면 같은 덩어리로 읽힌다.
+       가로 폭 300 은 마스커블 안전 영역에서 거꾸로 잡은 값이다. 0.8 로 줄이면 둥근
+       끝의 바깥점이 중심에서 196px 인데 안전 원의 반지름이 205px 다. 320 으로 그렸을
+       때는 201px 라 규격 안이긴 해도 4px 밖에 안 남아, 선 끝이 원에 닿아 보였다 -->
+  <rect x="56" y="412" width="400" height="62" fill="url(#gateGlow)"/>
+  <rect x="106" y="430" width="300" height="26" rx="13" fill="#f85149"/>
+  <!--/ART-->
+</svg>
