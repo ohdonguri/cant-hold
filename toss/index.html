@@ -8,9 +8,6 @@
 <meta name="theme-color" content="#0d1117">
 <!-- 전부 상대 경로다. 이 파일은 배포되면 /games/canthold/ 아래에 놓이는데, 절대 경로로
      적으면 거기서 전부 빗나간다. manifest 의 start_url·scope 도 같은 이유로 './' 다. -->
-<link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" href="./icons/favicon-32.png" sizes="32x32">
-<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <title>이번 웨이브는 못 막습니다</title>
 <style>
   html, body {
@@ -3228,152 +3225,25 @@ function persist() {
 }
 
 // ═════════════════════════════════════════════════════════════
-// 계정 (선택)
+// 계정 — 토스판에는 없다  (toss/sync.mjs 가 웹판의 「계정 (선택)」 절을 이걸로 갈았다)
 //
-// 스튜디오 공용 Firebase 프로젝트를 쓴다. 게임들이 같은 오리진에 있어서
-// 한 번 로그인하면 어디서나 같은 사람이다 (eastbird-studio/docs/sso-migration.md).
+// 미니앱은 구글 로그인을 못 쓴다. 토스 웹뷰 안에서 팝업이 안 열리고, 애초에 토스는
+// 익명 키로 사람을 가리므로 request.auth 가 없다. 그래서 Firebase SDK 를 아예 안
+// 싣는다 — 안 싣는 것이지 꺼 두는 것이 아니다. 심사에 나가는 번들에 구글 로그인
+// 코드가 섞여 들어가면 안 된다.
 //
-// config 값은 공개돼도 되는 식별자다 — 실제 접근 통제는 Firestore 보안 규칙이 한다.
-// 규칙은 README 의 "계정" 절에 있고, 콘솔에서 사람이 넣어야 한다.
+// **이름은 웹판과 똑같이 남긴다.** persist() 가 cloudSave 를, 스테이지 화면의
+// 그리기·탭 판정이 cloud·cloudLoading·cloudToggle 을 부른다. 지우면 그 자리에서
+// 널이 된다. CLOUD_UI 만 false 라서 로그인 줄이 아예 안 그려지고 안 눌린다.
 //
-// 로그인은 기기를 옮길 때 쓰는 것이지 없으면 못 하는 게 아니다. SDK 를 못 받아와도,
-// 로그인을 안 해도 게임은 로컬 저장만으로 끝까지 돌아간다.
-//
-// **이 절 전체가 토스판에서는 통째로 갈린다**(toss/sync.mjs). 미니앱은 구글 로그인을
-// 못 쓰므로 SDK 를 아예 안 싣는다. 갈아 끼우는 스텁이 아래 이름들을 그대로 다시
-// 선언하고 `CLOUD_UI` 만 false 로 둔다 — 그리기·탭 판정이 그 한 값만 본다.
+// 세이브는 localStorage 그대로다(toss/toss.js 머리 주석에 근거).
 // ═════════════════════════════════════════════════════════════
-const CLOUD_UI = true;            // 스테이지 목록에 로그인 줄을 두는가 (토스판은 false)
-const FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyApyN5BFgzOHu6JUdHO1gYRzJiuKm-TKzQ',
-  authDomain: 'eastbirdstudio-abfb5.firebaseapp.com',
-  projectId: 'eastbirdstudio-abfb5',
-  storageBucket: 'eastbirdstudio-abfb5.firebasestorage.app',
-  messagingSenderId: '955865945066',
-  appId: '1:955865945066:web:d6bead1199048c8d535893',
-};
-const SAVE_PATH = 'games/canthold/saves';
-const SDK = 'https://www.gstatic.com/firebasejs/11.0.2/';
-
+const CLOUD_UI = false;
 const cloud = { ready: false, user: null, busy: false, msg: '', ok: null };
-let cloudLoading = null;             // SDK 를 받아오는 중인 약속
-
-// 팝업은 사용자가 누른 그 순간에 열어야 브라우저가 막지 않는다. SDK 를 클릭 뒤에
-// 받아오면 그 사이에 제스처가 끊겨서 첫 클릭은 아무 일도 안 일어나고 두 번째부터
-// 열린다. 그래서 화면을 처음 건드릴 때 미리 받아 둔다.
-function cloudPreload() {
-  if (fb || cloudLoading) return;
-  cloudLoading = cloudInit().catch(() => { cloudLoading = null; });
-}
-let fb = null;                       // { auth, db, doc, getDoc, setDoc, ... }
-
-async function cloudInit() {
-  if (fb) return fb;
-  const [{ initializeApp }, authMod, dbMod] = await Promise.all([
-    import(SDK + 'firebase-app.js'),
-    import(SDK + 'firebase-auth.js'),
-    import(SDK + 'firebase-firestore.js'),
-  ]);
-  const app = initializeApp(FIREBASE_CONFIG);
-  fb = {
-    auth: authMod.getAuth(app),
-    db: dbMod.getFirestore(app),
-    GoogleAuthProvider: authMod.GoogleAuthProvider,
-    signInWithPopup: authMod.signInWithPopup,
-    signOut: authMod.signOut,
-    onAuthStateChanged: authMod.onAuthStateChanged,
-    doc: dbMod.doc, getDoc: dbMod.getDoc, setDoc: dbMod.setDoc,
-    serverTimestamp: dbMod.serverTimestamp,
-  };
-  fb.onAuthStateChanged(fb.auth, async u => {
-    cloud.user = u;
-    cloud.ready = true;
-    if (u) await cloudPull();
-  });
-  return fb;
-}
-
-// 로그인하면 서버 것과 로컬 것을 합친다. 어느 쪽도 줄어들면 안 된다.
-async function cloudPull() {
-  if (!fb || !cloud.user) return;
-  try {
-    cloud.busy = true;
-    const snap = await fb.getDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid));
-    const remote = snap.exists() ? snap.data() : null;
-    const merged = mergeBundle(saveBundle(), remote);
-    applyBundle(merged);
-    savedRun = merged.run || null;
-    saveLocal();
-    await cloudSave();
-    if (cloud.ok !== false) cloud.msg = '기록을 불러왔다';
-  } catch (e) {
-    cloud.ok = false;
-    cloud.msg = String((e && e.code) || e).includes('permission')
-      ? '읽기 거부됨 — 서버 규칙을 확인해야 한다'
-      : '기록을 못 불러왔다';
-  } finally {
-    cloud.busy = false;
-  }
-}
-
-// 실패를 삼키면 안 된다. 규칙이 안 올라가 있으면 로그인은 되는데 저장만 조용히
-// 실패하고, 기기를 바꾼 뒤에야 알게 된다. 결과를 화면에 남긴다.
-async function cloudSave() {
-  if (!fb || !cloud.user) return;
-  try {
-    await fb.setDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid),
-      { ...saveBundle(), updatedAt: fb.serverTimestamp() });
-    cloud.ok = true;
-    cloud.msg = '클라우드에 저장됨';
-  } catch (e) {
-    cloud.ok = false;
-    const code = String((e && e.code) || e);
-    cloud.msg = code.includes('permission')
-      ? '저장 거부됨 — 서버 규칙을 확인해야 한다'
-      : '저장 실패 — 이 기기에만 남는다';
-  }
-}
-
-async function cloudToggle() {
-  if (cloud.busy) return;
-
-  // 아직 안 받아왔으면 팝업을 열지 않는다. 여기서 기다렸다 열면 브라우저가
-  // 사용자 제스처로 안 쳐줘서 조용히 막힌다 — 눌렀는데 아무 일도 없는 그 증상이다.
-  if (!fb || !cloud.ready) {
-    cloud.busy = true;
-    cloud.msg = '연결 중…';
-    cloudPreload();
-    try { await cloudLoading; } catch { /* 아래에서 처리 */ }
-    // 세션 복구는 SDK 로드와 별개로 한 박자 더 걸린다. 그 사이에 팝업을 열면
-    // 이미 로그인된 사람에게 또 로그인을 시키게 된다.
-    for (let i = 0; i < 40 && fb && !cloud.ready; i++)
-      await new Promise(r => setTimeout(r, 50));
-    cloud.busy = false;
-    cloud.msg = !fb ? '연결 실패 — 잠시 뒤 다시'
-      : cloud.user ? '' : '준비됐다 — 다시 누르면 로그인';
-    return;
-  }
-
-  cloud.busy = true;
-  cloud.msg = '';
-  try {
-    if (cloud.user) {
-      await cloudSave();
-      await fb.signOut(fb.auth);
-      cloud.ok = null;
-      cloud.msg = '로그아웃했다';
-    } else {
-      await fb.signInWithPopup(fb.auth, new fb.GoogleAuthProvider());
-    }
-  } catch (e) {
-    const code = String((e && e.code) || e);
-    cloud.msg = code.includes('popup-blocked') ? '브라우저가 로그인 창을 막았다 — 팝업을 허용해야 한다'
-      : code.includes('popup') || code.includes('cancelled') ? '로그인 창이 닫혔다'
-      : '로그인 실패';
-  } finally {
-    cloud.busy = false;
-  }
-}
+const cloudLoading = null;
+function cloudPreload() {}
+function cloudSave() {}
+function cloudToggle() {}
 
 // ── 스테이지 선택 ────────────────────────────────────────────
 
@@ -6765,6 +6635,9 @@ if (typeof requestIdleCallback === 'function') requestIdleCallback(cloudPreload,
 else setTimeout(cloudPreload, 800);
 requestAnimationFrame(frame);
 </script>
+<!-- 토스 런타임. 광고와 화면 적응만 한다 — 게임 코드는 한 줄도 안 건드린다.
+     vite 가 npm 의존성을 번들에 묶으려면 별도 파일이어야 해서 인라인이 아니다. -->
+<script type="module" src="./toss.js"></script>
 <!-- ══════════════════════════════════════════════════════════════════════
      EASTBIRD 인트로 — 스튜디오 공통. 다른 게임에 넣을 때 이 블록만 통째로 옮기면 된다.
      외부 파일도 라이브러리도 참조하지 않는다. 로고가 data URI 로 들어 있어서

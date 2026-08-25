@@ -95,6 +95,15 @@ const capture = async (browser) => {
 
   await page.addInitScript(SEED_SCRIPT);
   await page.goto(URL);
+  // EASTBIRD 인트로를 걷는다. 저 블록은 실제 시각의 setTimeout(1.5초)으로 사라지는데
+  // 이 하네스가 가상 시계로 묶는 것은 rAF·performance.now 뿐이라 안 앞당겨진다. 그대로
+  // 두면 1-initial 이 통째로 로고 화면이고, 뒤 컷들은 페이드가 걸린 순간과 겹쳐서
+  // 런마다 md5 가 갈린다. 이 하네스가 보는 것은 게임 화면이므로 찍기 전에 없앤다.
+  // (init 스크립트로는 못 한다 — 그 시점엔 아직 파싱 전이라 요소가 없다.)
+  await page.evaluate(() => {
+    const el = document.getElementById('ebIntro');
+    if (el) el.remove();
+  });
   await page.waitForTimeout(300);
   await shot('1-initial', () => state.phase === 'stage' ? null : '스테이지 선택이 아니다: ' + state.phase);
 
