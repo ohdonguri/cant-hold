@@ -10,11 +10,17 @@
 // 부팅·시드·정지 방식은 shot.js 에서 그대로 가져왔다. 거기 주석에 이유가 다 있다
 // (특히 `__freeze` 가 update 만으로는 안 멈추는 이유). 고칠 일이 생기면 그쪽을 먼저 읽어라.
 //
-// ── 크기를 1080x1920 으로 잡은 이유 ──────────────────────────
-// 구글플레이 폰 스크린샷은 **긴 변이 짧은 변의 2배를 넘으면 거부된다.** 이 게임의
-// 기준 뷰포트인 390x844 는 2.16배라 그대로 뽑으면 안 올라간다. 540x960(=9:16, 1.78배)
-// 에 배율 2 를 걸어 1080x1920 을 낸다. 원스토어는 이보다 관대하지만 한 장으로 둘 다
-// 낸다. **이 값을 바꿀 때는 2배 규칙을 다시 확인해라.**
+// ── 크기를 720x1280 으로 잡은 이유 ───────────────────────────
+// 두 스토어의 규칙을 **한 장으로 동시에** 만족시켜야 한다.
+//
+//   원스토어    가로세로 최대 1300px · 16:9 또는 9:16 권장 · 최대 1MB · 2~8장
+//   구글플레이  긴 변이 짧은 변의 2배를 넘으면 거부
+//
+// 이 게임의 기준 뷰포트 390x844 는 2.16배라 구글플레이에서 거부된다. 처음에는
+// 540x960 에 배율 2 를 걸어 1080x1920 을 냈는데, 그건 **원스토어의 1300px 상한을
+// 넘는다**(1920). 360x640 에 배율 2 를 걸면 720x1280 — 9:16 정확히, 긴 변 1280 은
+// 1300 아래, 2배 규칙도 1.78 로 통과다.
+// **이 값을 바꿀 때는 위 네 줄을 전부 다시 확인해라.** 한쪽만 보면 다른 쪽에서 막힌다.
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +54,7 @@ const browser = await chromium.launch();
 const bad = [];
 
 // ── 게임 스크린샷 두 장 ────────────────────────────────────
-const page = await browser.newPage({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 2 });
+const page = await browser.newPage({ viewport: { width: 360, height: 640 }, deviceScaleFactor: 2 });
 page.on('pageerror', e => bad.push('페이지 에러: ' + e));
 await page.addInitScript(SEED_SCRIPT);
 await page.goto(URL);
@@ -58,7 +64,11 @@ const shot = async (name, check) => {
   const why = await page.evaluate(check);
   if (why) bad.push(`${name}: ${why}`);
   await page.screenshot({ path: join(OUT, name + '.png') });
-  console.log(`  ${name}.png${why ? '   ⚠ ' + why : ''}`);
+  // 피처 그래픽에서 PNG(241KB)가 「업로드 실패」로 거부당하고 JPG(46KB)가 올라간
+  // 일이 있다(아래 피처 그래픽 절 주석). 스크린샷도 같은 창구로 올라가므로
+  // **JPG 를 한 벌 더 낸다.** 원스토어 상한은 한 장당 1MB 다.
+  await page.screenshot({ path: join(OUT, name + '.jpg'), type: 'jpeg', quality: 92 });
+  console.log(`  ${name}.png + .jpg${why ? '   ⚠ ' + why : ''}`);
 };
 
 // 판에 들어가 성급이 섞인 보드를 만든다. **★1 만 늘어놓으면 이 게임이 머지 게임인
@@ -172,4 +182,4 @@ await fp.close();
 
 await browser.close();
 if (bad.length) { console.error('\n어긋난 것:\n  ' + bad.join('\n  ')); process.exit(1); }
-console.log(`\n${OUT} 에 4장.`);
+console.log(`\n${OUT} 에 6장.`);
