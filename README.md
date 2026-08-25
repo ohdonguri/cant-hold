@@ -90,6 +90,32 @@ node tools/icons.mjs     SVG → 마스커블 SVG + PNG 여섯 장 (playwright �
 - **생성물이 `icon.svg` 보다 낡지 않았는가** — 원본 지문을 생성물에 찍어 두고 대조한다.
   `icon.svg` 만 고치고 `node tools/icons.mjs` 를 안 돌리면 여기서 걸린다
 
+## 앱인토스 미니앱판 (`toss/`)
+
+**게임은 한 벌만 둔다.** `toss/index.html` 은 생성물이고 `toss/sync.mjs` 가 이 파일
+(`index.html`)에서 만든다. **손으로 고치지 마라.** 형제 리포(fruit-smash)가 토스판을
+손으로 고친 사본으로 뒀다가 웹판만 고쳐 나가는 동안 **토스판이 8월 5일자에 멈췄다.**
+
+```
+node toss/sync.mjs           토스판 생성
+node toss/sync.mjs --check   최신인지만 확인 (어긋나면 exit 1)
+cd toss && npm run build     sync + vite build → toss/dist/
+```
+
+**`index.html` 을 고쳤으면 `node toss/sync.mjs --check` 가 어긋난다고 알린다.**
+`sync.mjs` 는 잘라낼 표식을 못 찾으면 **조용히 넘어가지 않고 멈춘다** — 그대로 두면
+구글 로그인 코드가 심사에 나가는 번들에 섞여 들어간다.
+
+토스판에서 다른 것은 계정 절(스텁으로 갈린다) · manifest·아이콘 링크(없다) · 광고
+(`toss/toss.js`)뿐이다. 자세한 것은 [toss/README.md](toss/README.md).
+
+`index.html` 쪽에 토스가 남긴 자국은 둘뿐이다.
+
+- `CLOUD_UI` — 스테이지 목록에 로그인 줄을 두는가. 웹판 `true`, 토스판 `false`
+- `window.__bottomReserve` — 화면 아래를 게임이 아닌 것이 먹는 높이. 웹판은 늘 0 이고,
+  토스판이 **보드 없는 화면에서만** 배너 높이를 넣는다. 판 화면에서는 0 이라 셀 크기가
+  한 자리도 안 바뀐다
+
 ## 계정 (선택)
 
 로그인 없이도 끝까지 돌아간다. 진행도는 항상 `localStorage` 에 먼저 남고,
