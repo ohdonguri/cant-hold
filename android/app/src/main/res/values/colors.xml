@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 게임이 화면을 끝까지 칠하는 색. index.html 의 <meta name="theme-color"> ·
+         manifest.webmanifest 의 background_color · capacitor.config.js 의
+         android.backgroundColor 와 **같은 값이어야 한다.** 하나만 달라지면 실행 직후
+         그 색 띠가 한 프레임 스친다. -->
+    <color name="splashBackground">#0d1117</color>
+</resources>

@@ -43,6 +43,8 @@ open index.html          원본 그대로 (주석 포함)
 npm run build            dist/games/canthold/index.html 로 압축
 npm run verify:build     원본과 압축본을 헤드리스로 렌더해 비교 (playwright 필요)
 npm run deploy           빌드 + Cloudflare 배포
+npm run android:sync     빌드 + 안드로이드 프로젝트에 싣기
+npm run android:apk      ↑ + 서명된 릴리스 APK
 ```
 
 **`main` 에 푸시하면 Cloudflare 가 알아서 빌드하고 배포한다.** 평소에는 이게 배포다.
@@ -78,8 +80,14 @@ icons/icon.svg           아이콘 원본. 모티프를 왜 그렇게 골랐는�
 icons/icon-maskable.svg  ↑ 에서 생성된다(손으로 고치지 마라)
 icons/*.png              ↑ 에서 생성된다(손으로 고치지 마라)
 manifest.webmanifest     홈 화면 추가. start_url·scope 는 './' 다
-node tools/icons.mjs     SVG → 마스커블 SVG + PNG 여섯 장 (playwright 필요)
+android/…/res/mipmap-*   ↑ 에서 생성된다(손으로 고치지 마라). 안드로이드 런처 아이콘
+node tools/icons.mjs     SVG → 마스커블 SVG + PNG 여섯 장 + 안드로이드 런처 아이콘
+                         (playwright 필요)
 ```
+
+**안드로이드 것도 같은 실행에서 나온다.** 따로 두면 `icon.svg` 를 고치고 한쪽만
+돌리게 되고, 그 사고는 아무 에러도 안 낸다 — 웹 아이콘만 새것이고 앱 아이콘은 옛
+그림이 나갈 뿐이다.
 
 `npm run build` 가 이 둘을 `dist/games/canthold/` 로 같이 옮긴다. **SVG 원본은 안 옮긴다** —
 `index.html` 을 압축해 내보내는 것과 같은 이유로, 설계 근거 주석까지 배포할 것은 아니다.
@@ -90,6 +98,69 @@ node tools/icons.mjs     SVG → 마스커블 SVG + PNG 여섯 장 (playwright �
 - 홈 화면에 필요한 네 줄(`theme-color`·`manifest`·`icon`·`apple-touch-icon`)이 살아 있는가
 - **생성물이 `icon.svg` 보다 낡지 않았는가** — 원본 지문을 생성물에 찍어 두고 대조한다.
   `icon.svg` 만 고치고 `node tools/icons.mjs` 를 안 돌리면 여기서 걸린다
+
+## 안드로이드 앱 (`android/`)
+
+Capacitor 껍데기 하나에 **웹 빌드 산출물을 그대로 싣는다.** `index.html` 의 참조가 전부
+상대 경로라(웹에서 `/games/canthold/` 아래 놓이는 탓이다) 네이티브 루트에 통째로 옮겨
+놔도 그대로 뜬다. 그래서 형제 리포(fruit-smash)처럼 앱 전용 `www/` 를 따로 굽지 않는다.
+
+```
+npm run android:sync   빌드 → cap sync → tools/android-sync.mjs
+npm run android:apk    ↑ + gradlew assembleRelease + APK 안 확인 + 서명 지문
+```
+
+**`dist/` 는 `.gitignore` 라서 빌드를 먼저 돌려야 sync 가 된다.** 그 순서를 위 두 줄이
+묶고 있다. `npx cap sync android` 만 손으로 돌리면 지난 빌드나 빈 폴더가 실린다.
+
+필요한 것 둘이 저장소 밖에 있다.
+
+- **node 22** — Capacitor CLI 가 `>=22` 를 요구한다(`.nvmrc`). 나머지 도구는 20 에서도 돈다
+- **JDK 21** — Capacitor 가 깔아 주는 Gradle 8.14 는 **JDK 25 에서 못 돈다**
+  (`Unsupported class file major version 69`). `tools/android-build.mjs` 가 21 을 찾아 넘긴다
+
+### 서명 키 — 형제 리포와 공용이다
+
+`~/keys/fruitsmash-upload.jks` 하나로 이 앱과 fruit-smash 를 **같은 지문으로** 서명한다.
+비밀번호와 경로는 `android/key.properties` 에 있고, 루트 `.gitignore` 가 `*.jks` ·
+`*.keystore` · `key.properties` 를 막는다. **키를 잃으면 그 appId 는 영원히 업데이트를
+못 올린다.** 새 기계에서는 fruit-smash 의 `android/key.properties` 를 그대로 복사하면 된다.
+
+`key.properties` 가 없으면 gradle 은 **성공하고** 서명 안 된 APK 를 내놓는다 — 설치도
+업로드도 안 되는 물건인데 빌드 로그는 초록불이다. `tools/android-build.mjs` 가 그래서
+파일이 없으면 먼저 멈춘다.
+
+```
+apksigner verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+```
+
+### 못 바꾸는 값
+
+`capacitor.config.js` 의 `appId` 는 **한 번 올리면 영원히 못 바꾼다.** 바꾸려면 새 앱을
+올려야 하고 기존 설치자는 업데이트를 못 받는다. `android/app/build.gradle` 의
+`versionCode` 는 스토어에 올릴 때마다 1 씩 올린다.
+
+### 네이티브판에만 다른 것
+
+**게임 코드에 「네이티브면」 분기를 심지 않는다.** 토스판과 같은 구조로,
+`tools/android-sync.mjs` 가 `cap sync` 가 떠 놓은 사본을 고친다(그 사본은 Capacitor 의
+`.gitignore` 가 막는다 — 저장소에 게임이 두 벌 생기지 않는다).
+
+- **클라우드(구글 로그인) UI 를 끈다.** 유저 결정으로 **네이티브 첫 출시는 로컬 세이브만
+  간다.** 웹뷰에서 `signInWithPopup` 을 뚫으려면 네이티브 인증 플러그인이 필요하고, 그러면
+  SHA 지문 등록과 플러그인 의존성이 따라온다 — 첫 출시에 과하다고 봤다.
+  `CLOUD_UI` 한 값을 false 로 만드는 것이 전부고, `cloudPreload` 도 비운다(안 비우면 켤
+  때마다 gstatic 에서 Firebase 를 내려받고 아무 데도 안 쓴다).
+  세이브는 `localStorage` 그대로다 — **앱 데이터 삭제로 날아간다.** 로그인 안 한 웹판과
+  같은 조건이다
+- **하드웨어 뒤로 가기를 잇는다.** 웹판의 `history` 방식은 웹뷰에서 안 먹는다 — 확인했다.
+  덱 화면에서 뒤로를 누르면 화면이 한 칸 되돌아가는 게 아니라 **앱이 통째로 닫혔다.**
+  `@capacitor/app` 의 `backButton` 을 받아 게임의 `navBack()` 하나로 들여보낸다(#74).
+  목록에서만 `exitApp()` 이고, 그 자리인지는 `navState().pushed` 로 안다
+
+`npm run android:apk` 는 **다 만든 APK 를 열어서** 둘 다 들어갔는지 확인한다. npm script
+를 안 거치고 안드로이드 스튜디오에서 그냥 빌드하면 그 순서가 통째로 빠지는데, 그때
+나오는 APK 는 아무 에러 없이 로그인 줄을 달고 있기 때문이다.
 
 ## 앱인토스 미니앱판 (`toss/`)
 
@@ -121,6 +192,9 @@ cd toss && npm run build     sync + vite build → toss/dist/
 
 로그인 없이도 끝까지 돌아간다. 진행도는 항상 `localStorage` 에 먼저 남고,
 로그인은 **기기를 옮길 때** 쓴다. SDK 를 못 받아와도 게임은 그대로 진행된다.
+
+**이 절은 웹판 이야기다.** 토스판과 안드로이드 앱판에는 로그인이 아예 없고 세이브가
+`localStorage` 에만 남는다 — 왜 그렇게 뒀는지는 각각 위 두 절에 있다.
 
 저장하는 것은 두 층이다.
 

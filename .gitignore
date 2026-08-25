@@ -3,3 +3,12 @@ node_modules/
 .omc/
 .shots/
 dist/
+
+# 서명 키. 형제 리포(fruit-smash)와 **같은 업로드 키를 공용**으로 쓴다.
+# 실물은 저장소 밖(~/keys/)에 있고, 비밀번호는 android/key.properties 에 있다.
+# 둘 중 하나라도 올라가면 되돌릴 수 없다 — 키를 잃으면 그 appId 는 영원히
+# 업데이트를 못 올린다. Capacitor 가 만든 android/.gitignore 는 이 세 줄을
+# **주석 처리된 채로** 내놓으므로 여기서 막는다.
+*.keystore
+*.jks
+key.properties

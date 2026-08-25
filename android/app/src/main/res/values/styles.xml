@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <!-- **웹뷰가 뜬 뒤 실제로 쓰이는 테마다.** Capacitor 의 BridgeActivity.onCreate 가
+         AppTheme_NoActionBar 로 갈아 끼운다 — 그래서 위 런치 테마에 상태바 색을 걸면
+         한 프레임 뒤에 도로 풀린다(그렇게 해 보고 흰 띠가 그대로라 여기로 옮겼다).
+
+         시스템 바 뒤로 드러나는 자리를 게임 배경색으로 칠한다. 안 칠하면 부모
+         테마(DayNight 밝은 쪽)의 흰색이 나와서 **화면 맨 위에 흰 띠가 한 줄 남는다** —
+         게임이 #0d1117 로 끝까지 칠하는 화면이라 그 이음매가 그대로 보인다.
+         웹판에서 <meta name="theme-color"> 가 하는 일과 같다.
+
+         **windowBackground 한 줄이면 된다.** Capacitor 의 SystemBars 가 바 뒤를
+         이 값으로 칠한다(SystemBars.setStyle 마지막 줄). statusBarColor·
+         navigationBarColor 는 targetSdk 35+ 에서 무시돼서 넣어도 아무 일도 안 하고,
+         그 위 아이콘 색은 테마가 아니라 capacitor.config.js 의 SystemBars.style 이
+         정한다 — 둘 다 여기 적어 봤자 안 듣는 것을 확인했다. -->
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/splashBackground</item>
+    </style>
+
+
+    <!-- 실행 직후, 웹뷰가 첫 프레임을 그리기 전까지 깔리는 화면.
+         Capacitor 기본값은 **흰 바탕에 Capacitor 로고**(@drawable/splash)라, 그대로 두면
+         흰 화면이 번쩍한 뒤 EASTBIRD 인트로(#111111)로 넘어가 이음매가 그대로 보인다.
+         색 하나로 바꾸고 그림은 지웠다 — 이 게임의 첫 화면은 EASTBIRD 인트로 한 장이고,
+         그 앞에 다른 로고를 한 장 더 두면 로고가 두 번 나온다.
+         (안드로이드 12+ 는 여기 색 위에 런처 아이콘을 스스로 띄운다. 그건 OS 가 모든
+          앱에 하는 것이라 못 없앤다.) -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@color/splashBackground</item>
+        <item name="android:windowBackground">@color/splashBackground</item>
+    </style>
+</resources>

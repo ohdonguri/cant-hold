@@ -3327,8 +3327,16 @@ function persist() {
 // **이 절 전체가 토스판에서는 통째로 갈린다**(toss/sync.mjs). 미니앱은 구글 로그인을
 // 못 쓰므로 SDK 를 아예 안 싣는다. 갈아 끼우는 스텁이 아래 이름들을 그대로 다시
 // 선언하고 `CLOUD_UI` 만 false 로 둔다 — 그리기·탭 판정이 그 한 값만 본다.
+//
+// **안드로이드 앱(#89)도 로그인이 없다.** 「왜 네이티브만 없지」를 다시 조사하지
+// 마라 — 유저가 「네이티브 첫 출시는 로컬 세이브만 간다」로 정했다. 웹뷰에서
+// signInWithPopup 을 뚫으려면 네이티브 인증 플러그인이 필요하고, 그러면 SHA 지문
+// 등록과 플러그인 의존성이 따라온다. 첫 출시에 과하다고 봤다.
+// 끄는 자리는 `tools/android-sync.mjs` 다(토스와 같은 구조 · 같은 `CLOUD_UI` 한 값).
+// **이 파일에 「네이티브면」 분기를 심지 않는다** — 배포처가 셋이라 분기를 심기
+// 시작하면 게임 코드가 배포처 수만큼 갈래를 갖는다.
 // ═════════════════════════════════════════════════════════════
-const CLOUD_UI = true;            // 스테이지 목록에 로그인 줄을 두는가 (토스판은 false)
+const CLOUD_UI = true;            // 스테이지 목록에 로그인 줄을 두는가 (토스판·앱판은 false)
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyApyN5BFgzOHu6JUdHO1gYRzJiuKm-TKzQ',
   authDomain: 'eastbirdstudio-abfb5.firebaseapp.com',
