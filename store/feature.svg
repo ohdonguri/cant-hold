@@ -1,78 +1,106 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 578" width="1024" height="578">
   <!--
-    스토어 피처 그래픽 원본(원스토어 「그래픽 이미지」 1024x578).
+    스토어 피처 그래픽 원본(원스토어 「그래픽 이미지」 1024x578, PNG·JPG, 필수 1장).
     PNG 는 `node tools/store.mjs` 가 뽑는다. **PNG 를 직접 고치지 마라** —
     icons/icon.svg 와 같은 이유다(재현이 안 된다).
 
-    ── 아이콘과 같은 모티프를 옆으로 눕혔다 ─────────────────────
-    icons/icon.svg 는 「웨이브 → 타워 → 관문」을 **세로로** 쌓았다. 48px 에서 남는
-    것이 가로 띠 세 개뿐이라서였다. 여기는 1024x578 이고 가로가 길다. 같은 셋을
-    **왼쪽에서 오른쪽으로** 흐르게 놓는다 — 적이 왼쪽에서 와서, 타워를 지나,
-    오른쪽 관문에 닿는다. 그림 하나가 게임 규칙을 말한다.
+    ── 원스토어 가이드가 정한 자리 ──────────────────────────────
+    첫 판은 이 가이드를 안 읽고 만들어서 네 군데를 어겼다. 여기 적어 두는 것은
+    다음 사람이 같은 걸 다시 밟지 않게 하기 위해서다.
 
-    글자는 왼쪽 위에 둔다. 스토어 목록에서 이 이미지 **아래에 앱 이름이 다시 찍히므로**
-    가운데에 크게 넣으면 두 번 읽힌다.
+      ① 주요 그래픽은 **중앙**에 둔다. 첫 판은 타워를 오른쪽으로 몰았다
+      ② **하단 165px(y 413~578)** 에는 아무것도 두지 않는다. 전시 화면에서 UI 가
+         그 위에 얹히고, 그라데이션이 깔려 잘리거나 희미해진다
+      ③ 텍스트를 많이 넣지 않는다. 특히 **하단 텍스트는 금지**다(②와 같은 이유).
+         첫 판은 제목 두 줄 + 부제 한 줄을 왼쪽에 크게 넣었다.
+         **그래서 이 판에는 글자가 하나도 없다** — 앱 이름은 전시 카드가 따로 찍는다
+      ④ **좌상단은 광고 뱃지가 덮는다.** 첫 판은 거기에 제목을 뒀다.
+         (로고를 넣게 되면 우상단이나 중앙에 둔다. 하단은 안 된다)
 
-    ── 색은 icons/icon.svg 에서 그대로 가져왔다 ─────────────────
+      그 밖에: 배경을 완전한 흰색으로 하지 않는다(원스토어 배경색과 안 갈린다).
+      이 게임은 #0d1117 이라 해당 없음. 시즌·업데이트 한정 내용도 넣지 않는다.
+
+    ── 모티프: 웨이브 → 타워 → 관문 ────────────────────────────
+    icons/icon.svg 는 셋을 **세로로** 쌓았다. 48px 에서 남는 것이 가로 띠 세 개뿐이라
+    그랬다. 여기는 가로가 길고 중앙을 써야 하므로, 통로를 좌우로 눕히고 **타워를
+    한가운데 크게** 세운다. 적은 양쪽에서 그 타워로 몰려온다.
+
+    ── 색은 전부 icons/icon.svg 에서 그대로 가져왔다 ────────────
       #0d1117 #1d2533 #222b3a   배경·보드 바닥
       #697484 #8b949e           다가오는 웨이브
       #f0883e #f6ba8f #6c3d1c #301b0c   타워(파쇄자) 명암 사다리
       #f85149                   관문
   -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
       <stop offset="0" stop-color="#1d2533"/>
       <stop offset="1" stop-color="#0d1117"/>
     </linearGradient>
-    <!-- 관문의 붉은 기운. 선 하나만 있으면 「테두리」로 읽힌다 -->
+    <!-- 관문 주변의 붉은 기운. 선 하나만 있으면 「테두리」로 읽힌다 -->
     <linearGradient id="gateGlow" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0"   stop-color="#f85149" stop-opacity="0"/>
-      <stop offset="0.6" stop-color="#f85149" stop-opacity="0.28"/>
+      <stop offset="0.7" stop-color="#f85149" stop-opacity="0.30"/>
       <stop offset="1"   stop-color="#f85149" stop-opacity="0"/>
     </linearGradient>
-    <!-- 왼쪽 글자 뒤를 어둡게 눌러 격자 위에서도 읽히게 한다 -->
-    <linearGradient id="scrim" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0"    stop-color="#0d1117" stop-opacity="0.92"/>
-      <stop offset="0.6" stop-color="#0d1117" stop-opacity="0.80"/>
-      <stop offset="1"    stop-color="#0d1117" stop-opacity="0"/>
+    <!-- 타워 뒤 후광. 중앙 그래픽을 배경 격자에서 떼어 놓는다 -->
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0"   stop-color="#f0883e" stop-opacity="0.30"/>
+      <stop offset="0.55" stop-color="#f0883e" stop-opacity="0.10"/>
+      <stop offset="1"   stop-color="#f0883e" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 하단 165px 은 비워 둬야 하는 자리다. 그림이 거기서 끊긴 것처럼 보이지 않게
+         배경만 서서히 어둡게 깐다. 요소가 아니라 바탕이므로 규정에 안 걸린다 -->
+    <linearGradient id="footFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1117" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0d1117" stop-opacity="0.35"/>
     </linearGradient>
   </defs>
 
   <rect width="1024" height="578" fill="url(#bg)"/>
 
-  <!-- 보드 격자. 48px 아이콘과 달리 여기서는 크게 보이므로 더 옅게 깐다 -->
-  <g stroke="#222b3a" stroke-width="2" opacity="0.55">
+  <!-- 보드 격자 -->
+  <g stroke="#222b3a" stroke-width="2" opacity="0.5">
     <path d="M64 0V578M128 0V578M192 0V578M256 0V578M320 0V578M384 0V578M448 0V578M512 0V578M576 0V578M640 0V578M704 0V578M768 0V578M832 0V578M896 0V578M960 0V578"/>
     <path d="M0 64H1024M0 128H1024M0 192H1024M0 256H1024M0 320H1024M0 384H1024M0 448H1024M0 512H1024"/>
   </g>
 
-  <!-- 통로. **오른쪽 절반에만 깐다.** 왼쪽은 글자 자리라 어둡게 누르는데,
-       그 눌림이 통로·적·화살표를 통째로 지운다(첫 판이 정확히 그랬다).
-       그래서 그림은 x 500 오른쪽에만 둔다 — 눌림과 그림이 자리를 안 다툰다.
+  <!-- 타워 뒤 후광 -->
+  <ellipse cx="512" cy="180" rx="290" ry="200" fill="url(#halo)"/>
+
+  <!-- 통로. 양쪽 끝에서 들어와 중앙에서 한 번 올라갔다 내려온다.
        **꺾는다.** 직선이면 폭발 반경(0.8칸)이 칸 간격(1.0칸)보다 좁아 겹치는 자리가
-       안 생긴다. 이 게임에서 꺾임이 값을 하는 이유가 그것이고, 그림도 그걸 보여야 한다 -->
-  <path d="M470 400 H700 V310 H880 V400 H986" fill="none" stroke="#2b3546" stroke-width="72"/>
-  <path d="M470 400 H700 V310 H880 V400 H986" fill="none" stroke="#6b7688" stroke-width="4"
-        stroke-dasharray="14 20" opacity="0.65"/>
+       안 생긴다 — 이 게임에서 꺾임이 값을 하는 이유가 그것이다.
+       통로 아래 끝이 y 366 이라 **하단 금지 영역(413)** 위에서 끝난다 -->
+  <path d="M0 366 H300 V300 H724 V366 H912" fill="none" stroke="#2b3546" stroke-width="66"/>
+  <path d="M0 366 H300 V300 H724 V366 H912" fill="none" stroke="#6b7688" stroke-width="4"
+        stroke-dasharray="14 20" opacity="0.6"/>
 
   <!-- 다가오는 웨이브. 아래 줄이 밝다 — 다가오는 순서가 곧 밝기다(아이콘과 같은 규칙) -->
-  <g fill="none" stroke-width="17" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M508 372 L544 400 L508 428" stroke="#697484"/>
-    <path d="M560 372 L596 400 L560 428" stroke="#8b949e"/>
+  <g fill="none" stroke-width="15" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 342 L64 366 L34 390" stroke="#697484"/>
+    <path d="M80 342 L110 366 L80 390" stroke="#8b949e"/>
   </g>
 
-  <!-- 보병 셋. 통로 위에 실제로 얹어 「막아야 할 것」을 만든다 -->
+  <!-- 보병. 통로 위에 얹어 「막아야 할 것」을 만든다. 양쪽에서 중앙으로 온다 -->
   <g fill="#8b949e">
-    <rect x="626" y="387" width="26" height="26" rx="4"/>
-    <rect x="738" y="297" width="26" height="26" rx="4"/>
-    <rect x="800" y="297" width="26" height="26" rx="4"/>
+    <rect x="168" y="353" width="26" height="26" rx="4"/>
+    <rect x="230" y="353" width="26" height="26" rx="4"/>
+    <rect x="336" y="287" width="26" height="26" rx="4"/>
+    <rect x="404" y="287" width="26" height="26" rx="4"/>
+    <rect x="600" y="287" width="26" height="26" rx="4"/>
+    <rect x="668" y="287" width="26" height="26" rx="4"/>
+    <rect x="792" y="353" width="26" height="26" rx="4"/>
   </g>
 
-  <!-- 타워. icons/icon.svg 의 성탑을 0.52 로 줄여 꺾임 바로 위에 세웠다. 타워는
-       통로에 못 놓는 게 게임 규칙이라 그림에서도 통로 밖에 둔다.
+  <!-- 타워. 한가운데. icons/icon.svg 의 성탑을 0.75 로 줄였다.
+       **바닥이 통로 윗면(267)보다 아래로 내려가면 받침이 통로에 묻힌다** — 첫 판이
+       0.62 배 y 26 이라 바닥이 274 였고 실제로 잘려 보였다. 그래서 배율을 정한 뒤
+       바닥이 267 에 닿도록 y 를 역산한다: 401*0.75 + y = 267 → y = -34.
+       가로 중심도 같은 식이다: 512 - 256*0.75 = 320.
+       **배율을 바꾸면 이 두 값을 다시 계산해라.** 안 그러면 통로에 묻히거나 뜬다.
        실루엣을 한 번에 깔아 외곽선을 만들고 그 위에 명암을 얹는다 — 조각마다
        테두리를 두르면 이음매에서 두 번 겹쳐 두꺼워진다 -->
-  <g transform="translate(660 58) scale(0.52)">
+  <g transform="translate(320 -34) scale(0.75)">
     <path fill="#301b0c" stroke="#301b0c" stroke-width="12" stroke-linejoin="round" d="
       M163 193 H193 V254 H215 V193 H245 V254 H267 V193 H297 V254 H319 V193 H349 V254
       H356 V292 H320 V360 H368 V401 H144 V360 H192 V292 H156 V254 H163 Z"/>
@@ -97,31 +125,25 @@
     <rect x="144" y="387" width="224" height="14" fill="#6c3d1c"/>
   </g>
 
-  <!-- 별 다섯. 이 게임이 머지 게임인 것은 **타워 위의 별**이 말한다. 게임 안에서도
-       별은 타워에 붙어 있으므로 여기서도 띄우지 않고 머리 바로 위에 얹는다 -->
-  <g transform="translate(714 120)">
-    <g fill="#f85149">
-      <path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/>
-      <g transform="translate(35 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
-      <g transform="translate(70 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
-      <g transform="translate(105 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
-      <g transform="translate(140 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
+  <!-- 별 다섯. 이 게임이 합성으로 키우는 게임인 것은 **타워 위의 별**이 말한다.
+       글자를 뺐으므로 「무엇을 하는 게임인가」를 이 다섯 개가 대신 진다.
+       중심 512 에 맞춘다 — 40px 간격 다섯이면 폭 160, 시작은 512-80 = 432.
+       타워 머리(111)에서 35px 위에 둔다. 더 붙이면 톱니와 붙어 한 덩어리로 읽힌다 -->
+  <g transform="translate(432 44)">
+    <g fill="#f85149" stroke="#0d1117" stroke-width="3" stroke-linejoin="round">
+      <path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/>
+      <g transform="translate(40 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+      <g transform="translate(80 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+      <g transform="translate(120 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+      <g transform="translate(160 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
     </g>
   </g>
 
-  <!-- 관문. 통로가 여기서 끝난다. 이게 뚫리면 진다 -->
-  <rect x="906" y="316" width="118" height="168" fill="url(#gateGlow)"/>
-  <rect x="974" y="360" width="24" height="80" rx="12" fill="#f85149"/>
+  <!-- 관문. 통로가 여기서 끝난다. 이게 뚫리면 진다.
+       하단 금지 영역(413) 위에서 끝나도록 y 를 잡았다 -->
+  <rect x="846" y="286" width="178" height="160" fill="url(#gateGlow)"/>
+  <rect x="912" y="330" width="24" height="72" rx="12" fill="#f85149"/>
 
-  <!-- 글자 뒤 눌림 -->
-  <rect width="500" height="578" fill="url(#scrim)"/>
-
-  <!-- 제목. 스토어 목록에서 이미지 아래에 앱 이름이 다시 찍히므로 왼쪽 위에 둔다.
-       system-ui 로 두면 뽑는 기계마다 글꼴이 갈린다 — Apple SD Gothic Neo 를 먼저
-       적고 없는 곳을 위해 사다리를 남긴다 -->
-  <g font-family="'Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic',sans-serif">
-    <text x="72" y="238" font-size="66" font-weight="800" fill="#e6edf3" letter-spacing="-2">이 웨이브는</text>
-    <text x="72" y="318" font-size="66" font-weight="800" fill="#f0883e" letter-spacing="-2">못 막습니다</text>
-    <text x="74" y="376" font-size="27" font-weight="600" fill="#8b949e" letter-spacing="-0.5">합쳐서 키우는 타워 디펜스 · 판 15개</text>
-  </g>
+  <!-- 하단 165px. 요소를 두지 않는 자리라 배경만 어둡게 내린다 -->
+  <rect x="0" y="380" width="1024" height="198" fill="url(#footFade)"/>
 </svg>
