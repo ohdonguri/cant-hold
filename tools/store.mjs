@@ -155,8 +155,14 @@ await fp.setContent(`<style>html,body{margin:0;padding:0;background:#0d1117}</st
 await fp.waitForTimeout(150);
 await fp.screenshot({ path: join(OUT, 'feature-1024x578.png') });
 console.log('  feature-1024x578.png');
+// 원스토어는 PNG 와 JPG 를 둘 다 받는다. **한쪽이 거부당할 때 바꿔 낼 수 있게**
+// 두 벌을 만들어 둔다 — 업로드가 실패했을 때 원인이 파일 형식인지 아닌지를
+// 가르는 데 그 한 장이면 된다. 품질 92 는 이 그림(평면 색 + 격자)에서 눈으로
+// 차이가 안 나는 가장 낮은 값이다.
+await fp.screenshot({ path: join(OUT, 'feature-1024x578.jpg'), type: 'jpeg', quality: 92 });
+console.log('  feature-1024x578.jpg');
 await fp.close();
 
 await browser.close();
 if (bad.length) { console.error('\n어긋난 것:\n  ' + bad.join('\n  ')); process.exit(1); }
-console.log(`\n${OUT} 에 3장.`);
+console.log(`\n${OUT} 에 4장.`);
