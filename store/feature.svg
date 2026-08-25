@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 578" width="1024" height="578">
+  <!--
+    스토어 피처 그래픽 원본(원스토어 「그래픽 이미지」 1024x578).
+    PNG 는 `node tools/store.mjs` 가 뽑는다. **PNG 를 직접 고치지 마라** —
+    icons/icon.svg 와 같은 이유다(재현이 안 된다).
+
+    ── 아이콘과 같은 모티프를 옆으로 눕혔다 ─────────────────────
+    icons/icon.svg 는 「웨이브 → 타워 → 관문」을 **세로로** 쌓았다. 48px 에서 남는
+    것이 가로 띠 세 개뿐이라서였다. 여기는 1024x578 이고 가로가 길다. 같은 셋을
+    **왼쪽에서 오른쪽으로** 흐르게 놓는다 — 적이 왼쪽에서 와서, 타워를 지나,
+    오른쪽 관문에 닿는다. 그림 하나가 게임 규칙을 말한다.
+
+    글자는 왼쪽 위에 둔다. 스토어 목록에서 이 이미지 **아래에 앱 이름이 다시 찍히므로**
+    가운데에 크게 넣으면 두 번 읽힌다.
+
+    ── 색은 icons/icon.svg 에서 그대로 가져왔다 ─────────────────
+      #0d1117 #1d2533 #222b3a   배경·보드 바닥
+      #697484 #8b949e           다가오는 웨이브
+      #f0883e #f6ba8f #6c3d1c #301b0c   타워(파쇄자) 명암 사다리
+      #f85149                   관문
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d2533"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <!-- 관문의 붉은 기운. 선 하나만 있으면 「테두리」로 읽힌다 -->
+    <linearGradient id="gateGlow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"   stop-color="#f85149" stop-opacity="0"/>
+      <stop offset="0.6" stop-color="#f85149" stop-opacity="0.28"/>
+      <stop offset="1"   stop-color="#f85149" stop-opacity="0"/>
+    </linearGradient>
+    <!-- 왼쪽 글자 뒤를 어둡게 눌러 격자 위에서도 읽히게 한다 -->
+    <linearGradient id="scrim" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#0d1117" stop-opacity="0.92"/>
+      <stop offset="0.6" stop-color="#0d1117" stop-opacity="0.80"/>
+      <stop offset="1"    stop-color="#0d1117" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="578" fill="url(#bg)"/>
+
+  <!-- 보드 격자. 48px 아이콘과 달리 여기서는 크게 보이므로 더 옅게 깐다 -->
+  <g stroke="#222b3a" stroke-width="2" opacity="0.55">
+    <path d="M64 0V578M128 0V578M192 0V578M256 0V578M320 0V578M384 0V578M448 0V578M512 0V578M576 0V578M640 0V578M704 0V578M768 0V578M832 0V578M896 0V578M960 0V578"/>
+    <path d="M0 64H1024M0 128H1024M0 192H1024M0 256H1024M0 320H1024M0 384H1024M0 448H1024M0 512H1024"/>
+  </g>
+
+  <!-- 통로. **오른쪽 절반에만 깐다.** 왼쪽은 글자 자리라 어둡게 누르는데,
+       그 눌림이 통로·적·화살표를 통째로 지운다(첫 판이 정확히 그랬다).
+       그래서 그림은 x 500 오른쪽에만 둔다 — 눌림과 그림이 자리를 안 다툰다.
+       **꺾는다.** 직선이면 폭발 반경(0.8칸)이 칸 간격(1.0칸)보다 좁아 겹치는 자리가
+       안 생긴다. 이 게임에서 꺾임이 값을 하는 이유가 그것이고, 그림도 그걸 보여야 한다 -->
+  <path d="M470 400 H700 V310 H880 V400 H986" fill="none" stroke="#2b3546" stroke-width="72"/>
+  <path d="M470 400 H700 V310 H880 V400 H986" fill="none" stroke="#6b7688" stroke-width="4"
+        stroke-dasharray="14 20" opacity="0.65"/>
+
+  <!-- 다가오는 웨이브. 아래 줄이 밝다 — 다가오는 순서가 곧 밝기다(아이콘과 같은 규칙) -->
+  <g fill="none" stroke-width="17" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M508 372 L544 400 L508 428" stroke="#697484"/>
+    <path d="M560 372 L596 400 L560 428" stroke="#8b949e"/>
+  </g>
+
+  <!-- 보병 셋. 통로 위에 실제로 얹어 「막아야 할 것」을 만든다 -->
+  <g fill="#8b949e">
+    <rect x="626" y="387" width="26" height="26" rx="4"/>
+    <rect x="738" y="297" width="26" height="26" rx="4"/>
+    <rect x="800" y="297" width="26" height="26" rx="4"/>
+  </g>
+
+  <!-- 타워. icons/icon.svg 의 성탑을 0.52 로 줄여 꺾임 바로 위에 세웠다. 타워는
+       통로에 못 놓는 게 게임 규칙이라 그림에서도 통로 밖에 둔다.
+       실루엣을 한 번에 깔아 외곽선을 만들고 그 위에 명암을 얹는다 — 조각마다
+       테두리를 두르면 이음매에서 두 번 겹쳐 두꺼워진다 -->
+  <g transform="translate(660 58) scale(0.52)">
+    <path fill="#301b0c" stroke="#301b0c" stroke-width="12" stroke-linejoin="round" d="
+      M163 193 H193 V254 H215 V193 H245 V254 H267 V193 H297 V254 H319 V193 H349 V254
+      H356 V292 H320 V360 H368 V401 H144 V360 H192 V292 H156 V254 H163 Z"/>
+    <g fill="#f0883e">
+      <rect x="163" y="193" width="30" height="61"/><rect x="215" y="193" width="30" height="61"/>
+      <rect x="267" y="193" width="30" height="61"/><rect x="319" y="193" width="30" height="61"/>
+    </g>
+    <g fill="#f6ba8f">
+      <rect x="163" y="193" width="30" height="12"/><rect x="215" y="193" width="30" height="12"/>
+      <rect x="267" y="193" width="30" height="12"/><rect x="319" y="193" width="30" height="12"/>
+    </g>
+    <rect x="156" y="254" width="200" height="38" fill="#f0883e"/>
+    <rect x="156" y="254" width="200" height="12" fill="#f6ba8f"/>
+    <rect x="156" y="286" width="200" height="6"  fill="#301b0c"/>
+    <rect x="192" y="292" width="128" height="68" fill="#f0883e"/>
+    <rect x="192" y="292" width="128" height="8"  fill="#f6ba8f"/>
+    <rect x="192" y="344" width="128" height="10" fill="#6c3d1c"/>
+    <rect x="192" y="354" width="128" height="6"  fill="#301b0c"/>
+    <rect x="214" y="304" width="84"  height="34" rx="4" fill="#ffffff"/>
+    <rect x="144" y="360" width="224" height="41" fill="#f0883e"/>
+    <rect x="144" y="360" width="224" height="10" fill="#f6ba8f"/>
+    <rect x="144" y="387" width="224" height="14" fill="#6c3d1c"/>
+  </g>
+
+  <!-- 별 다섯. 이 게임이 머지 게임인 것은 **타워 위의 별**이 말한다. 게임 안에서도
+       별은 타워에 붙어 있으므로 여기서도 띄우지 않고 머리 바로 위에 얹는다 -->
+  <g transform="translate(714 120)">
+    <g fill="#f85149">
+      <path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/>
+      <g transform="translate(35 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
+      <g transform="translate(70 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
+      <g transform="translate(105 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
+      <g transform="translate(140 0)"><path d="M0 0 L4.4 8.9 L14.2 10.3 L7.1 17.2 L8.8 27 L0 22.4 L-8.8 27 L-7.1 17.2 L-14.2 10.3 L-4.4 8.9 Z"/></g>
+    </g>
+  </g>
+
+  <!-- 관문. 통로가 여기서 끝난다. 이게 뚫리면 진다 -->
+  <rect x="906" y="316" width="118" height="168" fill="url(#gateGlow)"/>
+  <rect x="974" y="360" width="24" height="80" rx="12" fill="#f85149"/>
+
+  <!-- 글자 뒤 눌림 -->
+  <rect width="500" height="578" fill="url(#scrim)"/>
+
+  <!-- 제목. 스토어 목록에서 이미지 아래에 앱 이름이 다시 찍히므로 왼쪽 위에 둔다.
+       system-ui 로 두면 뽑는 기계마다 글꼴이 갈린다 — Apple SD Gothic Neo 를 먼저
+       적고 없는 곳을 위해 사다리를 남긴다 -->
+  <g font-family="'Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic',sans-serif">
+    <text x="72" y="238" font-size="66" font-weight="800" fill="#e6edf3" letter-spacing="-2">이 웨이브는</text>
+    <text x="72" y="318" font-size="66" font-weight="800" fill="#f0883e" letter-spacing="-2">못 막습니다</text>
+    <text x="74" y="376" font-size="27" font-weight="600" fill="#8b949e" letter-spacing="-0.5">합쳐서 키우는 타워 디펜스 · 판 15개</text>
+  </g>
+</svg>
