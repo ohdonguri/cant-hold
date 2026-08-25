@@ -3677,13 +3677,15 @@ function pickStage(i) {
 }
 
 // ── 빈 칸 탭 → 소환 ───────────────────────────────────────────
-// **탭 두 번이다.** 빈 칸을 누르면 그 칸 둘레 10시·12시·2시에 덱 아이콘 셋이 뜨고,
-// 아이콘을 누르면 그 자리에 바로 선다.
+// **아이콘을 고른 다음 한 번 더 눌러 짓는다.** 빈 칸을 누르면 그 칸 둘레
+// 10시·12시·2시에 덱 아이콘 셋이 뜨고, 아이콘을 한 번 누르면 **골라지고**(사거리 +
+// 칸 안의 유령), 같은 아이콘을 다시 누르면 그 자리에 선다.
 //
 // 예전에는 세 번이었다 — 빈 칸 → 카드 → 배치 버튼. 카드 66px 석 장(이름 / 뭐냐 /
 // 어디에 놓냐 세 줄)에 액션 줄까지 화면 아래에 268px 을 잡았고, 30웨이브 동안 수십
 // 번 반복되는 동작이라 손가락이 매번 그만큼 왕복했다. 「짓다가 손목이 아프다」가
 // 이 화면을 갈아엎은 이유고, 그래서 **설명을 통째로 뺐다.** 이름도 blurb 도 없다.
+// **지금도 그 규칙은 그대로다** — 늘어난 것은 탭 한 번이지 화면에 적힌 글자가 아니다.
 //
 // **위쪽 부채꼴인 이유**: 아래·좌우는 누르고 있는 손가락 자체에 가린다. 오른손 엄지
 // 기준 10~2시가 가장 안 가리는 구간이다.
@@ -3693,18 +3695,34 @@ function pickStage(i) {
 // 그건 바로 위 문단이 「가린다」고 적은 자리다. 덱 크기를 건드리면 `PICK_STEP` 과 이
 // 주석을 같이 봐야 한다. (3종이 아니어도 그려지기는 한다. 나빠질 뿐이다.)
 //
-// **사거리 미리보기는 없애지 않고 길게 누르기로 옮겼다.** 예전 2단계의 근거는
+// **사거리 미리보기는 없애지 않았다 — 첫 탭이 그 자리다.** 예전 2단계의 근거는
 // 「후보 셋의 범위를 한꺼번에 겹쳐 그리면 어느 원이 누구 건지 못 읽는다」였고 그
-// 이유는 지금도 그대로다. 그래서 **누르고 있는 하나만** 그린다.
+// 이유는 지금도 그대로다. 그래서 **고른 하나만** 그린다. 기각된 것은 「셋을 겹쳐
+// 그리기」이지 「두 단계로 나누기」가 아니었다 — #68 이 그 둘을 한 문단에 적어 두는
+// 바람에 사거리가 **길게 누르기**로 갔고, 유저는 그걸 못 찾았다(#83). 길게 누르기는
+// 아무것도 안 하면 아무것도 안 보이므로 영영 못 배운다. 첫 탭은 화면이 스스로 답한다.
 const PICKER_ACT_H = 44;          // mergePlace 액션 버튼 높이
 
-// 부채꼴 치수. 이동 거리와 오조작이 이 셋에서 갈린다.
+// 부채꼴 치수. 이동 거리와 오조작이 이 넷에서 갈린다.
 //   PICK_R      칸 중심 → 아이콘 중심. **손가락 이동 상한이 곧 이 값이다**
-//   PICK_ICON_R 보이는 원. 지름 48px 로 최소 탭 크기 44px 위다
+//   PICK_ICON_R 안 고른 아이콘의 보이는 원. 지름 48px 로 최소 탭 크기 44px 위다
 //   PICK_HIT_R  히트박스. 보이는 원보다 넉넉하되 `PICK_R / 2 = 29` 미만이라야 한다 —
-//               이웃과 겹치면 「어느 쪽이 눌렸나」가 좌표 몇 px 에 달리고, 즉시
-//               배치라 그건 곧 골드가 나가는 오조작이다
+//               이웃과 겹치면 「어느 쪽이 눌렸나」가 좌표 몇 px 에 달리고, 둘째 탭이
+//               곧 배치라 그건 골드가 나가는 오조작이다
+//   PICK_SEL_R  **고른 아이콘의 보이는 원. 히트박스와 같은 값이다.**
+// 마지막 줄이 이 화면의 둘째 탭을 쉽게 만드는 방법이다 — 히트박스를 키우는 게 아니라
+// **이미 있던 히트박스를 보이게 하는 것**이다. 28 은 `PICK_HIT_R` 이 이미 쓰고 있던
+// 반경이라 「보이는 것이 곧 누를 수 있는 것」이 되고, 다음 둘이 같이 성립한다.
+//   ① 이웃과 안 겹친다: 28 + 24 = 52 < `PICK_R` 58 (여백 6px). 28 < 29 라 두 아이콘
+//     한복판(29px)에도 못 닿으므로 `pickerHit` 의 「이웃 사이는 안 잡힌다」가 그대로다
+//   ② 화면 밖으로 안 나간다: `pickerFan` 은 아이콘 중심을 `PICK_EDGE + PICK_ICON_R`
+//     안쪽에 두므로 커진 원도 28 − 24 = 4 ≤ `PICK_EDGE` 6 만큼만 먹는다. 즉 **부채꼴
+//     기하는 한 글자도 안 건드린다** — 가장자리 회전 로직이 이 값에 안 딸려 있다
+// **히트박스 자체는 안 키운다.** 28 은 위 29 천장 바로 밑이라 남은 자리가 1px 이고,
+// 고른 것만 키우면 지금은 「아무 일도 안 나는」 이웃 사이 틈이 「골드가 나가는」 틈이
+// 된다 — 오조작을 줄이려다 늘리는 방향이다.
 const PICK_R = 58, PICK_ICON_R = 24, PICK_HIT_R = 28;
+const PICK_SEL_R = PICK_HIT_R;
 const PICK_STEP = Math.PI / 3;    // 아이콘 사이 60°
 const PICK_ROT = Math.PI / 12;    // 가장자리에서 부채꼴을 돌리는 눈금 15°
 const PICK_EDGE = 6;              // 화면 가장자리 여백
@@ -3782,10 +3800,17 @@ function pickerLayout() {
   const pts = pickerFan(cx, cy, deck.length);
   // 원 정보(cx·cy·r)와 감싸는 사각형을 같이 담는다. 판정은 원으로 하지만(pickerHit)
   // 「화면 안인가」를 재는 쪽은 사각형이 편하다.
-  const icons = deck.map((k, i) => ({
-    k, cx: pts[i].x, cy: pts[i].y, r: PICK_ICON_R, hitR: PICK_HIT_R,
-    x: pts[i].x - PICK_ICON_R, y: pts[i].y - PICK_ICON_R, w: PICK_ICON_R * 2, h: PICK_ICON_R * 2,
-  }));
+  //
+  // **`r` 은 고른 아이콘에서 커진다**(PICK_SEL_R). 그리기 쪽에서 따로 부풀리지 않는
+  // 이유는 검사 때문이다 — `npm test` 가 「render 가 이 좌표·이 반경으로 그렸나」를
+  // 대조하므로(#58), 배치가 내놓은 `r` 과 화면의 원이 갈리면 그 대조가 못 쓰게 된다.
+  const icons = deck.map((k, i) => {
+    const r = k === state.picker.sel ? PICK_SEL_R : PICK_ICON_R;
+    return {
+      k, cx: pts[i].x, cy: pts[i].y, r, hitR: PICK_HIT_R,
+      x: pts[i].x - r, y: pts[i].y - r, w: r * 2, h: r * 2,
+    };
+  });
   return { icons, actions: [] };
 }
 
@@ -3807,81 +3832,55 @@ function pickerHit(px, py) {
   return best;
 }
 
-// ── 아이콘 누르기 · 길게 누르면 사거리 ───────────────────────
-// 즉시 배치라 **오조작이 곧 골드 손해다.** 1성 소환에 `10 + 2 x 그 웨이브 소환수` 가
+// ── 아이콘 탭: 첫 번은 고르기 · 둘째 번은 짓기 ───────────────
+// 배치라 **오조작이 곧 골드 손해다.** 1성 소환에 `10 + 2 x 그 웨이브 소환수` 가
 // 나가고, 되돌리는 길은 판매뿐인데 회수는 `sellValue` 로 4G(조폐소 A2 환급 분기면
 // 10G) 다. 게다가 `summonedThisWave` 는 이미 올라가 있어서 **그 웨이브의 다음 소환값이
 // 영구히 +2G** 다 — 즉 첫 소환을 잘못 누르면 실손 6G + 남은 웨이브 내내 +2G 다.
-// 그래서 세 가지를 둔다.
-//   ① 히트박스가 보이는 원보다 넉넉하다 (PICK_HIT_R > PICK_ICON_R)
-//   ② 짓는 것은 **뗄 때**다. 누른 채 8px 넘게 밀면 취소된다 — 잘못 눌렀다는 걸
-//      떼기 전에 알아채면 손가락을 옆으로 밀어 빠져나올 수 있다. 8px 은 #50 의 타워
-//      드래그 문턱과 **같은 값이다**. 두 화면에서 「탭인가 끌기인가」가 다르면
-//      손가락이 배운 것을 화면마다 다시 배워야 한다
-//   ③ 길게 누르면 사거리를 보여주고 **떼도 안 짓는다.** 들여다보려고 누른 손이
-//      골드를 쓰면 안 된다
-// 0.3초는 「보통의 탭을 뺏지 않는 가장 짧은 값」이다. 탭은 대개 0.15초 안에 끝난다.
-// 문턱이 낮으면 지으려던 탭이 조회가 되고(손해: 다시 한 번 누른다), 높으면 조회하려던
-// 손이 타워를 짓는다(손해: 위의 골드). 둘이 대칭이 아니라서 **낮은 쪽으로 치우친다.**
-const PICK_HOLD = 0.3;            // 초
-
-// 눌린 아이콘을 잡아 둔다. 상태를 `state.picker` 안에 넣는 이유는 beginMergePlace
-// 주석과 같다 — picker 를 지우는 경로가 이미 넷(togglePause · restoreRun · restart ·
-// ESC)이고, 형제 변수를 새로 만들면 그 넷을 전부 다시 맞춰야 한다.
-function pickerPressDown(px, py) {
+//
+// **그 방어를 두 단계 탭이 통째로 맡는다.** #68 은 같은 일을 장치 넷으로 했는데
+// (넉넉한 히트박스 · 뗄 때 짓기 · 8px 밀어서 취소 · 길게 누르면 조회) 그중 뒤의 셋은
+// **누른 채로 일어나는 일**이라 화면에 아무 흔적이 없었다. 유저는 길게 누르기를 못
+// 찾았고(#83), 못 찾은 장치는 방어가 아니다. 지금은 첫 탭이 공짜라 **잘못 누르면
+// 화면이 그렇게 말하고 골드는 안 나간다** — 다른 아이콘을 누르면 그리로 옮겨 간다.
+// 남은 것은 넉넉한 히트박스 하나뿐이고, 나머지는 이 두 단계가 대신한다.
+//
+// 값은 다시 안 매겼다. 늘어난 탭 한 번의 대가는 위 6G + 남은 웨이브 +2G 이고,
+// 판마다 수십 번 반복되므로 **둘째 탭이 쉬워야 한다** — 그 답이 `PICK_SEL_R` 이다.
+//
+// 고른 종류는 `state.picker.sel` 에 둔다. 상태를 `state.picker` 안에 넣는 이유는
+// beginMergePlace 주석과 같다 — picker 를 지우는 경로가 이미 넷(togglePause ·
+// restoreRun · restart · ESC)이고, 형제 변수를 새로 만들면 그 넷을 전부 다시 맞춰야
+// 한다. 이름도 mergePlace 의 `sel` 과 일부러 같다: **이 창에서 지금 고른 것.**
+//
+// 탭을 **누를 때** 처리하는 것도 그래서다. #68 이 뗄 때 처리한 이유가 「누른 채로
+// 일어나는 일」 셋이었는데 그게 전부 없어졌다. 남겨 두면 규칙이 두 벌이 된다.
+function pickerTap(px, py) {
   if (!state.picker || state.picker.mode !== 'summon') return null;
   const hit = pickerHit(px, py);
-  if (!hit || !hit.k) return null;
-  state.picker.press = { k: hit.k, sx: px, sy: py, held: 0, moved: false };
-  return state.picker.press;
-}
-
-function pickerPressMove(px, py) {
-  const p = state.picker && state.picker.press;
-  if (!p) return false;
-  if (Math.hypot(px - p.sx, py - p.sy) > 8) p.moved = true;
-  return p.moved;
-}
-
-// frame() 이 매 프레임 감는다. **게임 dt 가 아니라 실시간이다** — 배속·히트스톱
-// 안으로 들어가면 같은 시간 눌러도 어떨 땐 사거리가 뜨고 어떨 땐 안 뜬다.
-// decayShake 와 같은 사정으로 밖에서 부를 수 있게 둔다(frame 은 시뮬에 안 내보낸다).
-function pickerHold(dt) {
-  const p = state.picker && state.picker.press;
-  if (p && !p.moved) p.held += dt;
-}
-
-// 지금 사거리를 보여 주고 있는 종류. 없으면 null.
-function pickerPeek() {
-  const p = state.picker && state.picker.press;
-  return p && !p.moved && p.held >= PICK_HOLD ? p.k : null;
-}
-
-// 손을 뗐다. 짧게 눌렀을 때만 짓는다.
-function pickerPressUp() {
-  const p = state.picker && state.picker.press;
-  if (!p) return null;
-  state.picker.press = null;
-  if (p.moved || p.held >= PICK_HOLD) return null;
-  // 못 짓는 상황에서는 창을 안 닫는다 — 이유만 띄우고 회색 아이콘을 그대로 남긴다.
-  if (state.gold < summonCost()) { toast('골드 부족'); return null; }
+  if (!hit || !hit.k) return null;         // 아이콘 밖 — 창을 닫는 것은 핸들러가 한다
+  // 첫 탭. **골드가 모자라도 고른다** — 무엇을 못 사는지는 사거리를 보고 나서
+  // 판단할 일이고, 여기서 막으면 「눌렀는데 아무 일도 안 난다」가 된다.
+  if (state.picker.sel !== hit.k) { state.picker.sel = hit.k; return 'select'; }
+  // 둘째 탭. 못 짓는 상황에서는 창을 안 닫는다 — 이유만 띄우고 고른 상태를 남긴다.
+  if (state.gold < summonCost()) { toast('골드 부족'); return 'reject'; }
   const { gx, gy } = state.picker;
   state.picker = null;
-  summon(p.k, gx, gy);
-  return p.k;
+  summon(hit.k, gx, gy);
+  return 'build';
+}
+
+// 지금 고른 종류. 없으면 null. 사거리·유령·커진 아이콘이 전부 이 하나를 본다.
+function pickerSel() {
+  return state.picker && state.picker.mode === 'summon' ? (state.picker.sel || null) : null;
 }
 
 // 읽기용 게터. mergePlaceState 와 같은 형태다 — 핸들러에 로직을 남기면 헤드리스가
 // 원리적으로 못 보므로, 검사 창을 게임 코드 안에 둔다.
 function pickerState() {
   if (!state.picker || state.picker.mode !== 'summon')
-    return { open: false, gx: 0, gy: 0, held: 0, moved: false, peek: null, pressed: null };
-  const p = state.picker.press;
-  return {
-    open: true, gx: state.picker.gx, gy: state.picker.gy,
-    held: p ? p.held : 0, moved: p ? p.moved : false,
-    peek: pickerPeek(), pressed: p ? p.k : null,
-  };
+    return { open: false, gx: 0, gy: 0, sel: null };
+  return { open: true, gx: state.picker.gx, gy: state.picker.gy, sel: pickerSel() };
 }
 
 // 2x2 결과를 어디에 놓을지 고르는 화면. 소환 피커와 두 곳이 다르다.
@@ -3974,19 +3973,19 @@ function drawPicker() {
   if (!L) return;
   if (state.picker.mode === 'mergePlace') { drawMergePlacePicker(L); return; }
   const { gx, gy } = state.picker;
-  const peek = pickerPeek();
+  const sel = pickerSel();
 
   ctx.fillStyle = 'rgba(13,17,23,0.78)';
   ctx.fillRect(0, 0, view.w, view.h);
 
-  // 길게 누른 **그 하나의** 범위만 그린다. 셋을 겹쳐 그리면 어느 원이 누구 건지
+  // 고른 **그 하나의** 범위만 그린다. 셋을 겹쳐 그리면 어느 원이 누구 건지
   // 못 읽는다 — 예전 2단계가 있던 이유가 그거였고 그 이유는 지금도 그대로다.
-  if (peek) {
+  if (sel) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(view.ox, view.oy, view.cell * CFG.BOARD_W, view.cell * CFG.BOARD_H);
     ctx.clip();
-    drawRange({ gx, gy, kind: peek, star: 1, b3: null, b5: null, t7: null });
+    drawRange({ gx, gy, kind: sel, star: 1, b3: null, b5: null, t7: null });
     ctx.restore();
   }
 
@@ -4001,22 +4000,51 @@ function drawPicker() {
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+
+  // ── 고른 것을 화면이 되받는다 ─────────────────────────────
+  // **셋이 같이 나와야 「한 번 더 누르면 저게 여기에 선다」가 읽힌다.**
+  //   ① 칸 안의 유령 — 무엇이 · 어디에 서는지
+  //   ② 사거리 사각형(위) — 얼마나 닿는지
+  //   ③ 커진 초록 아이콘 + 나머지 둘 죽이기 — 어느 아이콘을 다시 눌러야 하는지
+  // 하나만 두면 안 된다. #83 의 판단이 그거였다 — 사거리만 뜨고 아이콘이 그대로면
+  // 플레이어는 「왜 안 지어지지」 하고 끝난다.
+  //
+  // 유령을 **칸 안**에 두는 것이 ①의 요점이다. 아이콘 둘레에는 이걸 놓을 자리가
+  // 없다 — 이웃 아이콘이 58px 뿐이고 부채꼴이 돌면 어느 쪽이든 바로 옆에 온다.
+  // 칸은 부채꼴이 어떻게 돌든 늘 비어 있고, 애초에 **답해야 할 물음이 「여기에
+  // 무엇을 세우나」**라 유령이 설 자리가 거기다.
+  if (sel) {
+    const sk = KINDS[sel];
+    const gcx = p.x + view.cell / 2, gcy = p.y + view.cell / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    if (!drawSprite(sel, sk.color, gcx, gcy, view.cell * 0.7)) {
+      ctx.fillStyle = sk.color;
+      ctx.font = '700 16px system-ui, sans-serif';
+      ctx.fillText(sk.tag, gcx, gcy);
+    }
+    ctx.restore();
+  }
+
   for (const ic of L.icons) {
     const k = KINDS[ic.k];
-    const lit = peek === ic.k;
-    // 들여다보는 중에는 나머지 둘을 옅게 죽인다. 예전 카드 피커가 쓰던 것과 같은
-    // 손짓이다 — 초록 테두리 하나로는 관측소처럼 **제 색이 초록인 종류**와 안 갈린다.
-    ctx.globalAlpha = peek && !lit ? 0.4 : 1;
+    const lit = sel === ic.k;
+    // 고른 하나만 살리고 나머지는 죽인다. 예전 카드 피커가 쓰던 것과 같은 손짓이다 —
+    // 초록 테두리 하나로는 관측소처럼 **제 색이 초록인 종류**와 안 갈린다. 그래서
+    // 테두리 말고도 셋이 더 붙는다: 원이 커지고(PICK_SEL_R) · 안쪽이 그 종류의 색으로
+    // 물들고 · 나머지 둘이 0.35 로 물러난다.
+    ctx.globalAlpha = sel && !lit ? 0.35 : 1;
     ctx.beginPath();
     ctx.arc(ic.cx, ic.cy, ic.r, 0, Math.PI * 2);
-    ctx.fillStyle = lit ? '#1b2b1f' : '#161b22';
+    ctx.fillStyle = '#161b22';
     ctx.fill();
+    if (lit) { ctx.fillStyle = k.color + '3d'; ctx.fill(); }
     ctx.strokeStyle = lit ? '#7ee787' : (afford ? k.color : '#30363d');
     ctx.lineWidth = lit ? 3 : 2;
     ctx.stroke();
 
     // 그림과 값뿐이다. 이름도 설명도 없는 것이 이 화면의 요점이다 —
-    // 알아야 하면 길게 눌러 사거리를 본다.
+    // 알아야 하면 한 번 눌러 사거리를 본다.
     if (!drawSprite(ic.k, afford ? k.color : '#484f58', ic.cx, ic.cy - 5, 30)) {
       ctx.fillStyle = afford ? k.color : '#484f58';
       ctx.font = '700 20px system-ui, sans-serif';
@@ -4025,7 +4053,8 @@ function drawPicker() {
     // **골드가 모자라면 셋 다 회색이다.** 예전 카드가 회색이 되던 자리를 그대로
     // 옮겼다. 비용은 셋이 같은 값이지만 **아이콘마다 붙인다** — 한 곳에 몰아 두면
     // 부채꼴이 돌았을 때 그 한 곳이 아이콘과 멀어지거나 화면 밖으로 나간다.
-    ctx.fillStyle = afford ? '#c9d1d9' : '#6e7681';
+    // 고른 하나에서만 초록이다 — 다음 탭에 실제로 나갈 값이 이것이라는 뜻이다.
+    ctx.fillStyle = afford ? (lit ? '#7ee787' : '#c9d1d9') : '#6e7681';
     ctx.font = '700 10px system-ui, sans-serif';
     ctx.fillText(cost + 'G', ic.cx, ic.cy + 14);
     ctx.globalAlpha = 1;
@@ -4036,16 +4065,21 @@ function drawPicker() {
   // 안내는 **부채꼴 반대쪽**에 붙인다. 부채꼴이 위면 칸 아래, 뒤집혔으면 칸 위다 —
   // 아이콘과 안 겹치고, 누르는 손가락은 그때 이미 아이콘 쪽으로 옮겨 가 있다.
   const lines = [];
-  if (peek) {
-    const k = KINDS[peek];
+  if (sel) {
+    const k = KINDS[sel];
     lines.push([`${k.name} · 사거리 ${k.range.toFixed(1)}`, k.color]);
-    lines.push(['떼면 안 지어진다 · 짧게 눌러 배치', '#8b949e']);
+    // **둘째 탭이 무엇을 하는지 글자로도 한 번 더 말한다.** 그림(유령·사거리·커진
+    // 아이콘)이 못 읽히는 자리를 이 줄이 받는다. 못 지을 때는 이 줄이 이유가 된다 —
+    // 「한 번 더 누르면 지어진다」와 「골드가 없다」가 동시에 참일 수는 없다.
+    lines.push(afford
+      ? ['한 번 더 누르면 여기에 짓는다', '#7ee787']
+      : [`골드 부족 — ${cost}G 필요 · 지금 ${state.gold}G`, '#d29922']);
   } else {
     // 취소 버튼이 없어졌으므로 그 자리를 이 줄이 대신한다. ESC 도 같이 닫는다.
     lines.push(afford
-      ? ['아이콘을 눌러 바로 짓는다 · 밖을 누르면 취소', '#8b949e']
+      ? ['아이콘을 눌러 고른다 · 밖을 누르면 취소', '#8b949e']
       : [`골드 부족 — ${cost}G 필요 · 지금 ${state.gold}G`, '#d29922']);
-    lines.push(['길게 누르면 그 종류의 사거리', '#6e7681']);
+    lines.push(['고르면 사거리가 뜬다 · 한 번 더 눌러 짓는다', '#6e7681']);
     // 소환값이 오른 이유를 그 값 옆에서 말해 준다. 안 적어 두면 "왜 갑자기
     // 비싸졌지" 로만 읽히고, 웨이브를 넘기면 내려간다는 것도 영영 모른다.
     if (cost > 10) lines.push(['부를수록 +2G · 웨이브를 넘기면 내려간다', '#6e7681']);
@@ -4308,9 +4342,9 @@ canvas.addEventListener('pointerdown', e => {
   }
 
   if (state.picker) {
-    // 아이콘은 **뗄 때** 처리한다 — 길게 누르기(사거리)도 밀어서 취소도 누른 채로
-    // 일어나는 일이라, 여기서 바로 지으면 그 둘이 원리적으로 불가능해진다.
-    if (pickerPressDown(px, py)) return;
+    // 첫 탭은 고르기, 둘째 탭은 짓기. **누를 때** 끝난다 — #68 이 뗄 때 처리하던
+    // 이유(길게 누르기 · 밀어서 취소)가 전부 없어졌다(pickerTap 주석).
+    if (pickerTap(px, py)) return;
     state.picker = null;                                // 바깥을 누르면 닫는다(취소)
     return;
   }
@@ -4327,7 +4361,7 @@ canvas.addEventListener('pointerdown', e => {
     state.selected = null;
     // 빈 칸을 누르면 거기에 뭘 놓을지 고른다
     if (canPlace(c.gx, c.gy, 1, occupancy()))
-      state.picker = { mode: 'summon', gx: c.gx, gy: c.gy, press: null };
+      state.picker = { mode: 'summon', gx: c.gx, gy: c.gy, sel: null };
     // 못 놓는 칸은 **이유를 말한다.** 예전에는 조용히 아무 일도 안 일어났는데,
     // 부채꼴이 안 뜨는 것과 「눌렀는데 반응이 없다」가 화면에서 같아 보인다.
     else toast(c.gy < firstOpenRow() ? '아직 안 열린 구역' : '여기엔 못 놓음');
@@ -4337,8 +4371,10 @@ canvas.addEventListener('pointerdown', e => {
 });
 
 canvas.addEventListener('pointermove', e => {
-  // 소환 아이콘을 누르고 있는 중. 8px 넘게 밀면 취소된다(pickerPressUp 주석 ②).
-  if (state.picker && state.picker.press) { pickerPressMove(e.clientX, e.clientY); return; }
+  // 소환 부채꼴에는 여기서 할 일이 없다. 탭이 pointerdown 에서 끝나므로 누른 채로
+  // 일어나는 일이 하나도 없다(pickerTap 주석). 부채꼴이 열려 있으면 애초에
+  // pointerdown 이 drag 를 안 만들었으므로 아래 두 갈래도 다 비어 있다.
+
   // 스테이지 목록 끌기. 문턱 8px 은 아래 타워 드래그와 **같은 값이다** — 두 화면에서
   // 「탭인가 끌기인가」의 기준이 다르면 손가락이 배운 것을 화면마다 다시 배워야 한다.
   if (stageDrag) {
@@ -4354,8 +4390,6 @@ canvas.addEventListener('pointermove', e => {
 });
 
 canvas.addEventListener('pointerup', e => {
-  // 소환 아이콘에서 손을 뗐다. 짧게 눌렀으면 여기서 타워가 선다.
-  if (state.picker && state.picker.press) { pickerPressUp(); return; }
   if (stageDrag) {
     const moved = stageDrag.moved;
     stageDrag = null;
@@ -4393,7 +4427,9 @@ canvas.addEventListener('pointerup', e => {
 
 canvas.addEventListener('pointercancel', () => {
   drag = null; stageDrag = null;
-  if (state.picker && state.picker.press) state.picker.press = null;
+  // 소환 부채꼴은 안 건드린다. 고른 상태는 손가락이 아니라 **창**에 매여 있어서
+  // (state.picker.sel) 취소된 터치 하나에 지워질 것이 없다 — 창을 닫는 길은
+  // 바깥 탭 · ESC · 뒤로가기 셋 그대로다.
 });
 
 // ── 뒤로 가기 (#74) ──────────────────────────────────────────
@@ -6482,8 +6518,8 @@ function pauseHelp() {
 
   return [
     { head: '조작', rows: [
-      { label: '빈 칸', text: '탭하면 둘레에 아이콘 셋이 뜬다. 누르면 바로 선다. 밖을 누르면 취소' },
-      { label: '사거리', text: '아이콘을 길게 누르면 그 종류의 사거리만 보인다. 떼면 안 지어진다' },
+      { label: '빈 칸', text: '탭하면 둘레에 아이콘 셋이 뜬다. 밖을 누르면 취소' },
+      { label: '소환', text: '아이콘을 누르면 골라지고 사거리가 보인다. 한 번 더 누르면 그 자리에 선다' },
       { label: '합성', text: '타워를 같은 종류·같은 성급 타워 위로 끌어 놓는다. 웨이브 사이에만 된다' },
       { label: '합성값', text: '성급 x8 골드. 끌어서 올리면 값과 결과 자리가 먼저 보인다' },
       { label: '분기', text: '3·5·7성에서 고른다. 분기가 다른 둘을 합치면 어느 쪽을 남길지 묻는다' },
@@ -6731,9 +6767,6 @@ function frame(now) {
   frameNow = now;
   const dt = Math.min((now - last) / 1000, 0.05); // 탭 전환 후 점프 방지
   last = now;
-  // 길게 누르기는 **실시간으로** 잰다. 아래 히트스톱·배속 안으로 들어가면 같은 시간
-  // 눌러도 어떨 땐 사거리가 뜨고 어떨 땐 안 뜬다.
-  pickerHold(dt);
   // 히트스톱은 시간을 늦추는 게 아니라 update 호출을 **통째로 건너뛴다.**
   // dt 를 곱하거나 나누면 update 가 보는 스텝 폭이 달라져서 판정이 연출에 끌려간다 —
   // 아래 배속 규칙과 같은 이유다. update 가 받는 dt 는 이 기능 전후로 동일하다.
