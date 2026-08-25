@@ -699,16 +699,21 @@ const capture = async (browser) => {
     return null;
   });
 
-  // ── 방사형 소환 · 가운데 칸 (#68) ──────────────────────────
+  // ── 방사형 소환 · 가운데 칸 · 종류를 고른 뒤 (#68 · #83) ────
   // **맨 뒤에 둔다** — 위 컷들과 같은 이유다(앞에 끼우면 뒤 컷의 fxRand 가 밀려
   // md5 가 통째로 갈린다).
   //
-  // 카드 석 장이 사라지고 아이콘 셋이 칸 둘레로 올라온 화면이다. 헤드리스는
-  // 좌표만 보고 **읽히는가는 못 본다.** 이 컷에서 볼 것이 그것이다.
+  // 카드 석 장이 사라지고 아이콘 셋이 칸 둘레로 올라온 화면이고, **12시를 한 번 눌러
+  // 고른 상태**다. 헤드리스는 좌표만 보고 **읽히는가는 못 본다.** 이 컷에서 볼 것이
+  // 그것이고, #83 은 그중 ③이 값의 전부다 — 「한 번 더 누르면 지어진다」가 안 읽히면
+  // 이 화면은 탭만 하나 늘어난 것이 된다.
   //   ① 아이콘 셋이 10시·12시·2시로 읽히는가 — 세 개가 「부채꼴」로 보여야 한다
   //   ② 지름 48px 원 안에서 스프라이트와 비용(10px)이 서로 안 뭉개지는가
-  //   ③ 길게 누른 하나의 사거리 사각형이 딤(0.78) 위에서 읽히는가
-  //   ④ 안내 두 줄이 칸 아래에 들어가고 아이콘과 안 겹치는가
+  //   ③ **고른 하나가 확 갈리는가** — 커진 원(56px) · 그 종류 색으로 물든 안쪽 ·
+  //      초록 테두리와 초록 비용 · 나머지 둘이 0.35 로 물러난 것. 그리고 **칸 안의
+  //      유령**이 「저게 여기 선다」로 읽히는가(딤 0.78 + 사거리 채움 위다)
+  //   ④ 고른 하나의 사거리 사각형이 딤(0.78) 위에서 읽히는가
+  //   ⑤ 안내 두 줄이 칸 아래에 들어가고 아이콘과 안 겹치는가
   await page.evaluate(() => {
     __reseed();
     window.update = window.__update;
@@ -731,12 +736,11 @@ const capture = async (browser) => {
         const d = Math.abs(x - mx) + Math.abs(y - my);
         if (d < bestD) { bestD = d; best = { gx: x, gy: y }; }
       }
-    state.picker = { mode: 'summon', gx: best.gx, gy: best.gy, press: null };
-    // 12시 아이콘을 길게 누른 상태로 얼린다. `pickerHold` 는 frame() 이 계속 감지만
-    // 문턱을 넘은 뒤로는 그림이 안 바뀐다(불리언 하나만 본다) — 그래서 정지가 유효하다.
+    state.picker = { mode: 'summon', gx: best.gx, gy: best.gy, sel: null };
+    // 12시 아이콘을 한 번 탭한다 — **첫 탭이라 아무것도 안 지어진다.** 고른 상태는
+    // 창에 매여 있어서(state.picker.sel) 얼려 놔도 안 풀린다.
     const ic = pickerLayout().icons[1];
-    pickerPressDown(ic.cx, ic.cy);
-    pickerHold(PICK_HOLD + 0.01);
+    pickerTap(ic.cx, ic.cy);
     __freeze();
   });
   await page.waitForTimeout(200);
@@ -748,21 +752,30 @@ const capture = async (browser) => {
     const p = cellToPx(s.gx, s.gy);
     const cy = p.y + view.cell / 2;
     if (!L.icons.every(ic => ic.cy < cy)) return '부채꼴이 위쪽이 아니다 (가운데 칸인데 돌았다)';
-    if (!s.peek) return '길게 누른 상태가 아니다 (사거리가 안 그려진다)';
+    if (!s.sel) return '고른 상태가 아니다 (사거리도 유령도 안 그려진다)';
+    // 고른 아이콘이 실제로 커졌는가. 안 커졌으면 이 컷이 볼 것(③)이 화면에 없다.
+    const on = L.icons.find(ic => ic.k === s.sel);
+    if (on.r !== PICK_SEL_R) return '고른 아이콘이 안 커졌다: r' + on.r;
+    if (L.icons.some(ic => ic.k !== s.sel && ic.r !== PICK_ICON_R)) return '안 고른 아이콘이 커졌다';
+    if (state.towers.length !== 6) return '첫 탭에 타워가 늘었다: ' + state.towers.length;
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });
 
-  // ── 방사형 소환 · 가장자리 칸 (⑩ 세물머리 0열 · #68) ────────
+  // ── 방사형 소환 · 가장자리 칸 · 고르기 전 (⑩ 0열 · #68) ─────
   // **맨 뒤에 둔다** — 위 컷들과 같은 이유다.
   //
-  // **이 티켓의 진짜 일이 이 컷이다.** 10열 판의 0열 칸은 중심이 보드 왼쪽 끝에서
+  // **#68 의 진짜 일이 이 컷이다.** 10열 판의 0열 칸은 중심이 보드 왼쪽 끝에서
   // `cell/2 = 18.5px` 밖에 안 떨어져 있어서, 돌리지 않으면 10시 아이콘이 화면 밖으로
   // 50px 나간다. `npm test` 는 좌표가 화면 안인지까지만 보고 **그림이 어떻게 읽히는지
   // 못 본다.** 여기서 볼 것이 그것이다.
   //   ① 돌아간 부채꼴이 여전히 「이 칸의 것」으로 읽히는가 — 셋이 칸을 감싸는가
   //   ② 아이콘이 보드 왼쪽 테두리를 물고 나가는 자리에서 잘려 보이지 않는가
   //   ③ 비용이 오른 상태(10G 초과)의 안내 세 줄이 칸 아래에 다 들어가는가
+  //
+  // **이 컷은 아직 아무것도 안 고른 상태다**(#83). 위 컷과 갈리는 자리라 그래야 한다 —
+  // 여기서 볼 것은 부채꼴의 기하이고, 고른 상태의 신호는 위 컷이 본다. 「고르면
+  // 사거리가 뜬다 · 한 번 더 눌러 짓는다」 줄이 첫 화면에 있다는 것도 여기서 확인한다.
   await page.evaluate(() => {
     __reseed();
     window.update = window.__update;
@@ -782,7 +795,7 @@ const capture = async (browser) => {
     let spot = null;
     for (let y = firstOpenRow(); y < CFG.BOARD_H && !spot; y++)
       if (canPlace(0, y, 1, occ)) spot = { gx: 0, gy: y };
-    state.picker = { mode: 'summon', gx: spot.gx, gy: spot.gy, press: null };
+    state.picker = { mode: 'summon', gx: spot.gx, gy: spot.gy, sel: null };
     __freeze();
   });
   await page.waitForTimeout(200);
@@ -800,7 +813,7 @@ const capture = async (browser) => {
     if (!L.icons.every(ic => ic.cx >= lo && ic.cx <= view.w - lo && ic.cy >= lo && ic.cy <= view.h - lo))
       return '아이콘이 화면 밖이다';
     if (summonCost() <= 10) return '소환값이 안 올랐다 (안내 세 줄이 안 나온다): ' + summonCost();
-    if (s.peek) return '길게 누른 상태다 (이 컷은 기본 상태여야 한다)';
+    if (s.sel) return '이미 고른 상태다 (이 컷은 고르기 전이어야 한다)';
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });

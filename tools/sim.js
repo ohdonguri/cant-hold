@@ -269,14 +269,13 @@ const EXPOSE = [
   'sfx', 'sfxUnlock', 'sfxStats', 'SFX', 'SFX_VOICE_CAP', 'setSoundEnabled', 'toggleSound', 'fxState',
   'render', 'restart', 'drawPause', 'choiceRects', 'openChoice', 'selectedTower', 'buttons',
   'startRun', 'toggleDeckPick', 'deckCardRects', 'deckStartRect', 'deckLayout', 'GROUPS', 'AURA_KINDS', 'pickerRects', 'pickerHit', 'pickerLayout',
-  // 방사형 소환(#68). 핸들러(pointerdown/move/up)에 로직을 안 남기고 이 함수들만
-  // 부르므로, 헤드리스가 손가락 없이 「눌렀다 · 밀었다 · 오래 눌렀다 · 뗐다」를
-  // 전부 밟을 수 있다 — mergePlace 와 같은 규칙이다. pickerHold 는 실시간 시계를
-  // 감는 유일한 통로다(frame 은 시뮬에 안 새게 일부러 안 내보낸다 — decayShake 와 같은 사정).
-  // 치수 상수까지 내보내는 건 PARTICLE_LIFE 와 같은 이유다 — 검사가 58·24·28·0.3 을
+  // 방사형 소환(#68 · 두 단계 탭은 #83). 핸들러(pointerdown)에 로직을 안 남기고
+  // `pickerTap` 하나만 부르므로, 헤드리스가 손가락 없이 「첫 탭 · 옮겨 탭 · 둘째 탭」을
+  // 전부 밟을 수 있다 — mergePlace 와 같은 규칙이다.
+  // 치수 상수까지 내보내는 건 PARTICLE_LIFE 와 같은 이유다 — 검사가 58·24·28·6 을
   // 손으로 베끼면 값을 고쳤을 때 검사만 옛 값을 지키며 통과한다.
-  'pickerPressDown', 'pickerPressMove', 'pickerPressUp', 'pickerHold', 'pickerPeek', 'pickerState',
-  'PICK_R', 'PICK_ICON_R', 'PICK_HIT_R', 'PICK_HOLD', 'PICK_STEP',
+  'pickerTap', 'pickerSel', 'pickerState',
+  'PICK_R', 'PICK_ICON_R', 'PICK_HIT_R', 'PICK_SEL_R', 'PICK_STEP', 'PICK_EDGE',
   // 판이 덱을 제한하는 기계(#50). **계측 도구가 이걸 안 보면 제약 판을 못 잰다** —
   // `tools/affinity.js`·`tools/curve.js` 는 35덱을 고정으로 돌던 것이라 제약 판에서는
   // 못 고르는 덱을 재게 된다. 허용 목록을 도구 쪽에 베끼면 자가 두 벌이 되므로
