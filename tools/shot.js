@@ -645,7 +645,9 @@ const capture = async (browser) => {
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
     // **인덱스를 못 박는다.** 3레인 판을 성질로 찾는다 — 판이 앞뒤로 늘어도 안 밀린다.
-    pickStage(STAGES.findIndex(s => s.lanes.length === 3));
+    // **크기로 좁힌다**(#79) — ⑮ 선돌이 11폭 3레인이라, 크기를 안 걸면 아래 다섯
+    // 선택자가 「3레인 중 첫째」로 서로를 집을 수 있다. 어귀 수는 이제 판을 못 가른다.
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3));
     ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
     startRun();
     tuteMerged = true;
@@ -814,7 +816,7 @@ const capture = async (browser) => {
     window.update = window.__update;
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
-    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3
       && s.lanes.filter(L => L[0].y < 0).length === 2));
     ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
     startRun();
@@ -886,7 +888,7 @@ const capture = async (browser) => {
     window.update = window.__update;
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
-    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3
       && s.lanes.filter(L => L[0].y < 0).length === 3));
     ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
     startRun();
@@ -1012,7 +1014,7 @@ const capture = async (browser) => {
     window.update = window.__update;
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
-    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3
       && s.lanes.filter(L => L[0].y < 0).length === 0
       && s.lanes.filter(L => L[0].x >= s.w).length === 2));
     ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
@@ -1072,7 +1074,7 @@ const capture = async (browser) => {
     window.update = window.__update;
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
-    pickStage(STAGES.findIndex(s => s.lanes.length === 3
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 3
       && s.lanes.filter(L => L[0].y < 0).length === 0
       && s.lanes.filter(L => L[0].x < 0).length === 2));
     ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
@@ -1116,6 +1118,84 @@ const capture = async (browser) => {
     if (isPath(4, 10)) return '고리 속(4,10)이 막혀 있다 — 고리로 안 읽힌다';
     // 꼭지가 있는가. 이 획 하나가 ⑭ 를 ㅁ 이 아니라 ㅎ 으로 읽게 한다.
     if (!isPath(4, 0)) return '꼭지(4,0)가 없다';
+    if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
+    if (state.towers.filter(t => t.star >= 5).length !== 2) return '5성(2x2)이 둘이 아니다';
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // ── 보드를 넓힌 판 (⑮ 선돌 · #79) ────────────────────────────
+  // **이 컷이 이 티켓의 진짜 게이트다.** 11폭이라 390x844 에서 칸이 **33px** 이고
+  // (10폭 37px 에서 4px 손해), 칸에 비례하는 것이 전부 같이 줄어든다 — 스프라이트
+  // `cell*0.82` · ★배지 `round(cell*0.26)` 8.6px · 드래그 원 `cell*0.42`.
+  // DESIGN §보드를 넓히는 것 이 9x14 때 「여기는 스크린샷이 진짜 게이트다」라고 적어
+  // 둔 자리이고, 그 뒤로 판이 열 장 늘도록 그 문장을 다시 쓸 일이 없었다.
+  //
+  // **맨 뒤에 붙인다.** 앞에 끼우면 뒤 컷의 fxRand 가 밀려 md5 가 통째로 갈린다
+  // (22·23 이 「맨 뒤에 둔다」로 적어 둔 그 이유이고, 그래서 그 둘 뒤로 간다).
+  //
+  // **판을 크기로 찾는다.** 위쪽 변 어귀는 ⑩ 1 · ⑪ 2 · ⑫ 3 · ⑬⑭ 0 으로 다 찼고,
+  // 이 판은 셋이 다 위쪽 변이라 ⑫ 와 어귀가 같다 — **어귀는 이제 판을 못 가른다.**
+  // 그래서 이 티켓이 위 다섯 선택자에 `s.w === 10` 을 더하고 여기는 11 로 집는다.
+  //
+  // 볼 것:
+  //   ① **33px 칸에서 읽히는가** — ★배지가 스프라이트를 안 덮는가 · 5성 2x2 가
+  //      2x2 로 보이는가 · 잠긴 구역 빗금과 안내 글자가 뭉개지지 않는가
+  //   ② **기둥 셋이 따로 선 것으로 읽히는가** — 곁가지 끝(x3·x2·x7)이 이웃 기둥에
+  //      붙어 보이면 이 판은 「빗장 셋」이 되어 ⑪ 과 같은 판이 된다
+  //   ③ 판이 한 열 넓어진 것이 좌우 여백·HUD 에서 손해로 안 보이는가
+  //
+  // **이 컷의 단언 하나가 이 판의 규칙을 잠그는 유일한 자다 — 지우지 마라.** 가운데
+  // 기둥을 `x5` → `x4` 로 옮기면 x0 과 4칸이 되어 한 대가 두 기둥을 보게 되는데,
+  // 그건 이 판을 이 판이게 하는 규칙이 사라지는 것인데도 `npm test` 가 **한 줄도 안
+  // 걸린다**(난이도가 `p` 0.444 → 0.47 로 거의 안 움직인다. DESIGN §보드를 넓힌 판
+  // 「무엇이 이 판의 규칙을 잠그고 있나」). 아래 「기둥이 x0·x5·x10 이 아니다」가 그
+  // 변조에서 유일하게 죽는 줄이다.
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    pickStage(STAGES.findIndex(s => s.w === 11 && s.lanes.length === 3));
+    ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    let id = 9990;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 개방 행은 6~13. 경로(기둥 x0·x5·x10 · 곁가지 행 8·9·10 · 행 11·13)를 피한다.
+    // **다섯 대만 놓는다** — 15·18·19·22·23 과 같은 이유로 사거리 칠이 획을 덮지 않게.
+    put('arc',      5, 1, 6);         // 2x2. 열 1~2 x 행 6~7 — 왼·가운데 기둥 사이 주머니
+    put('shredder', 5, 7, 6);         // 2x2. 열 7~8 x 행 6~7 — 가운데·오른 기둥 사이 주머니
+    put('frost',    2, 4, 9);         // 가운데 기둥(x5) 바로 옆 — **기둥 하나만 본다**
+    put('shredder', 3, 6, 10);        // 오른쪽 곁가지 아래 — 역시 기둥 하나만
+    put('frost',    1, 1, 12);        // 합류 바로 아래 띠 — 행 11·13 을 같이 스친다
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('24-seondol', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 11 || CFG.BOARD_H !== 14)
+      return '11x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
+    if (STAGES[state.stage].allowKinds) return '제약 판이다: ' + STAGES[state.stage].name;
+    // 기둥이 셋인가 — 합류(행 11) 위로 열 줄 넘게 이어지는 세로줄이 x0·x5·x10 셋이라야
+    // 한다. 이 판을 이 판이게 하는 획이고, 하나라도 빠지면 ⑫ 턱과 같은 판이 된다.
+    const pillars = [];
+    for (let x = 0; x < CFG.BOARD_W; x++) {
+      let n = 0;
+      for (let y = 0; y < 11; y++) if (isPath(x, y)) n++;
+      if (n >= 10) pillars.push(x);
+    }
+    if (pillars.join(',') !== '0,5,10') return '기둥이 x0·x5·x10 이 아니다: ' + pillars;
+    // 곁가지가 이웃 기둥에 안 닿는가. 닿으면 한 줄로 이어져 「빗장」으로 읽힌다 —
+    // 그 변형이 `tools/paths.js` §기각한 11폭 후보 의 「곁가지가 붙은 것」이다.
+    if (isPath(4, 8)) return '왼쪽 곁가지가 가운데 기둥에 닿았다 (4,8)';
+    if (isPath(1, 10)) return '가운데 곁가지가 왼쪽 기둥에 닿았다 (1,10)';
+    if (isPath(6, 9)) return '오른쪽 곁가지가 가운데 기둥에 닿았다 (6,9)';
     if (state.openRows >= CFG.BOARD_H) return '잠긴 행이 없다: openRows ' + state.openRows;
     if (state.towers.filter(t => t.star >= 5).length !== 2) return '5성(2x2)이 둘이 아니다';
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
