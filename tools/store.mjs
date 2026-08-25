@@ -155,10 +155,17 @@ await fp.setContent(`<style>html,body{margin:0;padding:0;background:#0d1117}</st
 await fp.waitForTimeout(150);
 await fp.screenshot({ path: join(OUT, 'feature-1024x578.png') });
 console.log('  feature-1024x578.png');
-// 원스토어는 PNG 와 JPG 를 둘 다 받는다. **한쪽이 거부당할 때 바꿔 낼 수 있게**
-// 두 벌을 만들어 둔다 — 업로드가 실패했을 때 원인이 파일 형식인지 아닌지를
-// 가르는 데 그 한 장이면 된다. 품질 92 는 이 그림(평면 색 + 격자)에서 눈으로
-// 차이가 안 나는 가장 낮은 값이다.
+// **원스토어에는 JPG 를 올려라.** 등록 화면은 「JPG, PNG」를 둘 다 받는다고
+// 적어 놓지만, 이 그림의 PNG(241KB)는 「업로드 실패」로 거부당했고 같은 그림의
+// JPG(46KB)는 한 번에 올라갔다. 규격·메타데이터는 두 파일이 완전히 같았다 —
+// 1024x578 · 8-bit RGB · 알파 없음 · non-interlaced · DPI 72. 성공한 형제
+// 리포(fruit-smash)의 것이 82KB 였다. **남은 변수는 용량뿐이었다.**
+//
+// PNG 가 큰 것은 배경 그라데이션 두 겹과 후광 때문이다. 무손실이라 부드러운
+// 색 변화에서 용량이 튄다 — JPG 는 그게 강점이라 같은 그림이 5분의 1이 된다.
+// 품질 92 는 이 그림(평면 색 + 격자)에서 눈으로 차이가 안 나는 가장 낮은 값이다.
+//
+// PNG 도 계속 낸다. 스토어마다 받는 형식이 다르고, 원본 확인용으로도 쓴다.
 await fp.screenshot({ path: join(OUT, 'feature-1024x578.jpg'), type: 'jpeg', quality: 92 });
 console.log('  feature-1024x578.jpg');
 await fp.close();
