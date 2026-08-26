@@ -111,13 +111,14 @@ const { RANGE: COVER_RANGE } = require('./paths.js');
 // 이름만 세면 「원을 그렸다」까지밖에 못 보고, 보드 밖이나 화면 밖에 그려도 통과한다.
 // 반지름까지 남겨야 「그 아이콘」인지 튜토리얼 링인지 갈린다.
 const GEOM = ['beginPath', 'moveTo', 'lineTo', 'stroke', 'arc'];
-function stubCtx(log, texts, geom) {
+function stubCtx(log, texts, geom, images) {
   return new Proxy({}, {
     get(_, p) {
       if (p === 'measureText') return () => ({ width: 10 });
       if (p === 'canvas') return {};
       if (texts && p === 'fillText') return s => { log.push(p); texts.push(String(s)); };
       if (geom && GEOM.includes(p)) return (...a) => { log.push(p); geom.push({ m: p, a }); };
+      if (images && p === 'drawImage') return (...a) => { log.push(p); images.push(a); };
       if (log) return () => { log.push(p); };
       return () => {};
     },
@@ -281,7 +282,7 @@ const EXPOSE = [
   // 못 고르는 덱을 재게 된다. 허용 목록을 도구 쪽에 베끼면 자가 두 벌이 되므로
   // 살아 있는 판 정의에서 그대로 가져다 쓴다.
   'allowedKinds', 'kindAllowed', 'deckLimitNote',
-  'SPR', 'sprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
+  'SPR', 'sprite', 'drawSprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
   // 세이브 형식 버전과 「뜻이 안 바뀐 인덱스 수」. 테스트가 리터럴 3·5 를 베껴 두면
   // 판을 또 붙여 경계가 움직였을 때 테스트만 옛 값을 지키며 통과한다.
   'SAVE_VERSION', 'SAVE_V2_STABLE', 'migrateBundle',
@@ -325,7 +326,17 @@ function load(overrides, opts) {
   const drawLog = [];
   const drawTexts = [];
   const drawGeom = [];
-  const canvas = { getContext: () => stubCtx(drawLog, drawTexts, drawGeom), addEventListener: () => {}, width: 0, height: 0, style: {} };
+  const drawImages = [];
+  const canvas = { getContext: () => stubCtx(drawLog, drawTexts, drawGeom, drawImages), addEventListener: () => {}, width: 0, height: 0, style: {} };
+
+  // PNG 스프라이트의 로딩 전/완료/실패를 브라우저와 같은 속성으로 밟는다.
+  // 테스트는 이 가짜를 단언하지 않고, 실제 drawImage 가 무엇을 받았는지만 본다.
+  const imageBySrc = new Map();
+  class StubImage {
+    constructor() { this.complete = false; this.naturalWidth = 0; this.naturalHeight = 0; this._src = ''; }
+    set src(v) { this._src = String(v); imageBySrc.set(this._src, this); }
+    get src() { return this._src; }
+  }
 
   const store = new Map();
   const localStorageStub = {
@@ -358,6 +369,7 @@ function load(overrides, opts) {
         if (!listeners.has(t)) listeners.set(t, []);
         listeners.get(t).push(fn);
       },
+      Image: StubImage,
       AudioContext: audio.AudioContext,
     },
     { now: () => 0 },
@@ -373,7 +385,8 @@ function load(overrides, opts) {
     log: drawLog,
     text: drawTexts,
     geom: drawGeom,
-    reset() { drawLog.length = 0; drawTexts.length = 0; drawGeom.length = 0; },
+    images: drawImages,
+    reset() { drawLog.length = 0; drawTexts.length = 0; drawGeom.length = 0; drawImages.length = 0; },
     count(...names) { return drawLog.filter(n => names.includes(n)).length; },
     // 한 번의 stroke 로 그은 **직선 하나**만 골라 낸다. beginPath → moveTo → lineTo →
     // stroke 가 정확히 그 모양이고, 점이 더 붙은 경로(roundRect 등)는 안 걸린다.
@@ -394,6 +407,21 @@ function load(overrides, opts) {
     circles() {
       return drawGeom.filter(e => e.m === 'arc')
         .map(e => ({ x: e.a[0], y: e.a[1], r: e.a[2] }));
+    },
+  };
+  api.images = {
+    get(src) { return imageBySrc.get(src) || null; },
+    load(src) {
+      const im = imageBySrc.get(src);
+      if (!im) return null;
+      im.complete = true; im.naturalWidth = 256; im.naturalHeight = 256;
+      return im;
+    },
+    fail(src) {
+      const im = imageBySrc.get(src);
+      if (!im) return null;
+      im.complete = true; im.naturalWidth = 0; im.naturalHeight = 0;
+      return im;
     },
   };
   // 오디오 시계를 앞으로 감는 창. 큐 쿨다운은 게임 dt 가 아니라 이 시계로 잰다.

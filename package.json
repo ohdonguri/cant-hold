@@ -14,9 +14,17 @@
     "sprites": "node tools/sprites.js",
     "build": "node build.mjs",
     "verify:build": "node tools/verify-build.mjs",
+    "android:sync": "node build.mjs && cap sync android && node tools/android-sync.mjs",
+    "android:apk": "npm run android:sync && node tools/android-build.mjs",
     "deploy": "node build.mjs && npx --yes wrangler@4 deploy"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "playwright": "^1.62.1"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.0"
   }
 }
