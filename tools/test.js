@@ -4088,6 +4088,13 @@ function poolDeck(g, st) {
 {
   console.log('스프라이트');
   const g = load();
+  const generated = require('./sprites.js');
+  const spriteKeys = [...new Set([...Object.keys(g.SPR), ...Object.keys(generated)])];
+  const spriteDrift = spriteKeys.filter(k =>
+    JSON.stringify(g.SPR[k]) !== JSON.stringify(generated[k]));
+  ok('생성기와 index.html 스프라이트가 같다', spriteDrift.length === 0,
+    spriteDrift.join(',') || '없음');
+
   const missing = g.KIND_KEYS.filter(k => !g.SPR[k])
     .concat(Object.keys(g.ENEMY).filter(k => !g.SPR[k]));
   ok('타워·적 전부 도트가 있다', missing.length === 0, missing.join(',') || '없음');
@@ -4112,6 +4119,59 @@ function poolDeck(g, st) {
     else seen.set(s2, k);
   }
   ok('실루엣이 겹치지 않는다', dupes.length === 0, dupes.join(',') || '없음');
+
+  // 새 시안의 핵심은 색이 아니라 실루엣이다. 파쇄자에서 톱날을 빼거나,
+  // 마력로를 다시 외기둥으로 줄여도 32x32와 중복 검사는 모두 통과한다.
+  // 그래서 작은 크기에서도 종류를 읽게 하는 구조를 별도로 잡는다.
+  const filled = (k, x, y) => g.SPR[k][y][x] !== '.';
+  const rowFill = (k, y) => [...g.SPR[k][y]].filter(c => c !== '.').length;
+  const splitFeet = k =>
+    [...Array(14).keys()].some(x => filled(k, x, 28))
+    && [...Array(14).keys()].some(i => filled(k, 18 + i, 28))
+    && !filled(k, 15, 28) && !filled(k, 16, 28);
+
+  ok('파쇄자 상단에 넓은 원형 톱날이 있다',
+    Math.max(...Array.from({ length: 10 }, (_, i) => rowFill('shredder', 7 + i))) >= 20);
+  ok('마력로는 사이가 열린 쌍기둥이다',
+    filled('arc', 8, 8) && filled('arc', 23, 8) && !filled('arc', 15, 8) && !filled('arc', 16, 8));
+  ok('조폐소는 위쪽 프레스와 아래쪽 동전 출구가 가린다',
+    rowFill('mint', 6) >= 20 && filled('mint', 16, 26) && !filled('mint', 8, 26));
+  const walkers = ['grunt', 'armored', 'regen', 'elite'].filter(k => !splitFeet(k));
+  ok('걸어오는 적은 몸체와 분리된 두 발이 있다', walkers.length === 0,
+    walkers.join(',') || '없음');
+
+  // PNG 로딩 분기를 지우면 시안 대신 다시 32x32 도트가 화면에 나온다.
+  // 반대로 로딩 전 fallback 을 지우면 첫 프레임과 느린 네트워크에서 타워가 빈다.
+  const pngPath = 'assets/sprites/towers/shredder.png';
+  const loadedPng = g.images.load(pngPath);
+  g.draws.reset();
+  g.drawSprite('shredder', g.KINDS.shredder.color, 80, 80, 56);
+  ok('PNG가 준비되면 시안 이미지를 그린다',
+    !!loadedPng && g.draws.images[0] && g.draws.images[0][0] === loadedPng,
+    loadedPng ? 'PNG' : 'PNG 등록 없음');
+
+  const pendingPath = 'assets/sprites/enemies/grunt.png';
+  const pendingPng = g.images.get(pendingPath);
+  g.draws.reset();
+  g.drawSprite('grunt', g.ENEMY.grunt.color, 80, 80, 40);
+  ok('PNG 로딩 전에는 기존 도트를 그린다',
+    !!pendingPng && g.draws.images[0] && g.draws.images[0][0] !== pendingPng,
+    pendingPng ? '도트 fallback' : 'PNG 등록 없음');
+
+  const brokenPath = 'assets/sprites/enemies/armored.png';
+  const brokenPng = g.images.fail(brokenPath);
+  g.draws.reset();
+  g.drawSprite('armored', g.ENEMY.armored.color, 80, 80, 44);
+  ok('PNG 로드 실패 뒤에도 기존 도트를 그린다',
+    !!brokenPng && g.draws.images[0] && g.draws.images[0][0] !== brokenPng,
+    brokenPng ? '도트 fallback' : 'PNG 등록 없음');
+
+  const loadedEnemy = g.images.load(pendingPath);
+  g.draws.reset();
+  g.drawSprite('grunt', '#79c0ff', 80, 80, 40);
+  ok('PNG 적도 빙결 색을 입는다',
+    !!loadedEnemy && g.draws.images[0] && g.draws.images[0][0] !== loadedEnemy,
+    loadedEnemy ? '빙결 tint' : 'PNG 등록 없음');
 }
 
 // ── 처치 연출 ────────────────────────────────────────────────

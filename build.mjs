@@ -142,6 +142,12 @@ function copyAssets() {
   });
   writeFileSync(join(OUT_DIR, 'manifest.webmanifest'),
     readFileSync(join(ROOT, 'manifest.webmanifest')));
+
+  rmSync(join(OUT_DIR, 'assets', 'sprites'), { recursive: true, force: true });
+  cpSync(join(ROOT, 'assets', 'sprites'), join(OUT_DIR, 'assets', 'sprites'), {
+    recursive: true,
+    filter: src => !src.slice(src.lastIndexOf('/') + 1).startsWith('.'),
+  });
 }
 
 // ── 검사 ──────────────────────────────────────────────────────
@@ -186,6 +192,23 @@ function verify({ html, out, minJs }) {
   for (const ic of mf.icons) refs.add(ic.src);
   const gone = [...refs].filter(p => !existsSync(join(OUT_DIR, p)));
   if (gone.length) throw new Error('배포 폴더에 없는 참조: ' + gone.join(', '));
+
+  // 스프라이트 주소는 HTML 태그가 아니라 JS 안에서 Image.src 로 들어가므로 위의
+  // href/src 긁기로는 못 잡힌다. 빌드가 PNG 폴더를 빼먹어도 첫 화면은 도트 fallback
+  // 으로 멀쩡해 보여 배포 뒤까지 숨는다 — 실제 런타임 주소를 긁어 파일까지 대조한다.
+  const spriteRefs = [...out.matchAll(/['`]((?:assets\/sprites\/)[^'`]+\.png)['`]/g)]
+    .map(m => m[1]);
+  if (spriteRefs.length !== 2) {
+    throw new Error('스프라이트 디렉터리 참조가 2개가 아니다: ' + spriteRefs.join(', '));
+  }
+  const spriteNames = {
+    towers: ['shredder', 'eroder', 'frost', 'mortar', 'marksman', 'arc', 'mint'],
+    enemies: ['grunt', 'armored', 'warded', 'swift', 'regen', 'immune', 'swarm', 'elite'],
+  };
+  const spriteFiles = ['towers', 'enemies'].flatMap(group =>
+    spriteNames[group].map(name => `assets/sprites/${group}/${name}.png`));
+  const missingSprites = spriteFiles.filter(p => !existsSync(join(OUT_DIR, p)));
+  if (missingSprites.length) throw new Error('배포 폴더에 없는 스프라이트: ' + missingSprites.join(', '));
 
   // 참조를 긁는 검사만으로는 **링크를 통째로 지운 경우**를 못 잡는다 — 참조가
   // 없으니 대조할 것도 없어서 조용히 통과한다. 홈 화면 추가에 반드시 있어야 하는
