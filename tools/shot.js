@@ -474,7 +474,10 @@ const capture = async (browser) => {
     // `w === 10` 만으로는 배열 순서에 기대는 셈이라(앞의 것을 집는다) 아래 확인
     // 함수의 「2레인이 아니다」가 순서에 딸린 값이 된다 — 아래 15-trimerge 가 그
     // 짝이고, 둘이 같은 성질로 갈려야 어느 쪽이 밀려도 조용히 안 바뀐다.
-    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 2));
+    // **[#91] 총웨이브까지 본다.** ⑯ 잘록이(42)·⑰ 톱날(46)이 붙으면서 10폭 2레인이
+    // 셋이 됐다 — 크기와 레인 수로는 더 못 가른다. 새 축이 총웨이브라 그것으로 좁힌다
+    // (⑥ 은 30 이다). 아래 확인 함수에도 같은 줄을 넣어 자를 한 벌로 둔다.
+    pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 2 && s.waves === 30));
     ['shredder', 'frost', 'marksman'].forEach(k => toggleDeckPick(k));
     startRun();
     tuteMerged = true;
@@ -499,6 +502,7 @@ const capture = async (browser) => {
     if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
       return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
     if (lanes.length !== 2) return '2레인이 아니다: ' + lanes.length;
+    if (CFG.WAVE_MAX !== 30) return '30웨이브 판이 아니다: ' + CFG.WAVE_MAX;
     // 10열이 폭 안에 들어가는가. 셀 왼쪽 모서리 + 한 칸이 캔버스 안이라야 한다.
     if (cellToPx(CFG.BOARD_W - 1, 0).x + view.cell > view.w)
       return '보드가 화면 밖으로 나간다: cell ' + view.cell.toFixed(1);
@@ -1187,7 +1191,8 @@ const capture = async (browser) => {
     window.update = window.__update;
     restart();
     applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
-    pickStage(STAGES.findIndex(s => s.w === 11 && s.lanes.length === 3));
+    pickStage(STAGES.findIndex(s => s.w === 11 && s.lanes.length === 3
+      && s.lanes.filter(L => L[0].y < 0).length === 3));
     ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
     startRun();
     tuteMerged = true;
@@ -1213,6 +1218,10 @@ const capture = async (browser) => {
       return '11x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
     if (lanes.length !== 3) return '3레인이 아니다: ' + lanes.length;
     if (STAGES[state.stage].allowKinds) return '제약 판이다: ' + STAGES[state.stage].name;
+    // 어귀가 셋 다 위쪽 변인가. 위 선택자와 같은 자다(#91) — ⑱ 사슬·⑲ 샛문이 같은
+    // 11폭 3레인이라, 이 줄이 없으면 그 둘을 집어도 아래가 전부 통과할 수 있다.
+    if (lanes.filter(L => L.points[0].y < 0).length !== 3)
+      return '어귀가 셋 다 위쪽 변이 아니다: ' + lanes.filter(L => L.points[0].y < 0).length;
     // 기둥이 셋인가 — 합류(행 11) 위로 열 줄 넘게 이어지는 세로줄이 x0·x5·x10 셋이라야
     // 한다. 이 판을 이 판이게 하는 획이고, 하나라도 빠지면 ⑫ 턱과 같은 판이 된다.
     const pillars = [];
@@ -1285,6 +1294,104 @@ const capture = async (browser) => {
     if (ef.size < 3) return '적 방향이 ' + ef.size + '가지뿐이다: ' + [...ef].join(',');
     const tf = new Set(state.towers.map(t => towerFacing(t)));
     if (tf.size < 2) return '포탑 방향이 ' + tf.size + '가지뿐이다: ' + [...tf].join(',');
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
+  // ── 총웨이브가 30 을 넘는 판 (⑯ 잘록이 · #91) ─────────────────
+  // **이 컷이 이 티켓의 진짜 게이트다.** 총웨이브를 난이도 손잡이로 쓰면서 판이
+  // 38·40·42웨이브가 됐는데, 헤드리스가 못 보는 것이 그 수에 딸린 화면이다.
+  //
+  // **맨 뒤에 붙인다.** 앞에 끼우면 뒤 컷의 fxRand 가 밀려 md5 가 통째로 갈린다
+  // (22·23·24 가 「맨 뒤에 둔다」로 적어 둔 그 이유이고, 그래서 그 셋 뒤로 간다).
+  //
+  // **웨이브를 29 로 세운 것이 이 컷의 요지다.** 3웨이브 예고가 w30·**w31·w32** 를
+  // 짚는데 `WAVES` 표는 30줄이다 — 즉 이 컷은 **표 밖을 짚는 유일한 컷**이고,
+  // 진짜 마지막 줄(w30)과 그 되풀이(w31·w32)가 한 화면에 같이 찍힌다.
+  // 고치기 전에는 여기서 `groups is not iterable` 로 화면이 통째로 죽었고
+  // (`drawForecast` 만 되풀이 규칙을 안 쓰고 있었다), `npm test` 는 렌더를 안 보므로
+  // **한 줄도 안 걸렸다.** 지금은 `waveGroups()` 하나로 묶여 있고, 이 컷이 그 묶음이
+  // 풀리는 것을 잡는 자다 — **웨이브를 30 이하로 내리지 마라. 내리면 아무것도 안 잰다.**
+  //
+  // 볼 것:
+  //   ① **`웨이브 28 / 38` 이 안 깨지는가** — 「/ 38」이 두 자리라 제목 오른쪽에
+  //      붙는 자리가 30 일 때와 같다. 골드·정수/관문 줄과 안 겹쳐야 한다
+  //   ② **예고 세 칸이 다 그려지는가** — w31 이 표 밖이라 마지막 편성을 되풀이한다.
+  //      셋째 칸이 비면 되풀이가 안 걸린 것이고, 그건 이 판이 죽는다는 뜻이다
+  //   ③ **모래시계로 읽히는가** — 위가 넓고(x0·x9 두 기둥) 목이 **왼쪽으로 치우쳐**
+  //      조였다가(x2~x3) 아래에서 다시 벌어진다(x0~x5). 목이 가운데로 보이면
+  //      이 판은 ② 이중 병목과 구별이 안 된다
+  //   ④ **잠긴 구역 빗금이 웨이브와 맞는가** — 개방 행을 상수로 안 박고 `unlockAt`
+  //      에서 끌어내므로, 웨이브가 바뀌면 빗금도 같이 움직여야 한다
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
+    // **인덱스를 못 박는다.** 총웨이브로 찾는다 — 판이 앞뒤로 늘어도 안 밀리고,
+    // 무엇보다 **이 컷이 무엇 때문에 있는지가 선택자에 그대로 적힌다**(30 초과).
+    // 30 을 넘는 판은 ⑯⑰⑱ 셋이고 그중 첫째다.
+    pickStage(STAGES.findIndex(s => s.waves > 30));
+    ['shredder', 'frost', 'arc'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    // 웨이브 29 — 예고가 w30·w31·w32 를 짚어 **표(30줄) 밖으로 두 칸 나간다.**
+    // w30 은 표의 마지막 줄이고 w31·w32 는 그 되풀이라, **한 화면에 진짜와 되풀이가
+    // 같이 찍힌다** — 셋째 칸이 둘째 칸과 같은 편성이면 되풀이가 걸린 것이다.
+    state.wave = 29;
+    // 개방 행은 **웨이브에서 끌어낸다.** 상수로 박으면 `unlockAt` 이 바뀌었을 때
+    // (웨이브를 늘리면 같이 밀린다) 그림이 조용히 거짓말이 된다 — 잠긴 행이 없는
+    // 판을 「잠긴 행이 있다」로 찍는 식이다.
+    state.openRows = Math.min(CFG.BOARD_H,
+      CFG.OPEN_ROWS + 2 * CFG.UNLOCK_AT.filter(w => w <= state.wave).length);
+    let id = 9600;
+    const put = (kind, star, gx, gy) => state.towers.push({
+      id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
+      cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
+    // 경로(x0·x9 기둥 · 행 4 · 목 x2~3 행 5~7 · 아래 벌어짐 · 행 13)를 피한다.
+    // **다섯 대만 놓는다** — 15·18·19·22·23·24 와 같은 이유로 사거리 칠이 획을 덮지 않게.
+    put('arc',      5, 6, 6);         // 2x2. 열 6~7 x 행 6~7 — 목 오른쪽의 빈 반쪽
+    put('shredder', 5, 1, 9);         // 2x2. 열 1~2 x 행 9~10 — 아래 벌어짐 안쪽 주머니
+    put('frost',    3, 4, 6);         // 목 바로 옆 — 조인 구간을 혼자 본다
+    put('frost',    2, 8, 9);         // 오른쪽 빈 반쪽
+    put('shredder', 1, 2, 12);        // 바닥 띠 — 행 13 출구를 스친다
+    state.selected = null;
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('26-jallogi', () => {
+    if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
+    if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
+      return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
+    // **총웨이브가 30 을 넘는가.** 이 컷이 있는 이유 그 자체다.
+    if (CFG.WAVE_MAX <= 30) return '총웨이브가 30 이하다: ' + CFG.WAVE_MAX;
+    // **예고가 표 밖을 짚는가.** 웨이브 28 이면 셋째 칸이 w31 이고 WAVES 는 30줄이다.
+    // 이 줄이 깨지면 컷은 멀쩡히 나오는데 아무것도 안 재게 된다.
+    if (state.wave + 3 <= WAVES.length)
+      return '예고가 표 안에서 끝난다: w' + (state.wave + 3) + ' / 표 ' + WAVES.length + '줄';
+    // 되풀이 규칙이 살아 있는가. 표 밖을 짚어도 편성이 나와야 한다.
+    if (!waveGroups(state.wave + 3)) return '표 밖 웨이브의 편성이 없다: w' + (state.wave + 3);
+    // 목이 **왼쪽**인가. 조인 구간(행 5~7)의 경로 열이 판 가운데(4.5)보다 왼쪽이라야
+    // 한다 — 가운데로 옮기면 좌우가 대칭이 되어 편차가 무너지고(후보 `H1 모래시계`가
+    // 그래서 떨어졌다) 이 판은 ② 이중 병목과 골격이 겹친다.
+    const neck = [];
+    for (let x = 0; x < CFG.BOARD_W; x++) if (isPath(x, 6)) neck.push(x);
+    if (neck.join(',') !== '2,3') return '목(행 6)이 x2~x3 이 아니다: ' + neck;
+    // 위가 넓은가 — 잠긴 행의 두 기둥이 판 양끝이라야 「조인다」가 그림이 된다.
+    if (!isPath(0, 2) || !isPath(9, 2)) return '위쪽 두 기둥(x0·x9)이 없다';
+    // 아래에서 다시 벌어지는가 — 목(2칸)보다 넓어야 한다.
+    const low = [];
+    for (let x = 0; x < CFG.BOARD_W; x++) if (isPath(x, 9)) low.push(x);
+    if (low.length < 2 || low[low.length - 1] - low[0] <= 1)
+      return '아래가 다시 안 벌어진다(행 9): ' + low;
+    // 개방 행이 웨이브와 맞는가. 이 컷은 상수를 안 박으므로 여기서도 다시 계산한다 —
+    // 두 곳이 같은 규칙을 쓰는지가 이 줄의 요지다.
+    const want = Math.min(CFG.BOARD_H,
+      CFG.OPEN_ROWS + 2 * CFG.UNLOCK_AT.filter(w => w <= state.wave).length);
+    if (state.openRows !== want)
+      return '개방 행이 웨이브와 안 맞는다: ' + state.openRows + ' / 기대 ' + want;
+    if (state.towers.filter(t => t.star >= 5).length !== 2) return '5성(2x2)이 둘이 아니다';
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });
