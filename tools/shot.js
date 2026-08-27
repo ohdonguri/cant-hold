@@ -58,11 +58,20 @@ const capture = async (browser) => {
   // 아래에서 외부 요청을 일부러 끊기 때문에 그 실패가 콘솔 에러로 올라온다. 그건
   // 하네스가 만든 소음이라 세면 안 된다 — 진짜 페이지 에러가 그 속에 묻힌다.
   // 다만 file:// 것은 반드시 남긴다. 로컬 자산이 빠진 건 진짜 사고다.
+  //
+  // **방향별 스프라이트는 예외다.** 디자이너가 한 장씩 넘기는 중이라 아직 대부분
+  // 없고(index.html §방향별 그림 · docs/sprite-request.md), 그 404 는 코드가 그렇게
+  // 굴러가도록 만든 것이라 사고가 아니다. 그렇다고 file:// 404 를 통째로 눈감으면
+  // 위 한 줄이 통째로 무뎌진다 — **게임이 방향 파일로 요청한 주소이면서 디스크에도
+  // 없는 것만** 넘긴다. 주소 목록은 게임에게 물어본다(아래 dirAssets). 규칙을 여기
+  // 베끼면 이름 규칙을 고쳤을 때 하네스만 옛 규칙으로 걸러 낸다.
+  // 파일이 실제로 있는데 못 읽었으면 그건 그대로 사고로 센다.
+  const consoleErrs = [];
   page.on('console', m => {
     if (m.type() !== 'error') return;
     const from = (m.location() || {}).url || '';
     if (from && !from.startsWith('file://')) return;
-    errors.push(m.text());
+    consoleErrs.push({ text: m.text(), from });
   });
 
   // 이 하네스는 네트워크를 쓰지 않는다. cloudPreload() 가 requestIdleCallback 으로
@@ -465,7 +474,7 @@ const capture = async (browser) => {
     // `w === 10` 만으로는 배열 순서에 기대는 셈이라(앞의 것을 집는다) 아래 확인
     // 함수의 「2레인이 아니다」가 순서에 딸린 값이 된다 — 아래 15-trimerge 가 그
     // 짝이고, 둘이 같은 성질로 갈려야 어느 쪽이 밀려도 조용히 안 바뀐다.
-    // **[#91] 총웨이브까지 본다.** ⑯ 잘록이(38)·⑰ 톱날(42)이 붙으면서 10폭 2레인이
+    // **[#91] 총웨이브까지 본다.** ⑯ 잘록이(42)·⑰ 톱날(46)이 붙으면서 10폭 2레인이
     // 셋이 됐다 — 크기와 레인 수로는 더 못 가른다. 새 축이 총웨이브라 그것으로 좁힌다
     // (⑥ 은 30 이다). 아래 확인 함수에도 같은 줄을 넣어 자를 한 벌로 둔다.
     pickStage(STAGES.findIndex(s => s.w === 10 && s.lanes.length === 2 && s.waves === 30));
@@ -1164,13 +1173,6 @@ const capture = async (browser) => {
   // 이 판은 셋이 다 위쪽 변이라 ⑫ 와 어귀가 같다 — **어귀는 이제 판을 못 가른다.**
   // 그래서 이 티켓이 위 다섯 선택자에 `s.w === 10` 을 더하고 여기는 11 로 집는다.
   //
-  // **[#91] 「11폭은 이 판뿐」이 깨졌다 — 어귀를 다시 걸었다.** ⑱ 사슬·⑲ 샛문이
-  // 11폭 3레인으로 붙어서 `w === 11 && lanes 3` 이 세 판을 문다. `findIndex` 가
-  // 앞의 것을 집으므로 컷이 옮겨 가지는 않았지만, **그건 배열 순서에 기댄 것이라**
-  // 이 판 앞에 11폭이 하나라도 붙는 날 조용히 다른 판을 찍는다(#33 의 S4 래칫과
-  // 같은 실패모드다). 어귀가 다시 자가 된 것은 새 둘이 위쪽 변을 안 쓰기 때문이다 —
-  // ⑱ 은 0개(왼2·오른1) · ⑲ 는 1개(위1·왼1·오른1) · 이 판은 **셋 다 위쪽 변**이다.
-  //
   // 볼 것:
   //   ① **33px 칸에서 읽히는가** — ★배지가 스프라이트를 안 덮는가 · 5성 2x2 가
   //      2x2 로 보이는가 · 잠긴 구역 빗금과 안내 글자가 뭉개지지 않는가
@@ -1240,6 +1242,62 @@ const capture = async (browser) => {
     return null;
   });
 
+  // ── 방향 (몹은 걷는 쪽 · 포탑은 쏘는 쪽) ─────────────────────
+  // **지금 이 컷은 기존 그림만 찍힌다.** 방향 그림이 아직 한 장도 없고
+  // (docs/sprite-request.md 로 요청해 둔 44장이 나중에 온다), 「한 장도 없으면
+  // 화면이 지금과 똑같다」가 이 티켓의 수용 기준이기 때문이다. 그러니 눈으로
+  // 이 컷을 지금 열어 봐야 방향은 안 보인다 — **그림이 한 장 떨어지는 날 여기서
+  // 바로 보이라고** 판을 고정해 두는 컷이다.
+  //
+  // 그때까지 이 컷이 지키는 것은 아래 단언 하나다: **방향이 실제로 갈리는가.**
+  // 외곽 도로는 오른쪽→아래→왼쪽으로 뱀처럼 돌아서 획마다 한 마리씩 세우면
+  // 적 세 방향이 한 화면에 같이 선다. 판을 갈아 끼워 전부 한 방향이 되면 이 컷은
+  // 그림이 와도 아무것도 안 보여 주는 컷이 되는데, 그건 스크린샷으로는 영영 안
+  // 걸린다(지금과 똑같이 멀쩡해 보인다).
+  //
+  // **맨 뒤에 붙인다.** 앞에 끼우면 뒤 컷의 fxRand 가 밀려 md5 가 통째로 갈린다
+  // (22·23·24 가 「맨 뒤에 둔다」로 적어 둔 그 이유다).
+  await page.evaluate(() => {
+    __reseed();
+    window.update = window.__update;
+    restart();
+    pickStage(0);
+    ['marksman', 'shredder', 'mortar'].forEach(k => toggleDeckPick(k));
+    startRun();
+    tuteMerged = true;
+    state.gold = 99999;
+    for (let i = 0; i < 8; i++) summon(state.deck[i % 3]);
+    state.selected = null;
+    state.wave = 5;
+    state.phase = 'wave';
+    // 레인 획마다 한 마리씩. **좌표를 안 베낀다** — 획을 고치면 여기가 같이 따라온다.
+    state.enemies.length = 0;
+    const L = lanes[0];
+    let d = 0;
+    for (const seg of L.seg) {
+      spawnEnemy('grunt');
+      const e = state.enemies[state.enemies.length - 1];
+      e.maxHp = e.hp = 1e9;          // 안 죽어야 획마다 한 마리가 그대로 선다
+      e.dist = d + seg * 0.5;
+      const p = posAt(e.dist, e.lane);
+      e.x = p.x; e.y = p.y;
+      d += seg;
+    }
+    // 몇 틱 돌린다. 적은 걸어서 이동 벡터가 생기고, 포탑은 쏴서 조준 각도가 생긴다.
+    for (let i = 0; i < 6; i++) update(1 / 60);
+    __freeze();
+  });
+  await page.waitForTimeout(200);
+  await shot('25-facing', () => {
+    if (state.phase !== 'wave') return '웨이브 중이 아니다: ' + state.phase;
+    const ef = new Set(state.enemies.map(e => enemyFacing(e)));
+    if (ef.size < 3) return '적 방향이 ' + ef.size + '가지뿐이다: ' + [...ef].join(',');
+    const tf = new Set(state.towers.map(t => towerFacing(t)));
+    if (tf.size < 2) return '포탑 방향이 ' + tf.size + '가지뿐이다: ' + [...tf].join(',');
+    if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
+    return null;
+  });
+
   // ── 총웨이브가 30 을 넘는 판 (⑯ 잘록이 · #91) ─────────────────
   // **이 컷이 이 티켓의 진짜 게이트다.** 총웨이브를 난이도 손잡이로 쓰면서 판이
   // 38·40·42웨이브가 됐는데, 헤드리스가 못 보는 것이 그 수에 딸린 화면이다.
@@ -1302,7 +1360,7 @@ const capture = async (browser) => {
     __freeze();
   });
   await page.waitForTimeout(200);
-  await shot('25-jallogi', () => {
+  await shot('26-jallogi', () => {
     if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
     if (CFG.BOARD_W !== 10 || CFG.BOARD_H !== 14)
       return '10x14 가 아니다: ' + CFG.BOARD_W + 'x' + CFG.BOARD_H;
@@ -1337,6 +1395,21 @@ const capture = async (browser) => {
     if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
     return null;
   });
+
+  // 게임이 방향 파일로 잡은 주소 전부. 게임에게 직접 물어 규칙을 안 베낀다.
+  const dirAssets = new Set(await page.evaluate(() => {
+    const out = [];
+    for (const k of KIND_KEYS) for (const d of TOWER_DIR_FILES) out.push(dirPath(k, d));
+    for (const k of Object.keys(ENEMY)) for (const d of ENEMY_DIR_FILES) out.push(dirPath(k, d));
+    return out;
+  }));
+  const ROOT = path.join(__dirname, '..');
+  for (const { text, from } of consoleErrs) {
+    const rel = from.startsWith('file://')
+      ? path.relative(ROOT, decodeURIComponent(from.slice('file://'.length))) : '';
+    if (dirAssets.has(rel) && !require('fs').existsSync(path.join(ROOT, rel))) continue;
+    errors.push(from ? `${text} (${rel || from})` : text);
+  }
 
   await page.close();
   return { hashes, errors, bad };

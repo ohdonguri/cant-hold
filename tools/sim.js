@@ -110,8 +110,15 @@ const { RANGE: COVER_RANGE } = require('./paths.js');
 // `arc` 도 좌표를 남긴다(#68). 방사형 소환 아이콘이 관문 선과 같은 함정 자리다 —
 // 이름만 세면 「원을 그렸다」까지밖에 못 보고, 보드 밖이나 화면 밖에 그려도 통과한다.
 // 반지름까지 남겨야 「그 아이콘」인지 튜토리얼 링인지 갈린다.
+// **좌표 변환도 인자를 남긴다.** 스프라이트 좌우 뒤집기(index.html drawSprite)가
+// 이름만으로는 「뒤집었다」까지밖에 못 보고, **엉뚱한 자리에 뒤집어 놔도 통과한다** —
+// 뒤집기는 그린 자리를 그대로 두고 좌우만 바꿔야 하는데 그게 순수한 그림 문제라
+// 스크린샷 말고는 볼 창이 없었다. `geom` 이 아니라 따로 담는 이유는 segments() 가
+// beginPath→moveTo→lineTo→stroke 네 줄이 **붙어 있는 것**으로 선분을 복원하기
+// 때문이다. 거기 변환이 끼면 멀쩡한 선이 선분으로 안 읽힌다.
 const GEOM = ['beginPath', 'moveTo', 'lineTo', 'stroke', 'arc'];
-function stubCtx(log, texts, geom, images) {
+const XFORM = ['translate', 'scale'];
+function stubCtx(log, texts, geom, images, xform) {
   return new Proxy({}, {
     get(_, p) {
       if (p === 'measureText') return () => ({ width: 10 });
@@ -119,6 +126,7 @@ function stubCtx(log, texts, geom, images) {
       if (texts && p === 'fillText') return s => { log.push(p); texts.push(String(s)); };
       if (geom && GEOM.includes(p)) return (...a) => { log.push(p); geom.push({ m: p, a }); };
       if (images && p === 'drawImage') return (...a) => { log.push(p); images.push(a); };
+      if (xform && XFORM.includes(p)) return (...a) => { log.push(p); xform.push({ m: p, a }); };
       if (log) return () => { log.push(p); };
       return () => {};
     },
@@ -282,7 +290,14 @@ const EXPOSE = [
   // 못 고르는 덱을 재게 된다. 허용 목록을 도구 쪽에 베끼면 자가 두 벌이 되므로
   // 살아 있는 판 정의에서 그대로 가져다 쓴다.
   'allowedKinds', 'kindAllowed', 'deckLimitNote',
-  'SPR', 'sprite', 'drawSprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
+  // 방향별 그림. 검사가 「어느 방향이 어느 파일로 떨어지나」를 손으로 베끼면 표를
+  // 고쳤을 때 검사만 옛 표를 지키며 통과한다 — 체인과 이름 목록을 살아 있는 채로
+  // 내보내고, 경로도 `dirPath` 로 게임과 같은 자를 쓴다.
+  // `towerFacing`/`enemyFacing` 은 이력(경계 떨림)을 밖에서 밟는 유일한 통로다.
+  'TOWER_DIRS', 'TOWER_DIR_FILES', 'ENEMY_DIR_FILES', 'TOWER_FACE_CHAIN', 'ENEMY_FACE_CHAIN',
+  'towerFacing', 'enemyFacing', 'facingAsset', 'dirPath', 'muzzle',
+  'FACE_STEP', 'FACE_MARGIN', 'FACE_AXIS_BIAS',
+  'SPR', 'SPR_ASSET_PATH', 'sprite', 'drawSprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
   // 세이브 형식 버전과 「뜻이 안 바뀐 인덱스 수」. 테스트가 리터럴 3·5 를 베껴 두면
   // 판을 또 붙여 경계가 움직였을 때 테스트만 옛 값을 지키며 통과한다.
   'SAVE_VERSION', 'SAVE_V2_STABLE', 'migrateBundle',
@@ -327,7 +342,8 @@ function load(overrides, opts) {
   const drawTexts = [];
   const drawGeom = [];
   const drawImages = [];
-  const canvas = { getContext: () => stubCtx(drawLog, drawTexts, drawGeom, drawImages), addEventListener: () => {}, width: 0, height: 0, style: {} };
+  const drawXform = [];
+  const canvas = { getContext: () => stubCtx(drawLog, drawTexts, drawGeom, drawImages, drawXform), addEventListener: () => {}, width: 0, height: 0, style: {} };
 
   // PNG 스프라이트의 로딩 전/완료/실패를 브라우저와 같은 속성으로 밟는다.
   // 테스트는 이 가짜를 단언하지 않고, 실제 drawImage 가 무엇을 받았는지만 본다.
@@ -386,7 +402,8 @@ function load(overrides, opts) {
     text: drawTexts,
     geom: drawGeom,
     images: drawImages,
-    reset() { drawLog.length = 0; drawTexts.length = 0; drawGeom.length = 0; drawImages.length = 0; },
+    xform: drawXform,
+    reset() { drawLog.length = 0; drawTexts.length = 0; drawGeom.length = 0; drawImages.length = 0; drawXform.length = 0; },
     count(...names) { return drawLog.filter(n => names.includes(n)).length; },
     // 한 번의 stroke 로 그은 **직선 하나**만 골라 낸다. beginPath → moveTo → lineTo →
     // stroke 가 정확히 그 모양이고, 점이 더 붙은 경로(roundRect 등)는 안 걸린다.

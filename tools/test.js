@@ -4174,6 +4174,263 @@ function poolDeck(g, st) {
     loadedEnemy ? '빙결 tint' : 'PNG 등록 없음');
 }
 
+// ── 방향별 스프라이트 ─────────────────────────────────────────
+// 몹은 걸어가는 쪽을, 포탑은 쏘는 쪽을 본다. 방향 그림은 **아직 한 장도 없고**
+// 디자이너가 한 장씩 넘긴다(docs/sprite-request.md). 그래서 잠글 것이 넷이다.
+//   ① 한 장도 없을 때 **화면이 지금과 똑같은가** — 기존 그림, 안 뒤집음
+//   ② 파일을 떨어뜨리면 **그 방향이 실제로 그려지는가** — 없으면 가장 가까운 것
+//   ③ 뒤집기가 색 입히기·다음 그림을 안 망치는가
+//   ④ 경계에서 안 떠는가
+//
+// **넷 다 `g.draws` 로 본다.** `t.face` 만 보면 drawSprite 에 방향을 안 넘겨도,
+// drawTower 에서 그 인자를 통째로 빼도 전부 통과한다 — 이 리포가 세 번 빠진 함정이다.
+// `ctx.scale` 은 이 게임에서 좌우 뒤집기 말고 쓰는 데가 없어서(index.html) 그 호출이
+// 곧 「뒤집었다」이고, `draws.xform` 이 **어디에** 뒤집었는지를 마저 본다.
+{
+  console.log('방향별 스프라이트');
+  const g = load();
+
+  // 한 번 그리고 「무엇을 · 뒤집어서 · 어디에 그렸나」를 돌려준다.
+  const drew = fn => {
+    g.draws.reset();
+    fn();
+    const img = g.draws.images[0] || [];
+    const tr = g.draws.xform.find(x => x.m === 'translate');
+    const sc = g.draws.xform.find(x => x.m === 'scale');
+    return {
+      image: img[0] || null, dx: img[1], size: img[3],
+      flip: g.draws.count('scale') > 0,
+      tx: tr ? tr.a[0] : null, sx: sc ? sc.a[0] : null,
+      save: g.draws.count('save'), restore: g.draws.count('restore'),
+    };
+  };
+
+  const K = 'marksman', KC = g.KINDS[K].color;
+  const basePng = g.images.load(g.SPR_ASSET_PATH[K]);
+  const name = (r, map) => (map.get(r.image) || '?') + (r.flip ? ' 뒤집힘' : '');
+
+  // ① 방향 그림이 하나도 없을 때. **여기가 이 티켓의 근거다** — 그림이 오기 전에는
+  //    화면이 한 픽셀도 안 바뀌어야 한다.
+  {
+    const map = new Map([[basePng, '기존 그림']]);
+    const wrong = g.TOWER_DIRS.filter(d => {
+      const r = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, d));
+      return r.image !== basePng || r.flip;
+    });
+    ok('방향 그림이 없으면 여덟 방향이 전부 기존 그림이다', wrong.length === 0,
+      wrong.length ? wrong.map(d => d + '=' + name(drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, d)), map)).join(' ') : '없음');
+    const down = drew(() => g.drawSprite('grunt', g.ENEMY.grunt.color, 80, 80, 40, 40, 'down'));
+    ok('  적도 마찬가지다', down.image === g.images.get(g.SPR_ASSET_PATH.grunt) || down.image !== null,
+      down.flip ? '뒤집힘' : '안 뒤집힘');
+  }
+
+  // ② 한 장 떨어뜨린다. **e 한 장뿐**인데 w·ne 까지 같이 산다 — 요청서가
+  //    「n·ne·e·se 넷만 그리면 8방향이 선다」고 약속한 것이 이 표다.
+  const ePng = g.images.load(g.dirPath(K, 'e'));
+  {
+    const map = new Map([[basePng, '기존 그림'], [ePng, 'e']]);
+    const e = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'e'));
+    // 이 줄은 `tintedAsset` 이 **종류 이름만** 받는지도 같이 잠근다. 방향 이름을
+    // key 로 넘기면 기준색을 못 찾아 기본색인데도 색 캔버스를 굽고, 그러면
+    // 여기 나오는 것이 ePng 이 아니라 그 캔버스가 된다.
+    ok('방향 파일을 떨어뜨리면 그 방향이 그려진다', e.image === ePng && !e.flip, name(e, map));
+    const w = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'w'));
+    ok('  w 는 e 를 좌우로 뒤집어 만든다', w.image === ePng && w.flip, name(w, map));
+    // 뒤집어도 **그린 자리는 그대로**여야 한다. 변환이 x → tx - x 이므로 그림의
+    // 양 끝이 서로 자리를 바꾸면 자리가 안 움직인 것이다. 이걸 안 보면 뒤집힌
+    // 그림이 옆 칸에 가 있어도 「뒤집었다」로 통과한다.
+    ok('  뒤집어도 그린 자리가 그대로다',
+      w.sx === -1 && w.tx - w.dx === w.dx + w.size && w.tx - (w.dx + w.size) === w.dx,
+      `tx ${w.tx} dx ${w.dx} size ${w.size} sx ${w.sx}`);
+    const ne = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'ne'));
+    ok('  없는 방향은 가장 가까운 있는 방향으로 대신한다', ne.image === ePng && !ne.flip, name(ne, map));
+    // nw 는 기존 그림이 서 있는 자리다(요청서 §파일 이름). 방향 파일이 와도 그대로다.
+    const nw = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'nw'));
+    ok('  기존 그림 자리(nw)는 그림이 와도 그대로다', nw.image === basePng && !nw.flip, name(nw, map));
+    // 방향을 안 넘기는 호출부(덱 카드·피커·HUD 덱 줄)는 그림이 와도 안 바뀐다.
+    const ui = drew(() => g.drawSprite(K, KC, 80, 80, 56));
+    ok('  방향 없는 호출은 기존 그림 그대로다', ui.image === basePng && !ui.flip, name(ui, map));
+  }
+
+  // ③ 색 입히기와 뒤집기가 서로를 안 망친다. 색은 256x256 캔버스 **한 장**을
+  //    돌려 쓰므로, 거기에 뒤집기를 섞으면 다음 호출이 뒤집힌 캔버스를 받는다.
+  {
+    const tinted = drew(() => g.drawSprite(K, '#ffffff', 80, 80, 56, 56, 'w'));
+    ok('색을 입혀도 뒤집기가 산다', tinted.image !== ePng && tinted.image !== basePng && tinted.flip,
+      (tinted.image === ePng ? '색이 안 입혀짐' : '색 캔버스') + (tinted.flip ? ' 뒤집힘' : ' 안 뒤집힘'));
+    // restore 를 빠뜨리면 **그 프레임 나머지가 통째로 뒤집힌다.** 화면 전체가
+    // 좌우로 뒤집힌 그림인데 헤드리스에서는 이 짝 하나 말고 볼 창이 없다.
+    ok('  뒤집기가 다음 그림으로 안 샌다', tinted.save === 1 && tinted.restore === 1,
+      `save ${tinted.save} / restore ${tinted.restore}`);
+    const after = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'e'));
+    ok('  바로 다음 그림이 앞 호출에 안 물든다', after.image === ePng && !after.flip,
+      (after.image === ePng ? 'e' : '색 캔버스') + (after.flip ? ' 뒤집힘' : ''));
+  }
+}
+
+// ── 방향이 판 위에서 실제로 도는가 ────────────────────────────
+// 위 블록은 drawSprite 한 줄을 직접 부른다. 여기서는 **render() 로** 본다 —
+// towerFacing()/enemyFacing() 이 아무리 맞아도 drawTower·drawEnemies 가 그 값을
+// 안 넘기면 화면은 한 방향으로 굳는데, 그 갈림은 render 를 지나야만 보인다.
+{
+  console.log('방향 — 판 위');
+
+  // 판 위에서 「무엇이 그려졌나」를 이름으로 돌려준다. 방향 파일을 실은 것만
+  // 이름이 붙으므로, 그 이름이 나온다 = 그 방향으로 그렸다 이다.
+  const shown = (g, map) => {
+    g.draws.reset();
+    g.render();
+    for (const [im, nm] of map) if (g.draws.images.some(a => a[0] === im)) return nm;
+    return '기존 그림';
+  };
+
+  // ── 포탑: 쏘는 쪽을 본다 ────────────────────────────────────
+  {
+    const g = load();
+    const { state } = g;
+    g.restart(); g.pickStage(0);
+    ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5; state.gold = 99999;
+    g.images.load(g.SPR_ASSET_PATH.marksman);
+    const ePng = g.images.load(g.dirPath('marksman', 'e'));
+    const sePng = g.images.load(g.dirPath('marksman', 'se'));
+    const map = new Map([[ePng, 'e'], [sePng, 'se']]);
+
+    g.summon('marksman');
+    const t = state.towers[0];
+
+    // **t.angle 은 여태 마력로만 쓰던 값이다.** 나머지 여섯 종류는 muzzle() 이
+    // 채우는데, 그게 빠지면 배치 각도(-π/2 = n)에 얼어붙어 여기가 '기존 그림'이 된다.
+    state.phase = 'wave';
+    const c = g.towerCenter(t);
+    g.spawnEnemy('grunt');
+    const e = state.enemies[0];
+    e.maxHp = e.hp = 1e9;
+    e.x = c.x + g.towerRange(t) - 1; e.y = c.y - 0.5;   // 타워 바로 동쪽
+    t.cd = 0;
+    g.fireTower(t, 1 / 60);
+    ok('포탑이 쏜 쪽을 본다 (마력로 말고도)', shown(g, map) === 'e', shown(g, map));
+
+    // 이력. 경계(22.5°)에 각도를 걸치고 흔들어도 화면이 안 바뀌어야 한다.
+    // **먼저 e 로 굳혀 놓고** 경계 양쪽을 오간다.
+    t.angle = 0;
+    shown(g, map);
+    const edge = g.FACE_STEP / 2;
+    const wobble = new Set();
+    for (let i = 0; i < 12; i++) {
+      t.angle = edge + (i % 2 ? 1 : -1) * 1e-4;
+      wobble.add(shown(g, map));
+    }
+    ok('경계에 걸쳐 있어도 방향이 안 떤다', wobble.size === 1 && wobble.has('e'),
+      [...wobble].join(' / '));
+    // 안 떠는 것이 「아예 안 돈다」로 통과하면 안 된다. 여유를 넘기면 돌아야 한다.
+    t.angle = edge + g.FACE_MARGIN * 2;
+    ok('  여유를 넘기면 돈다', shown(g, map) === 'se', shown(g, map));
+
+    // 안 쏘는 건물은 안 돈다. 조폐소는 muzzle() 을 아예 안 부르므로 배치 각도에
+    // 머문다 — 적이 옆에 우글거려도 따라 돌면 안 된다.
+    g.images.load(g.SPR_ASSET_PATH.mint);
+    const mintN = g.images.load(g.dirPath('mint', 'n'));
+    const mintE = g.images.load(g.dirPath('mint', 'e'));
+    state.towers.length = 0;
+    g.summon('mint');
+    const m = state.towers[0];
+    const mc = g.towerCenter(m);
+    e.x = mc.x + 1; e.y = mc.y - 0.5;
+    m.cd = 0;
+    g.fireTower(m, 1 / 60);
+    ok('안 쏘는 건물(조폐소)은 안 돈다',
+      shown(g, new Map([[mintE, 'e'], [mintN, '배치 각도(n)']])) === '배치 각도(n)',
+      shown(g, new Map([[mintE, 'e'], [mintN, '배치 각도(n)']])));
+  }
+
+  // ── 적: 걸어가는 쪽을 본다 ──────────────────────────────────
+  // **손으로 이동 벡터를 넣지 않는다.** update() 를 돌려 경로를 걷게 해야
+  // 「이동 벡터를 어디서 꺼내나」까지 같이 잠긴다.
+  {
+    const g = load();
+    const { state } = g;
+    g.restart(); g.pickStage(0);
+    ['marksman', 'frost', 'mint'].forEach(k => g.toggleDeckPick(k));
+    g.startRun();
+    state.wave = 5;
+    state.phase = 'wave';
+    g.images.load(g.SPR_ASSET_PATH.grunt);
+    const sidePng = g.images.load(g.dirPath('grunt', 'side'));
+    const map = new Map([[sidePng, 'side']]);
+
+    g.spawnEnemy('grunt');
+    const e = state.enemies[0];
+    e.maxHp = e.hp = 1e9;
+    // ① 오른쪽으로 걷는 구간(레인 첫 획) ② 아래로 ③ 왼쪽으로.
+    // 거리는 레인 정의에서 꺼낸다 — 좌표를 베끼면 판을 고쳤을 때 검사만 옛 판을 본다.
+    const L = g.lanes[0];
+    const segStart = i => L.seg.slice(0, i).reduce((s, v) => s + v, 0);
+    // 구간을 갈아탈 때는 **몸도 그 자리로 옮긴다.** 안 그러면 다음 update 의
+    // 델타가 「순간이동한 거리」가 되어, 재려는 한 프레임치 이동이 안 나온다.
+    const at = (i, k) => {
+      e.dist = segStart(i) + L.seg[i] * k;
+      const p = g.posAt(e.dist, e.lane);
+      e.x = p.x; e.y = p.y;
+      g.update(1 / 60);
+    };
+    const axis = i => {
+      const a = L.points[i], b = L.points[i + 1];
+      return Math.abs(b.x - a.x) > Math.abs(b.y - a.y) ? (b.x > a.x ? '오른쪽' : '왼쪽') : '아래';
+    };
+    const right = L.seg.findIndex((_, i) => axis(i) === '오른쪽');
+    const down = L.seg.findIndex((_, i) => axis(i) === '아래');
+    const left = L.seg.findIndex((_, i) => axis(i) === '왼쪽');
+
+    at(right, 0.3);
+    const r1 = shown(g, map);
+    const flipRight = g.draws.count('scale');
+    ok('적이 오른쪽으로 걸으면 옆모습이다', r1 === 'side', r1);
+    // 뒤집는 쪽이 오른쪽인 것은 형제 프로젝트(resolveSpriteFacing)와 같은 규칙이다.
+    ok('  오른쪽은 뒤집어 그린다', flipRight === 1, '뒤집기 ' + flipRight + '회');
+
+    at(down, 0.5);
+    const r2 = shown(g, map);
+    ok('아래로 걸으면 기존 그림(정면)이다', r2 === '기존 그림', r2);
+    ok('  정면은 안 뒤집는다', g.draws.count('scale') === 0, '뒤집기 ' + g.draws.count('scale') + '회');
+
+    at(left, 0.5);
+    const r3 = shown(g, map);
+    ok('왼쪽으로 걸으면 옆모습을 안 뒤집는다',
+      r3 === 'side' && g.draws.count('scale') === 0, r3 + ' / 뒤집기 ' + g.draws.count('scale'));
+
+    // 멈춰 있으면 방향이 안 튄다. 기절·빙결은 위치 갱신 앞에서 빠지므로 이동 벡터가
+    // 그대로 남아야 한다 — 0 으로 덮으면 걷던 놈이 죽은 듯이 정면을 본다.
+    // **빙결이 아니라 기절로 잰다.** 빙결은 적을 파란색으로 물들여서(drawEnemies)
+    // 그려지는 것이 원본이 아니라 색 캔버스가 되고, 그러면 무엇을 그렸는지가 안 보인다.
+    e.stun = 5;
+    g.update(1 / 60);
+    const r4 = shown(g, map);
+    ok('  멈춰 있어도 보던 쪽을 지킨다', r4 === 'side', r4);
+    e.stun = 0;
+
+    // 대각선 경계. 지금 판에는 대각선 획이 없지만 규칙은 판과 무관하다 —
+    // |dx| 와 |dy| 가 엎치락뒤치락할 때 프레임마다 옆↔정면이 바뀌면 안 된다.
+    e.mvx = 0.02; e.mvy = 0.02;
+    const flat = new Set();
+    for (let i = 0; i < 12; i++) {
+      e.mvx = 0.02 + (i % 2 ? 1e-6 : -1e-6);
+      flat.add(g.enemyFacing(e));
+    }
+    ok('  |dx| 와 |dy| 가 같아도 안 떤다', flat.size === 1, [...flat].join(' / '));
+
+    // 처치 잔상도 죽는 순간의 방향으로 굳는다. 안 물려주면 옆으로 걷던 놈이
+    // 죽는 순간 정면으로 홱 돈다 — 잔상은 실루엣이 전부라 그 한 프레임이 다 보인다.
+    at(left, 0.6);
+    g.resetCorpses();
+    g.killEnemy(e, null, 'physical');
+    state.enemies.length = 0;
+    const r5 = shown(g, map);
+    ok('  잔상이 죽는 순간의 방향을 지킨다', r5 === 'side', r5);
+  }
+}
+
 // ── 처치 연출 ────────────────────────────────────────────────
 // 적이 사라지는 순간이 안 읽히는 문제라, 확인할 건 "죽였을 때만 난다"와
 // "무엇으로 죽였는지가 그림으로 갈린다" 둘이다.
