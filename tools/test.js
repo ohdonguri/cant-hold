@@ -4209,16 +4209,19 @@ function poolDeck(g, st) {
   const basePng = g.images.load(g.SPR_ASSET_PATH[K]);
   const name = (r, map) => (map.get(r.image) || '?') + (r.flip ? ' 뒤집힘' : '');
 
-  // ① 방향 그림이 하나도 없을 때. **여기가 이 티켓의 근거다** — 그림이 오기 전에는
-  //    화면이 한 픽셀도 안 바뀌어야 한다.
+  // ① 방향 그림이 하나도 없을 때. **[#93] 에서는 여덟 방향이 전부 기존 그림**이었고
+  //    (그림이 오기 전에 화면을 안 바꾸려고), **[#97] 부터 오른쪽 넷은 뒤집는다** —
+  //    기존 그림이 nw 라 뒤집으면 그대로 ne 다. 그림 한 장 없이 포탑이 좌우를 가른다.
   {
     const map = new Map([[basePng, '기존 그림']]);
-    const wrong = g.TOWER_DIRS.filter(d => {
-      const r = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, d));
-      return r.image !== basePng || r.flip;
-    });
-    ok('방향 그림이 없으면 여덟 방향이 전부 기존 그림이다', wrong.length === 0,
-      wrong.length ? wrong.map(d => d + '=' + name(drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, d)), map)).join(' ') : '없음');
+    const FLIP = new Set(['e', 'ne', 'se', 's']);
+    const got = g.TOWER_DIRS.map(d => [d, drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, d))]);
+    const notBase = got.filter(([, r]) => r.image !== basePng);
+    ok('방향 그림이 없으면 여덟 방향이 전부 기존 그림에서 나온다', notBase.length === 0,
+      notBase.length ? notBase.map(([d, r]) => d + '=' + name(r, map)).join(' ') : '없음');
+    const wrong = got.filter(([d, r]) => r.flip !== FLIP.has(d));
+    ok('  오른쪽 넷(e·ne·se·s)만 뒤집고 왼쪽 넷(w·nw·sw·n)은 그대로다', wrong.length === 0,
+      wrong.length ? wrong.map(([d, r]) => d + (r.flip ? ' 뒤집힘' : ' 안 뒤집힘')).join(' ') : '없음');
     const down = drew(() => g.drawSprite('grunt', g.ENEMY.grunt.color, 80, 80, 40, 40, 'down'));
     ok('  적도 마찬가지다', down.image === g.images.get(g.SPR_ASSET_PATH.grunt) || down.image !== null,
       down.flip ? '뒤집힘' : '안 뒤집힘');
@@ -4242,8 +4245,12 @@ function poolDeck(g, st) {
     ok('  뒤집어도 그린 자리가 그대로다',
       w.sx === -1 && w.tx - w.dx === w.dx + w.size && w.tx - (w.dx + w.size) === w.dx,
       `tx ${w.tx} dx ${w.dx} size ${w.size} sx ${w.sx}`);
+    const se = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'se'));
+    ok('  없는 방향은 가장 가까운 있는 방향으로 대신한다', se.image === ePng && !se.flip, name(se, map));
+    // ne 는 e 가 와도 기존 그림 뒤집기다 — 45° 옆의 e.png 보다 **정확히 ne** 인 그림이
+    // 이미 있다(nw 의 거울). ne.png 가 오면 그때 그것이 이긴다(체인에서 파일이 앞이다).
     const ne = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'ne'));
-    ok('  없는 방향은 가장 가까운 있는 방향으로 대신한다', ne.image === ePng && !ne.flip, name(ne, map));
+    ok('  ne 는 e 가 와도 기존 그림을 뒤집어 쓴다', ne.image === basePng && ne.flip, name(ne, map));
     // nw 는 기존 그림이 서 있는 자리다(요청서 §파일 이름). 방향 파일이 와도 그대로다.
     const nw = drew(() => g.drawSprite(K, KC, 80, 80, 56, 56, 'nw'));
     ok('  기존 그림 자리(nw)는 그림이 와도 그대로다', nw.image === basePng && !nw.flip, name(nw, map));
