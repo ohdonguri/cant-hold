@@ -180,6 +180,20 @@ await fp.screenshot({ path: join(OUT, 'feature-1024x578.jpg'), type: 'jpeg', qua
 console.log('  feature-1024x578.jpg');
 await fp.close();
 
+// ── 앱인토스 썸네일 1932x828 ───────────────────────────────
+// 피처 그래픽과 같은 모티프인데 비율이 달라(2.33:1) 원본을 따로 둔다
+// (store/thumb-toss.svg 머리 주석). JPG 도 같이 낸다 — 피처 그래픽이 PNG 용량으로
+// 업로드를 거부당한 전적이 있어서다(위 주석). 토스가 PNG 를 받으면 PNG 를 쓴다.
+const THUMB = readFileSync(join(ROOT, 'store', 'thumb-toss.svg'), 'utf8');
+const tp = await browser.newPage({ viewport: { width: 1932, height: 828 } });
+await tp.setContent(`<style>html,body{margin:0;padding:0;background:#0d1117}</style>${THUMB}`);
+await tp.waitForTimeout(150);
+await tp.screenshot({ path: join(OUT, 'thumb-1932x828.png') });
+console.log('  thumb-1932x828.png');
+await tp.screenshot({ path: join(OUT, 'thumb-1932x828.jpg'), type: 'jpeg', quality: 92 });
+console.log('  thumb-1932x828.jpg');
+await tp.close();
+
 await browser.close();
 if (bad.length) { console.error('\n어긋난 것:\n  ' + bad.join('\n  ')); process.exit(1); }
-console.log(`\n${OUT} 에 6장.`);
+console.log(`\n${OUT} 에 8장.`);

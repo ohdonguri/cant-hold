@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1932 828" width="1932" height="828">
+  <!--
+    앱인토스 콘솔 썸네일 원본(1932x828, 필수 1장). PNG 는 `node tools/store.mjs` 가
+    뽑는다. **PNG 를 직접 고치지 마라** — icons/icon.svg 와 같은 이유다(재현이 안 된다).
+
+    feature.svg(원스토어 1024x578)와 같은 모티프·같은 팔레트인데 **비율이 달라서
+    (2.33:1 vs 1.77:1) 늘리지 않고 다시 짰다** — 늘리면 격자가 직사각이 되고 타워가
+    퍼진다. 원스토어의 「하단 165px 금지」 같은 규정은 토스에는 없지만, 글자 없음·
+    중앙 배치는 그대로 따른다 — 카드가 제목을 따로 찍는 것은 어느 전시든 같다.
+
+    좌표 규칙은 feature.svg 에서 그대로 가져왔다:
+      · 통로는 양끝에서 들어와 중앙에서 한 번 올라갔다 내려온다(꺾임이 값을 한다)
+      · 타워 바닥은 통로 윗면에 닿는다: 통로 중심 430 - 폭 94/2 = 383.
+        타워 바닥이 401*s + ty = 383 이 되게 ty 를 역산한다. s=1.05 → ty=-38.
+        가로 중심: 966 - 256*1.05 = 697. **배율을 바꾸면 둘 다 다시 계산해라**
+      · 별 다섯이 「합성으로 키우는 게임」을 글자 대신 진다
+      · 다가오는 순서가 곧 밝기다(아이콘과 같은 규칙)
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#1d2533"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="gateGlow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"   stop-color="#f85149" stop-opacity="0"/>
+      <stop offset="0.7" stop-color="#f85149" stop-opacity="0.30"/>
+      <stop offset="1"   stop-color="#f85149" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0"    stop-color="#f0883e" stop-opacity="0.30"/>
+      <stop offset="0.55" stop-color="#f0883e" stop-opacity="0.10"/>
+      <stop offset="1"    stop-color="#f0883e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="footFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1117" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0d1117" stop-opacity="0.35"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1932" height="828" fill="url(#bg)"/>
+
+  <!-- 보드 격자. 92px 칸 — 1932/92=21, 828/92=9 로 딱 나눠떨어진다 -->
+  <g stroke="#222b3a" stroke-width="2" opacity="0.5">
+    <path d="M92 0V828M184 0V828M276 0V828M368 0V828M460 0V828M552 0V828M644 0V828M736 0V828M828 0V828M920 0V828M1012 0V828M1104 0V828M1196 0V828M1288 0V828M1380 0V828M1472 0V828M1564 0V828M1656 0V828M1748 0V828M1840 0V828"/>
+    <path d="M0 92H1932M0 184H1932M0 276H1932M0 368H1932M0 460H1932M0 552H1932M0 644H1932M0 736H1932"/>
+  </g>
+
+  <!-- 타워 뒤 후광 -->
+  <ellipse cx="966" cy="290" rx="430" ry="280" fill="url(#halo)"/>
+
+  <!-- 통로 -->
+  <path d="M0 520 H560 V430 H1372 V520 H1750" fill="none" stroke="#2b3546" stroke-width="94"/>
+  <path d="M0 520 H560 V430 H1372 V520 H1750" fill="none" stroke="#6b7688" stroke-width="5"
+        stroke-dasharray="20 28" opacity="0.6"/>
+
+  <!-- 다가오는 웨이브 -->
+  <g fill="none" stroke-width="21" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M48 486 L90 520 L48 554" stroke="#697484"/>
+    <path d="M112 486 L154 520 L112 554" stroke="#8b949e"/>
+  </g>
+
+  <!-- 보병. 양쪽에서 중앙으로 -->
+  <g fill="#8b949e">
+    <rect x="252" y="503" width="34" height="34" rx="5"/>
+    <rect x="336" y="503" width="34" height="34" rx="5"/>
+    <rect x="610" y="413" width="34" height="34" rx="5"/>
+    <rect x="700" y="413" width="34" height="34" rx="5"/>
+    <rect x="1200" y="413" width="34" height="34" rx="5"/>
+    <rect x="1290" y="413" width="34" height="34" rx="5"/>
+    <rect x="1480" y="503" width="34" height="34" rx="5"/>
+    <rect x="1570" y="503" width="34" height="34" rx="5"/>
+  </g>
+
+  <!-- 타워. 한가운데, s=1.05 (머리 주석의 역산) -->
+  <g transform="translate(697 -38) scale(1.05)">
+    <path fill="#301b0c" stroke="#301b0c" stroke-width="12" stroke-linejoin="round" d="
+      M163 193 H193 V254 H215 V193 H245 V254 H267 V193 H297 V254 H319 V193 H349 V254
+      H356 V292 H320 V360 H368 V401 H144 V360 H192 V292 H156 V254 H163 Z"/>
+    <g fill="#f0883e">
+      <rect x="163" y="193" width="30" height="61"/><rect x="215" y="193" width="30" height="61"/>
+      <rect x="267" y="193" width="30" height="61"/><rect x="319" y="193" width="30" height="61"/>
+    </g>
+    <g fill="#f6ba8f">
+      <rect x="163" y="193" width="30" height="12"/><rect x="215" y="193" width="30" height="12"/>
+      <rect x="267" y="193" width="30" height="12"/><rect x="319" y="193" width="30" height="12"/>
+    </g>
+    <rect x="156" y="254" width="200" height="38" fill="#f0883e"/>
+    <rect x="156" y="254" width="200" height="12" fill="#f6ba8f"/>
+    <rect x="156" y="286" width="200" height="6"  fill="#301b0c"/>
+    <rect x="192" y="292" width="128" height="68" fill="#f0883e"/>
+    <rect x="192" y="292" width="128" height="8"  fill="#f6ba8f"/>
+    <rect x="192" y="344" width="128" height="10" fill="#6c3d1c"/>
+    <rect x="192" y="354" width="128" height="6"  fill="#301b0c"/>
+    <rect x="214" y="304" width="84"  height="34" rx="4" fill="#ffffff"/>
+    <rect x="144" y="360" width="224" height="41" fill="#f0883e"/>
+    <rect x="144" y="360" width="224" height="10" fill="#f6ba8f"/>
+    <rect x="144" y="387" width="224" height="14" fill="#6c3d1c"/>
+  </g>
+
+  <!-- 별 다섯. 1.2배, 간격 48 — 폭 192, 시작 966-96=870.
+       타워 머리(193*1.05-38=165)에서 위로 -->
+  <g transform="translate(870 88) scale(1.2)">
+    <g fill="#f85149" stroke="#0d1117" stroke-width="3" stroke-linejoin="round">
+      <path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/>
+      <g transform="translate(40 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+      <g transform="translate(80 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+      <g transform="translate(120 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+      <g transform="translate(160 0)"><path d="M0 0 L5.3 10.7 L17.1 12.4 L8.6 20.7 L10.6 32.4 L0 26.9 L-10.6 32.4 L-8.6 20.7 L-17.1 12.4 L-5.3 10.7 Z"/></g>
+    </g>
+  </g>
+
+  <!-- 관문. 통로가 여기서 끝난다 -->
+  <rect x="1560" y="410" width="372" height="220" fill="url(#gateGlow)"/>
+  <rect x="1750" y="470" width="30" height="100" rx="15" fill="#f85149"/>
+
+  <!-- 바닥으로 서서히 어둡게 — 카드 UI 가 얹혀도 안 부딪는다 -->
+  <rect x="0" y="600" width="1932" height="228" fill="url(#footFade)"/>
+</svg>
