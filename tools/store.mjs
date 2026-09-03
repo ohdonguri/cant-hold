@@ -1,4 +1,4 @@
-// 스토어 등록물. 스크린샷 두 장과 피처 그래픽 한 장을 뽑는다.
+// 스토어 등록물. 원스토어(스크린샷 2 + 피처 그래픽)와 앱인토스(세로 3 + 가로 1 + 썸네일)를 뽑는다.
 //
 //   node tools/store.mjs [출력디렉토리]      기본값 .store
 //
@@ -53,14 +53,36 @@ mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 const bad = [];
 
-// ── 게임 스크린샷 두 장 ────────────────────────────────────
-const page = await browser.newPage({ viewport: { width: 360, height: 640 }, deviceScaleFactor: 2 });
-page.on('pageerror', e => bad.push('페이지 에러: ' + e));
-await page.addInitScript(SEED_SCRIPT);
-await page.goto(URL);
-await page.evaluate(() => { const el = document.getElementById('ebIntro'); if (el) el.remove(); });
+// ── 게임 스크린샷 ──────────────────────────────────────────
+// 같은 장면을 스토어마다 다른 크기로 찍는다. 장면을 함수로 묶고 크기별로 페이지를
+// 새로 연다 — 뷰포트만 바꾸면 레이아웃이 그 크기로 다시 흐르므로, 찍은 그대로가
+// 그 기기에서 보이는 화면이다(늘리거나 자르지 않는다).
+//
+//   원스토어    720x1280   viewport 360x640 @2 — 위 「크기를 720x1280 으로」 주석의 네 규칙
+//   앱인토스    636x1048   viewport 318x524 @2 — 콘솔 요구 규격 그대로. 세로형 최소 3장
+//
+const openGamePage = async (w, h, { cloudUi = true } = {}) => {
+  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+  page.on('pageerror', e => bad.push('페이지 에러: ' + e));
+  await page.addInitScript(SEED_SCRIPT);
+  // 토스판 화면을 찍을 때는 CLOUD_UI 를 끈 본문을 먹인다 — 토스판이 실제로 그렇다
+  // (toss/sync.mjs · tools/android-sync.mjs 가 같은 값을 끈다). 스테이지 목록의
+  // 「구글로 로그인」 줄이 빠지는 것이 눈에 보이는 차이의 전부다. 콘솔의
+  // 「자체등급분류 게임물 화면 = 앱인토스 게임물 화면」 대조도 이 컷으로 낸다 —
+  // 실물과 다른 화면을 심사에 내면 안 된다.
+  if (!cloudUi) await page.route('**/index.html', route => route.fulfill({
+    body: readFileSync(join(ROOT, 'index.html'), 'utf8')
+      .replace('const CLOUD_UI = true;', 'const CLOUD_UI = false;'),
+    contentType: 'text/html',
+  }));
+  await page.goto(URL);
+  await page.evaluate(() => { const el = document.getElementById('ebIntro'); if (el) el.remove(); });
+  await page.evaluate(bootScene);
+  return page;
+};
 
-const shot = async (name, check) => {
+const mkShot = page => async (name, check) => {
+
   const why = await page.evaluate(check);
   if (why) bad.push(`${name}: ${why}`);
   await page.screenshot({ path: join(OUT, name + '.png') });
@@ -74,7 +96,7 @@ const shot = async (name, check) => {
 // 판에 들어가 성급이 섞인 보드를 만든다. **★1 만 늘어놓으면 이 게임이 머지 게임인
 // 것이 안 보인다** — 스토어 이름이 「이웨이브는못막습니다」라도 첫인상은 타워 위의
 // 별이 만든다. 그래서 1·2·3·5 를 섞고 5 를 둘 둔다.
-await page.evaluate(() => {
+const bootScene = () => {
   __reseed();
   restart();
   applyBundle({ v: 1, unlocked: STAGES.length, best: [], run: null });
@@ -89,11 +111,11 @@ await page.evaluate(() => {
   window.__put = (kind, star, gx, gy) => state.towers.push({
     id: id++, gx, gy, kind, star, b3: 'A', b5: 'A1', t7: null,
     cd: 0, angle: -Math.PI / 2, flash: 0, streak: 0, lastTarget: null, arcKills: 0 });
-});
+};
 
 // ── 1. 전투 중 ─────────────────────────────────────────────
 // 적이 화면에 있어야 「디펜스」로 읽힌다. 웨이브를 실제로 돌려서 적을 통로에 올린다.
-await page.evaluate(() => {
+const sceneWave = page => page.evaluate(() => {
   __reseed();
   window.update = window.__update;
   // 자리는 게임 규칙으로 고른다. `canPlace` 는 점유 맵을 받고(occupancy),
@@ -124,18 +146,17 @@ await page.evaluate(() => {
   state.gold = 340;                              // 실제로 플레이한 사람의 지갑
   __freeze();
 });
-await page.waitForTimeout(200);
-await shot('screenshot-1-wave', () => {
+const checkWave = () => {
   if (state.phase !== 'wave') return '웨이브 중이 아니다: ' + state.phase;
   if (!state.enemies.length) return '화면에 적이 없다';
   if (!state.towers.some(t => t.star >= 5)) return '5성 타워가 없다';
   if (state.toast) return '토스트가 떠 있다: ' + state.toast.text;
   return null;
-});
+};
 
 // ── 2. 배치 · 사거리 ───────────────────────────────────────
 // 두 번째 장은 「무엇을 하는 게임인가」를 말한다. 타워를 하나 골라 사거리 원을 띄운다.
-await page.evaluate(() => {
+const sceneBuild = page => page.evaluate(() => {
   __reseed();
   window.update = window.__update;
   state.phase = 'build';
@@ -147,13 +168,48 @@ await page.evaluate(() => {
   state.gold = 340;
   __freeze();
 });
-await page.waitForTimeout(200);
-await shot('screenshot-2-build', () => {
+const checkBuild = () => {
   if (state.phase !== 'build') return '배치 단계가 아니다: ' + state.phase;
   if (!state.selected) return '선택된 타워가 없다(사거리 원이 안 그려진다)';
   if (state.enemies.length) return '적이 남아 있다';
   return null;
+};
+
+// ── 3. 스테이지 목록 (토스 세 번째 장) ──────────────────────
+// 판 스무 개가 「콘텐츠 양」을 말한다 — 전투·배치 다음에 보여줄 것은 그것이다.
+// bootScene 이 전 판 해금 번들을 넣어 두었으므로 restart 로 목록에 돌아가기만 하면
+// 잠긴 자물쇠 없이 스무 판이 선다.
+const sceneStages = page => page.evaluate(() => {
+  __reseed();
+  window.update = window.__update;
+  restart();
+  __freeze();
 });
+const checkStages = () => state.phase === 'stage' ? null : '스테이지 목록이 아니다: ' + state.phase;
+
+// 원스토어 두 장
+let page = await openGamePage(360, 640);
+let shot = mkShot(page);
+await sceneWave(page);
+await page.waitForTimeout(200);
+await shot('screenshot-1-wave', checkWave);
+await sceneBuild(page);
+await page.waitForTimeout(200);
+await shot('screenshot-2-build', checkBuild);
+await page.close();
+
+// 앱인토스 세 장
+page = await openGamePage(318, 524, { cloudUi: false });
+shot = mkShot(page);
+await sceneWave(page);
+await page.waitForTimeout(200);
+await shot('toss-screen-1-wave', checkWave);
+await sceneBuild(page);
+await page.waitForTimeout(200);
+await shot('toss-screen-2-build', checkBuild);
+await sceneStages(page);
+await page.waitForTimeout(200);
+await shot('toss-screen-3-stages', checkStages);
 await page.close();
 
 // ── 피처 그래픽 1024x578 ───────────────────────────────────
@@ -194,6 +250,43 @@ await tp.screenshot({ path: join(OUT, 'thumb-1932x828.jpg'), type: 'jpeg', quali
 console.log('  thumb-1932x828.jpg');
 await tp.close();
 
+// ── 앱인토스 가로형 1504x741 ───────────────────────────────
+// 세로 게임이라 가로로 찍을 화면이 없다. 대신 방금 찍은 세로 컷 셋을 썸네일과 같은
+// 배경(그라데이션 + 격자) 위에 나란히 얹는다 — 게임 화면 그대로라 과장이 없고,
+// 글자는 안 넣는다(store/thumb-toss.svg 머리 주석과 같은 이유).
+// 액자 388x640 은 원본 636x1048 과 비율이 0.0006 차이라 slice 로 깎여도 픽셀 한 줄이다.
+const b64 = f => readFileSync(join(OUT, f)).toString('base64');
+const frame = (x, file) => `
+  <g>
+    <rect x="${x - 6}" y="44" width="400" height="652" rx="26" fill="#222b3a"/>
+    <clipPath id="c${x}"><rect x="${x}" y="50" width="388" height="640" rx="20"/></clipPath>
+    <image x="${x}" y="50" width="388" height="640" clip-path="url(#c${x})"
+           href="data:image/png;base64,${b64(file)}" preserveAspectRatio="xMidYMid slice"/>
+  </g>`;
+const WIDE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1504 741" width="1504" height="741">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#1d2533"/><stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+  <rect width="1504" height="741" fill="url(#bg)"/>
+  <g stroke="#222b3a" stroke-width="2" opacity="0.5">
+    ${Array.from({ length: 16 }, (_, i) => `<path d="M${(i + 1) * 92} 0V741"/>`).join('')}
+    ${Array.from({ length: 8 }, (_, i) => `<path d="M0 ${(i + 1) * 92}H1504"/>`).join('')}
+  </g>
+  ${frame(114, 'toss-screen-1-wave.png')}
+  ${frame(558, 'toss-screen-2-build.png')}
+  ${frame(1002, 'toss-screen-3-stages.png')}
+</svg>`;
+const wp = await browser.newPage({ viewport: { width: 1504, height: 741 } });
+await wp.setContent(`<style>html,body{margin:0;padding:0;background:#0d1117}</style>${WIDE}`);
+await wp.waitForTimeout(150);
+await wp.screenshot({ path: join(OUT, 'toss-screen-wide.png') });
+console.log('  toss-screen-wide.png');
+await wp.screenshot({ path: join(OUT, 'toss-screen-wide.jpg'), type: 'jpeg', quality: 92 });
+console.log('  toss-screen-wide.jpg');
+await wp.close();
+
 await browser.close();
 if (bad.length) { console.error('\n어긋난 것:\n  ' + bad.join('\n  ')); process.exit(1); }
-console.log(`\n${OUT} 에 8장.`);
+console.log(`\n${OUT} 에 16장.`);
