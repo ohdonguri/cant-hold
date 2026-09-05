@@ -301,23 +301,39 @@ function seedRandom() {
 //      이 세 줄로 밸런스를 판정하지 않는다 — 판정하는 자는 210판짜리 `npm run curve`
 //      와 8판 x 40런짜리 `npm test` 밸런스 블록이고, 근거는 DESIGN §난이도의 눈금에 있다
 //
+// [2026-09 난이도 완만화 (#105)] **여섯 줄 중 다섯을 새로 떴다.** `CFG.START_LIFE`
+// 20 → 30 과 ⑬⑭ `hpMult` 1.0 → 0.9 를 반영한 값이다(index.html §START_LIFE).
+// 통과시키려고 맞춘 숫자가 아니라는 근거 셋:
+//   ① **CASES 세 줄의 난수 호출 수가 한 자리도 안 움직였다**(903 · 909 · 1703).
+//      관문 체력은 난수를 안 뽑고 판의 길이도 안 바꿨다 — 스트림이 밀렸다면 그건
+//      이 변경이 아니라 다른 것이다
+//   ② **바뀐 칸이 `life` 하나다.** 0번 9 → 19 · 3번 5 → 15 로 **정확히 +10**,
+//      곧 늘린 체력 그대로다. towers·gold 는 문자열까지 같다
+//   ③ 1번만 `over w25` → `clear w25` 로 결과가 갈렸는데, 그게 이 티켓이 노린
+//      것이다 — 옛 값이 `life 0` 이라 **딱 한 끗 모자라 지던 판**이고 10 을 더
+//      받아 깼다. 웨이브 수가 같아서 난수도 909 그대로다
+//
+// **퇴화 블록은 3번만 움직였고 거기서만 난수가 밀렸다**(625 → 658 · `over w29` →
+// `over w30`). 배치 개선이 빠진 경로라 체력 10 을 판을 한 웨이브 더 버티는 데 쓰고,
+// **웨이브가 하나 늘면 소환·롤이 늘어 난수를 더 쓴다.** 0번은 `life` 만 +10,
+// 1번은 한 글자도 안 바뀌었다(154) — stage 1 은 ⑬⑭ 도 아니고 체력이 남던 판이다.
 const CASES = [
   {
     name: '0 / 파쇄·관측·조폐',
     opts: { stage: 0, deck: ['shredder', 'marksman', 'mint'] },
-    expect: '{"result":"clear","wave":20,"life":9,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
+    expect: '{"result":"clear","wave":20,"life":19,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
     rand: 903,
   },
   {
     name: '1 / 서리·박격·마력',
     opts: { stage: 1, deck: ['frost', 'mortar', 'arc'] },
-    expect: '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
+    expect: '{"result":"clear","wave":25,"life":5,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":988}',
     rand: 909,
   },
   {
     name: '3 / 침식·마력·관측 (B,B1)',
     opts: { stage: 3, deck: ['eroder', 'arc', 'marksman'], branch3: 'B', branch5: 'B1' },
-    expect: '{"result":"clear","wave":30,"life":5,"towers":["arc7","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":1605}',
+    expect: '{"result":"clear","wave":30,"life":15,"towers":["arc7","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":1605}',
     rand: 1703,
   },
 ];
@@ -368,9 +384,9 @@ for (const c of CASES) {
 // 고쳤는데 여기가 움직였으면 배치 말고 다른 것이 샌 것이고, index.html 밸런스를
 // 고쳤는데 여기가 안 움직였으면 퇴화 경로가 실제 게임을 안 태우고 있는 것이다.
 const DEGENERATE = [
-  '{"result":"clear","wave":20,"life":9,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
+  '{"result":"clear","wave":20,"life":19,"towers":["marksman2","marksman3","marksman5","marksman6","mint6","shredder7"],"maxStar":7,"gold":1254}',
   '{"result":"over","wave":25,"life":0,"towers":["arc6","frost7","mortar1","mortar2","mortar3","mortar5","mortar6"],"maxStar":7,"gold":37}',
-  '{"result":"over","wave":29,"life":0,"towers":["arc7","eroder3","eroder4","eroder7","marksman7"],"maxStar":7,"gold":51}',
+  '{"result":"over","wave":30,"life":0,"towers":["arc7","eroder2","eroder2","eroder4","eroder5","eroder7","marksman7"],"maxStar":7,"gold":31}',
 ];
 // 지점별로 갈라 센 값(위 CASES 표와 같은 방식):
 //   케이스   소환 자리      7성 특성 롤   관측 치명      합계
@@ -400,7 +416,7 @@ const DEGENERATE = [
 // hpMult 강화만 남으므로 판이 `over w30` → `over w29` 로 **나빠지고**, 출시 블록은
 // k=6 의 배치 개선이 그걸 덮어 `over w30` → `clear w30` 이 된다. 한쪽만 움직였으면
 // 그때가 회귀다.
-const DEGENERATE_RAND = [153, 154, 625];
+const DEGENERATE_RAND = [153, 154, 658];
 
 console.log('\n  ── 노브를 퇴화값(SUMMON_SAMPLES = 1)으로 두면 #35 이전과 같아야 한다 ──');
 CASES.forEach((c, i) => {

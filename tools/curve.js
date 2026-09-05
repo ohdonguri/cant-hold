@@ -50,6 +50,12 @@ const { load, greedy, SUMMON_SAMPLES } = require('./sim.js');
 const SEED = 12345;
 const TRIALS = Number(process.env.TRIALS || 6);
 
+// CFG 상수를 덮어쓰고 재는 통로. **밸런스 손잡이를 고를 때만 쓴다** —
+// `CFG_OVERRIDE='{"HP_GROWTH":1.15}' npm run curve` 처럼 준다. 인자를 준 실행은
+// 출시 값을 잰 것이 아니므로 표 아래에 그 사실이 찍힌다(아래 태그). 값을 정한 뒤에는
+// index.html 을 고치고 **인자 없이** 다시 재서 그 표를 DESIGN 에 올린다.
+const CFG_OVERRIDE = process.env.CFG_OVERRIDE ? JSON.parse(process.env.CFG_OVERRIDE) : {};
+
 // DESIGN §밸런스 표가 쓰는 클리어 센티넬. **`전체평균` 열 전용이다.**
 const CLEAR_SENTINEL = 99;
 
@@ -88,7 +94,7 @@ function measure(st, waveMax, DECKS) {
     const w = seeded(() => {
       const out = [];
       for (let i = 0; i < TRIALS; i++) {
-        const g = load({});
+        const g = load(CFG_OVERRIDE);
         const r = greedy(g, { stage: st, deck });
         out.push(r.result === 'clear' ? CLEAR_SENTINEL : r.wave);
       }
@@ -112,10 +118,10 @@ function measure(st, waveMax, DECKS) {
 }
 
 // 판 목록을 하드코딩하지 않는다. 박아 두면 판이 늘었을 때 **조용히 안 잰다**(place.js 와 같은 규칙).
-const { STAGES } = load();
+const { STAGES } = load(CFG_OVERRIDE);
 const rows = [];
 for (let st = 0; st < STAGES.length; st++) {
-  const g = load({});
+  const g = load(CFG_OVERRIDE);
   g.loadStage(st);
   // 덱 목록도 박아 두지 않는다. 판마다 살아 있는 허용 목록에서 다시 만든다.
   rows.push(measure(st, g.CFG.WAVE_MAX, combos(g.allowedKinds(st), 3)));
