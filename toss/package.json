@@ -1,6 +1,6 @@
 {
   "name": "cant-hold-toss",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "이번 웨이브는 못 막습니다 — 앱인토스 미니앱판. 게임은 웹판(../index.html) 한 벌뿐이고 sync.mjs 가 떠 온다.",
   "type": "module",
