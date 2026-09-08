@@ -12,6 +12,8 @@
 //                                            게다가 toss/ 옆에 icons/ 가 없어서
 //                                            vite 가 참조를 못 풀고 빌드가 죽는다
 //   4. 토스 런타임(./toss.js) 삽입        →  광고·화면 적응. 게임 코드는 안 건드린다
+//   5. 인트로의 빈 버전 자리              →  채널 버전을 찍는다. 기기에는 콘솔이 없어서
+//                                            QR 로 켠 판이 어느 판인지 화면에서만 갈린다
 //
 // **서비스워커는 애초에 없다.** cant-hold 는 등록 코드가 한 줄도 없어서 걷어낼 것이
 // 없다 — 아래 남으면 안 되는 목록이 그 사실을 계속 확인한다.
@@ -129,6 +131,18 @@ s = s.replace(GAME_END,
   + '<script type="module" src="./toss.js"></script>\n'
   + '<!-- ══');
 
+// ── 5) 빌드 도장 ─────────────────────────────────────────────
+// **기기에는 콘솔이 없다.** QR 로 켠 판이 방금 올린 것인지 예전 것인지 화면에서 가릴
+// 방법이 없으면 「고쳤는데 안 보인다」와 「예전 판을 켰다」를 못 나눈다 — 실제로 그
+// 구분이 안 돼서 배포 한 사이클을 태웠다(`toss.js` 의 `AD_DEBUG` 와 같은 사정).
+//
+// 웹판은 이 자리가 **빈 채로** 있고 인트로 스크립트가 그것을 걷는다. 채우는 것은
+// 여기뿐이라, 화면에 버전이 보이면 그것은 반드시 토스판이다.
+const VER_SLOT = '<p class="ebVer"></p>';
+findOnce(VER_SLOT, '버전 도장 자리');
+const version = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).version;
+s = s.replace(VER_SLOT, `<p class="ebVer">v${version}</p>`);
+
 // ── 남으면 안 되는 것들 ──────────────────────────────────────
 // 하나라도 걸리면 위 잘라내기가 어긋난 것이다.
 for (const [needle, why] of [
@@ -153,6 +167,7 @@ for (const [needle, why] of [
   ['const CLOUD_UI = false', '계정 스텁'],
   ['./toss.js', '토스 런타임'],
   ['ebIntro', 'EASTBIRD 인트로'],
+  ['class="ebVer">v', '빌드 도장'],
 ]) {
   if (!s.includes(needle)) throw new Error(`토스판에서 ${why} 가 사라졌다 (${needle})`);
 }
