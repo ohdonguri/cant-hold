@@ -4067,6 +4067,8 @@ const SDK = 'https://www.gstatic.com/firebasejs/11.0.2/';
 
 const cloud = { ready: false, user: null, busy: false, msg: '', ok: null };
 let cloudLoading = null;             // SDK 를 받아오는 중인 약속
+let cloudQueue = Promise.resolve();  // 같은 탭의 저장 순서를 지킨다
+let cloudSyncedUser = null;          // 첫 동기화에서만 서버 이어하기를 가져온다
 
 // 팝업은 사용자가 누른 그 순간에 열어야 브라우저가 막지 않는다. SDK 를 클릭 뒤에
 // 받아오면 그 사이에 제스처가 끊겨서 첫 클릭은 아무 일도 안 일어나고 두 번째부터
@@ -4092,12 +4094,14 @@ async function cloudInit() {
     signInWithPopup: authMod.signInWithPopup,
     signOut: authMod.signOut,
     onAuthStateChanged: authMod.onAuthStateChanged,
-    doc: dbMod.doc, getDoc: dbMod.getDoc, setDoc: dbMod.setDoc,
+    doc: dbMod.doc, runTransaction: dbMod.runTransaction,
     serverTimestamp: dbMod.serverTimestamp,
   };
   fb.onAuthStateChanged(fb.auth, async u => {
     cloud.user = u;
     cloud.ready = true;
+    cloud.busy = false;
+    if (!u) cloudSyncedUser = null;
     if (u) await cloudPull();
   });
   return fb;
@@ -4106,41 +4110,66 @@ async function cloudInit() {
 // 로그인하면 서버 것과 로컬 것을 합친다. 어느 쪽도 줄어들면 안 된다.
 async function cloudPull() {
   if (!fb || !cloud.user) return;
+  const user = cloud.user;
   try {
     cloud.busy = true;
-    const snap = await fb.getDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid));
-    const remote = snap.exists() ? snap.data() : null;
-    const merged = mergeBundle(saveBundle(), remote);
-    applyBundle(merged);
-    savedRun = merged.run || null;
-    saveLocal();
-    await cloudSave();
-    if (cloud.ok !== false) cloud.msg = '기록을 불러왔다';
-  } catch (e) {
-    cloud.ok = false;
-    cloud.msg = String((e && e.code) || e).includes('permission')
-      ? '읽기 거부됨 — 서버 규칙을 확인해야 한다'
-      : '기록을 못 불러왔다';
+    const saved = await cloudSave();
+    if (cloud.user === user && saved) cloud.msg = '기록을 불러왔다';
   } finally {
-    cloud.busy = false;
+    if (cloud.user === user) cloud.busy = false;
   }
+}
+
+// 읽기와 쓰기를 분리하면 로그인 조회 중 persist(), 조회 실패 뒤 저장, 또는 다른
+// 기기의 낡은 저장이 서버 기록을 덮어쓴다. 매번 트랜잭션 안에서 최신 기록과 합친다.
+// 오프라인/읽기 거부 때는 쓰기도 하지 않는다. 로컬 기록은 persist() 가 이미 남긴다.
+function cloudSave() {
+  if (!fb || !cloud.user) return Promise.resolve(false);
+  const user = cloud.user;
+  cloudQueue = cloudQueue.then(() => cloudWrite(user));
+  return cloudQueue;
 }
 
 // 실패를 삼키면 안 된다. 규칙이 안 올라가 있으면 로그인은 되는데 저장만 조용히
 // 실패하고, 기기를 바꾼 뒤에야 알게 된다. 결과를 화면에 남긴다.
-async function cloudSave() {
-  if (!fb || !cloud.user) return;
+async function cloudWrite(user) {
+  if (cloud.user !== user) return false;
+  const ref = fb.doc(fb.db, SAVE_PATH, user.uid);
+  const local = saveBundle();
+  const restore = cloudSyncedUser !== user && (state.phase === 'stage' || state.phase === 'deck');
   try {
-    await fb.setDoc(fb.doc(fb.db, SAVE_PATH, cloud.user.uid),
-      { ...saveBundle(), updatedAt: fb.serverTimestamp() });
+    const merged = await fb.runTransaction(fb.db, async tx => {
+      const snap = await tx.get(ref);
+      // 계정이 바뀐 뒤 도착한 응답은 새 계정과 로컬 어디에도 적용하지 않는다.
+      if (cloud.user !== user) return null;
+      const next = mergeBundle(local, snap.exists() ? snap.data() : null);
+      // 클리어 기록은 단조 증가지만 이어하기는 완료/포기 때 null 로 지워야 한다.
+      if (!restore) next.run = local.run;
+      tx.set(ref, { ...next, updatedAt: fb.serverTimestamp() });
+      return next;
+    });
+    if (cloud.user !== user || !merged) return false;
+    // 트랜잭션은 재시도될 수 있다. 확정된 뒤에만 로컬을 갱신하고, 통신 중 새로
+    // 쌓인 진행도와 시작한 판은 보존한다.
+    const current = saveBundle();
+    const combined = mergeBundle(current, merged);
+    combined.run = restore && (state.phase === 'stage' || state.phase === 'deck') && current.run === local.run
+      ? merged.run : current.run;
+    applyBundle(combined);
+    savedRun = combined.run || null;
+    saveLocal();
+    cloudSyncedUser = user;
     cloud.ok = true;
     cloud.msg = '클라우드에 저장됨';
+    return true;
   } catch (e) {
+    if (cloud.user !== user) return false;
     cloud.ok = false;
     const code = String((e && e.code) || e);
     cloud.msg = code.includes('permission')
       ? '저장 거부됨 — 서버 규칙을 확인해야 한다'
       : '저장 실패 — 이 기기에만 남는다';
+    return false;
   }
 }
 
