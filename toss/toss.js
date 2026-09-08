@@ -56,6 +56,27 @@ const AD_DEBUG = false;
 // 35px 가 된다(실측). 여섯 자리가 통째로 줄어드는 것이라 보드 위에는 안 둔다.
 const BOARDLESS = new Set(['stage', 'deck']);
 
+// ── 일시정지는 예외다 ────────────────────────────────────────
+// **셀이 줄어드는 것이 왜 문제였는지를 보면 정지가 왜 예외인지 나온다.** 위 35px 이
+// 문제인 이유는 「빈 칸을 탭해 소환」(#68)의 아이콘 셋이 칸에 비해 커져서 칸 밖으로
+// 나가기 때문이다. 그런데 **정지 중에는 배치도 합성도 안 된다** — 그 화면이 스스로
+// 「멈춰 있는 동안에는 배치도 합성도 되지 않습니다」라고 적고 있고, `pointerdown` 의
+// 정지 분기가 탭을 통째로 먹는다. 즉 셀이 줄어서 나빠질 조작이 **하나도 없다.**
+//
+// 화면도 이미 덮여 있다 — `drawPause` 가 95% 불투명으로 판을 가린다. 보드가 안
+// 보이는 화면이니 「보드 위에는 안 둔다」의 취지에도 안 걸린다. 오히려 정지 화면은
+// 아래쪽이 「아무 곳이나 눌러 계속」 한 줄뿐이라 자리를 내주기 가장 쉬운 화면이다.
+//
+// `state.paused` 는 `state.phase` 와 **다른 축이다**(정지 중에도 phase 는 build·wave
+// 그대로다). 그래서 화면을 하나의 키로 합쳐 본다 — 안 합치면 정지를 눌러도 phase 가
+// 안 바뀌어서 `tick` 이 아무 일도 안 한다.
+function readPaused() {
+  try { return !!state.paused; } catch { return false; }
+}
+function wantsBanner(phase, paused) {
+  return BOARDLESS.has(phase) || paused;
+}
+
 // 게임의 `state` 는 인라인 classic 스크립트가 `const` 로 잡은 이름이다. 그런 이름은
 // **전역 렉시컬 환경**에 들어가므로 `globalThis.state` 로는 안 잡히고 맨 이름으로만
 // 보인다. 게임이 안 실렸을 때 여기서 ReferenceError 로 같이 죽지 않게 감싼다.
@@ -236,12 +257,18 @@ function detachBanner() {
 }
 
 // ── 화면을 따라간다 ──────────────────────────────────────────
-// 게임에 갈고리를 심지 않고 `state.phase` 만 본다. 게임 코드를 안 건드리는 것이
+// 게임에 갈고리를 심지 않고 `state` 만 읽는다. 게임 코드를 안 건드리는 것이
 // 「게임은 한 벌만 둔다」의 실질이라, 관찰은 밖에서 한다.
-let prev = null;
+//
+// **전면 광고는 `phase` 만 본다.** 정지는 판이 끝난 것이 아니므로 전면을 띄우면 안 된다.
+// 배너만 정지를 같이 본다(위 §일시정지는 예외다).
+let prev = null;        // 직전 phase. 전면 광고가 「판이 방금 끝났다」를 가르는 축이다
+let prevWant = false;   // 직전에 배너를 원했는가. 정지 토글은 phase 를 안 바꾸므로 따로 든다
 
 function tick() {
   const phase = readPhase();
+  const want = wantsBanner(phase, readPaused());
+
   if (phase !== prev) {
     const was = prev;
     prev = phase;
@@ -249,11 +276,13 @@ function tick() {
     // 판이 끝난 그 한 번만. 결과 화면에 머무는 동안 다시 뜨지 않는다.
     if ((phase === 'clear' || phase === 'over') && was !== phase) showFullScreen();
 
-    if (BOARDLESS.has(phase)) attachBanner();
-    else detachBanner();
-
     // 판에 들어갈 때 다음 것을 미리 받아 둔다. 부팅에서 실패했어도 여기서 한 번 더.
     if (phase === 'build' && was === 'deck') preloadFullScreen();
+  }
+
+  if (want !== prevWant) {
+    prevWant = want;
+    if (want) attachBanner(); else detachBanner();
   }
   setTimeout(tick, 200);
 }
