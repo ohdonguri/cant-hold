@@ -5290,6 +5290,20 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
 
+  // ── 판이 끝났으면 여기가 가장 먼저 이긴다 (#122) ─────────────
+  // **아래 모달 분기들보다 위여야 한다.** 전에는 `state.choice`·`state.picker`
+  // 아래에 있었는데, 마지막 웨이브가 끝나는 순간 분기 모달이 떠 있으면
+  //   · `state.choice` 분기가 탭을 통째로 먹고 `return` 한다
+  //   · 화면에는 `drawOverlay` 가 그린 「클리어」가 덮여 있어 사람은 그것을 누른다
+  //   · 모달 선택지는 그 밑에 가려 안 보인다
+  // 라서 **영구 무반응**이었다(실제 신고). 소환 창이 열린 채 끝나면 첫 탭을 그
+  // 창이 먹어 「한 번 눌렀는데 안 간다」가 됐다.
+  //
+  // 판이 끝나면 모달로 할 수 있는 일이 하나도 없다 — 분기를 골라도 그 타워는 이미
+  // 사라질 판의 것이고, 소환은 애초에 안 된다. 그래서 순서만으로 고친다.
+  // `restart()` 가 `state` 를 새로 깔면서 모달도 같이 치운다.
+  if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
+
   // 목록이 스크롤되므로 **탭은 pointerup 에서 처리한다**(아래 `stageTap`).
   // pointerdown 에서 바로 고르면 끌기 시작이 곧 판 선택이 되어 스크롤을 못 한다.
   // 여기서는 끌기만 시작한다.
@@ -5332,8 +5346,6 @@ canvas.addEventListener('pointerdown', e => {
     state.picker = null;                                // 바깥을 누르면 닫는다(취소)
     return;
   }
-
-  if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
 
   const b = hitButton(px, py);
   if (b) { if (b.enabled()) b.fn(); return; }
@@ -5513,12 +5525,15 @@ window.addEventListener('popstate', e => {
 function goBack() {
   // mergePlace(#24)·소환 피커(#68) 둘 다 `state.picker` 다. 지우는 것으로 닫는 것은
   // ESC 와 한 글자도 안 다르다 — 두 모드 다 커밋 전에는 판을 안 건드린다(2.10).
+  // 탭과 **같은 순서다**(#122). 판이 끝났으면 모달이 떠 있어도 그것부터 나간다 —
+  // 여기가 아래 `state.choice` 밑에 있으면 「분기 선택은 안 닫는다」가 끝난 판에까지
+  // 걸려서 뒤로가기도 같이 막힌다.
+  if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
   if (state.picker) { state.picker = null; return; }
   if (state.choice) return;                      // 분기 선택은 되돌릴 수 없으니 안 닫는다
   if (state.paused) { togglePause(); return; }   // 덮개를 먼저 걷는다
   if (state.phase === 'stage') return;           // 목록이 끝이다. 더 뒤는 페이지 밖이다
   if (state.phase === 'deck') { restart(); return; }
-  if (state.phase === 'over' || state.phase === 'clear') { restart(); return; }
   // 판 중이다. **여기서 바로 안 나간다.** 나가면 잃는 것이 phase 마다 다르고(준비
   // 단계는 통째로 이어하기로 남지만 웨이브 중에는 그 웨이브가 날아간다), 그 사실을
   // 적어 두는 자리가 정지 화면의 나가기 줄이다(exitRunNote). 안드로이드에서 게임 중
