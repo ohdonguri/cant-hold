@@ -39,6 +39,17 @@ const AD = {
   banner: 'ait.v2.live.ce271d27543a4493',  // 콘솔 > 광고 > 배너 광고 그룹 ID
 };
 
+// ── 광고가 왜 안 뜨는지 화면에 적는다 ────────────────────────
+// **기기에는 콘솔이 없다.** 미니앱은 QR 로 토스 앱 안에서 도는 것이라 `console.warn`
+// 을 아무도 못 읽는다. 그런데 이 파일의 실패 경로는 전부 조용했다 — `isSupported()`
+// 가 false 면 `return`, `attachBanner` 가 던지면 `catch`, 광고가 안 차면 높이 0.
+// **셋이 화면에서 똑같이 「아무것도 없음」으로 보인다.** 배너가 안 뜬다는 신고를
+// 받고 나서 어느 쪽인지 가릴 방법이 없었던 것이 이 티켓의 실제 비용이다.
+//
+// `AD_DEBUG` 가 켜져 있으면 배너 자리에 한 줄을 그린다. **출시 값은 false 다** —
+// 진단용 빌드에서만 켜서 말고, 원인을 잡으면 다시 끈다.
+const AD_DEBUG = false;
+
 // 보드가 없는 화면. 여기서만 배너를 띄운다.
 // 'build'·'wave'·'over'·'clear' 는 전부 보드가 깔린 화면이다(over·clear 는 보드 위에
 // 결과를 덮어 그린다). 낮은 화면(375x667)에서 셀은 이미 41px 인데 배너 60px 를 빼면
@@ -96,7 +107,16 @@ function showFullScreen() {
 //
 // 덮어쓰는 게 아니라 **자리를 내주는** 이유는 이 화면들의 아래쪽이 이미 차 있기
 // 때문이다 — 목록은 「이어하기」 줄, 덱은 「시작 · 뒤로」 줄이 바닥에 붙는다.
-let host = null, slot = null, ro = null;
+let host = null, slot = null, ro = null, badge = null;
+
+// 마지막으로 무슨 일이 있었는가. `AD_DEBUG` 가 이걸 그린다.
+let adState = 'boot';
+
+function setAdState(v) {
+  adState = v;
+  if (!AD_DEBUG || !badge) return;
+  badge.textContent = 'AD ' + v;
+}
 
 function ensureHost() {
   if (host) return host;
@@ -108,6 +128,16 @@ function ensureHost() {
     + 'touch-action:auto;'
     + 'display:flex;justify-content:center;';
   document.body.appendChild(host);
+
+  if (AD_DEBUG) {
+    badge = document.createElement('div');
+    badge.style.cssText =
+      'position:fixed;left:0;right:0;bottom:0;z-index:11;'
+      + 'font:11px/1.4 monospace;color:#ffd700;background:rgba(0,0,0,.75);'
+      + 'padding:3px 6px;pointer-events:none;word-break:break-all;';
+    document.body.appendChild(badge);
+    setAdState(adState);
+  }
 
   // 광고가 실제로 그려진 뒤에야 높이를 안다. 창을 미리 비워 두면 안 찰 때 빈 띠가
   // 남으므로, 그려진 높이를 그대로 게임에 넘긴다.
@@ -121,20 +151,76 @@ function ensureHost() {
   return host;
 }
 
+// ── 붙이는 시점이 문제였다 ───────────────────────────────────
+// **`TossAds.initialize` 는 즉시 끝나지 않는다** — 완료를 `onInitialized` 콜백으로
+// 알려 준다(SDK `InitializeOptions`). 그런데 예전 코드는 `initialize({})` 를 부른
+// 바로 다음 줄에서 `tick()` 을 돌렸고, 첫 틱의 화면이 이미 `stage` 라 **초기화가
+// 끝나기 전에 `attachBanner` 를 불렀다.** 거기서 실패하면 `catch` 가 삼키고,
+// `tick` 은 **화면이 바뀔 때만** 다시 붙이므로 목록에 머무는 동안 재시도가 없다.
+// 스테이지 목록은 부팅하면 바로 떠 있는 화면이라 「한 번 실패하면 끝」이었다.
+//
+// **증상이 그 모양 그대로였다.** 신고는 「목록·덱에서 배너가 안 보인다」였는데,
+// 같은 빌드에서 **판에 들어갔다가 일시정지 → 판 나가기로 목록에 돌아오면 뜬다.**
+// 나가기가 `wave` → `stage` 로 화면을 바꿔 `attachBanner` 를 한 번 더 부르고, 그때는
+// 초기화가 끝나 있어서 붙는다. 즉 붙이는 코드가 틀린 게 아니라 **처음 한 번의 시점**
+// 만 틀렸다 — 이 문단이 그 재현 경로다.
+//
+// 그래서 셋을 고친다.
+//   ① 초기화가 끝나야 붙인다(`adsReady`). 아직이면 표시만 해 두고 끝나면 그때 붙인다
+//   ② 실패하면 재시도한다 — 화면 전환에 기대지 않고 이 파일이 직접 다시 부른다
+//   ③ 붙인 뒤의 결과를 `callbacks` 로 받는다. 「안 찼다(onNoFill)」와 「못 그렸다
+//      (onAdFailedToRender)」가 갈려야 콘솔 문제인지 코드 문제인지 가른다
+let adsReady = false;
+let wantBanner = false;
+let retryT = null, retries = 0;
+const RETRY_MAX = 5;
+const RETRY_MS = 1500;
+
 function attachBanner() {
+  wantBanner = true;
   if (slot || !AD.banner) return;
+  if (!adsReady) { setAdState('wait-init'); return; }
   try {
-    if (!TossAds.attachBanner.isSupported()) return;
-    slot = TossAds.attachBanner(AD.banner, ensureHost(), { theme: 'dark', variant: 'card' });
-  } catch { slot = null; }
+    if (!TossAds.attachBanner.isSupported()) { setAdState('unsupported'); return; }
+    setAdState('attaching');
+    slot = TossAds.attachBanner(AD.banner, ensureHost(), {
+      theme: 'dark',
+      variant: 'card',
+      callbacks: {
+        onAdRendered: () => { retries = 0; setAdState('rendered'); },
+        onAdViewable: () => setAdState('viewable'),
+        onNoFill: () => setAdState('no-fill'),
+        onAdFailedToRender: (p) => setAdState('render-fail ' + (p && p.error ? p.error.code + ':' + p.error.message : '?')),
+      },
+    });
+  } catch (e) {
+    slot = null;
+    setAdState('throw ' + (e && e.message ? e.message : e));
+    scheduleRetry();
+  }
+}
+
+// 붙는 데 실패했을 때만 다시 부른다. **상한을 둔다** — 안 되는 것을 무한히 두드리면
+// 배터리만 쓴다. 화면을 나갔다 들어오면 `detachBanner` 가 카운터를 되돌린다.
+function scheduleRetry() {
+  if (retryT || retries >= RETRY_MAX) return;
+  retries++;
+  retryT = setTimeout(() => {
+    retryT = null;
+    if (wantBanner && !slot) attachBanner();
+  }, RETRY_MS);
 }
 
 function detachBanner() {
+  wantBanner = false;
+  if (retryT) { clearTimeout(retryT); retryT = null; }
+  retries = 0;
   if (slot) {
     try { slot.destroy(); } catch { /* 이미 정리됐다 */ }
     slot = null;
   }
   if (host) host.replaceChildren();
+  if (badge) badge.textContent = '';
   // **자리를 반드시 되돌린다.** 여기서 0 으로 안 돌리면 판 화면의 셀이 줄어든다.
   if (window.__bottomReserve) { window.__bottomReserve = 0; relayout(); }
 }
@@ -170,8 +256,27 @@ try {
   if (missing.length) {
     console.warn(`[toss] 광고 그룹 ID 가 비어 있다: ${missing.join(', ')} — toss/toss.js 의 AD 를 채워야 그 광고가 뜬다`);
   }
-  TossAds.initialize({});
-} catch { /* 토스 밖(로컬 vite dev)에서는 없는 게 정상이다 */ }
+  if (!TossAds.initialize.isSupported()) {
+    setAdState('init-unsupported');
+  } else {
+    setAdState('init');
+    TossAds.initialize({
+      callbacks: {
+        onInitialized: () => {
+          adsReady = true;
+          setAdState('init-ok');
+          // 초기화 전에 목록 화면이 이미 떠 있었으면 여기서 처음 붙는다.
+          if (wantBanner && !slot) attachBanner();
+          preloadFullScreen();
+        },
+        onInitializationFailed: (e) => setAdState('init-fail ' + (e && e.message ? e.message : e)),
+      },
+    });
+  }
+} catch (e) {
+  // 토스 밖(로컬 vite dev)에서는 없는 게 정상이다.
+  setAdState('init-throw ' + (e && e.message ? e.message : e));
+}
 
 preloadFullScreen();
 tick();
