@@ -103,10 +103,9 @@ async function shoot(browser, url) {
   page.on('pageerror', e => errors.push(String(e)));
   await page.addInitScript(SEED_SCRIPT);
   await page.goto(url);
-  // EASTBIRD 인트로를 걷는다. 저 블록은 **프레임을 세서** 사라지므로(index.html 의 머리
-  // 주석) 수명이 이 하네스가 돌리는 프레임 수에 달려 있다. 두 페이지를 잇따라 띄우는
-  // 검사라 「찍는 순간 인트로가 남아 있었나」가 원본과 압축본에서 갈리고, 그러면
-  // 코드가 같아도 픽셀 비교가 실패한다. 비교 대상은 게임 화면이므로 걷고 시작한다.
+  // EASTBIRD 인트로를 걷는다. **이건 취향이 아니라 필수다.** 저 블록은 이제 시간으로
+  // 안 사라지고 **탭을 기다리므로**(index.html 의 머리 주석) 안 걷으면 원본·압축본 두
+  // 장이 다 로고 화면이고, 픽셀 비교가 게임을 아예 안 본다. 걷고 시작한다.
   await page.evaluate(() => {
     const el = document.getElementById('ebIntro');
     if (el) el.remove();
