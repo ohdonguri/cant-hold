@@ -707,6 +707,44 @@ function known(name, worse, detail, why) {
   state.paused = true;
   ok('멈추면 재개 아이콘', row[2].icon() === 'play', row[2].icon());
   ok('정지 중에도 render 가 안 터진다', (g.render(), true));
+
+  // ── 누를 수 있는 셋이 버튼이다 (#116) ────────────────────────
+  // 신고가 「글이 많아서 뭘 누를 수 있는지 모르겠다」였다. 전 세대는 셋 다 화면 폭을
+  // 채운 글줄이라 위아래의 읽기 전용 설명과 생김새가 같았고, 「여기를 누르면 바뀝니다」
+  // 라고 **글자로 적어 두는 것으로는 안 읽혔다.** 그래서 모양을 갈랐다.
+  //
+  // **자리를 재는 이유는 셋을 한 줄에 나눠 담기 때문이다.** 폭을 셋으로 쪼개므로
+  // 좁은 화면에서 겹치거나 라벨이 칸 밖으로 나갈 수 있다 — 그건 눈으로만 보인다.
+  // `[390, 375, 360, 320]` 을 **그대로 유지한다**: 통과시키려고 기기를 빼면 회귀를
+  // 숨기는 것이다(§스테이지 목록의 같은 규칙).
+  {
+    const w0 = g.view.w, h0 = g.view.h;
+    state.paused = true;
+    for (const w of [390, 375, 360, 320]) {
+      for (const h of [844, 667, 658]) {
+        g.view.w = w; g.view.h = h;
+        g.render();
+        const br = g.pauseButtonRects();
+        const rects = [br.shake, br.sound, br.exit];
+        const tag = `${w}x${h}`;
+        ok(`  ${tag} 누를 자리 셋이 다 선다`, rects.every(r => !!r && r.w > 0 && r.h > 0),
+          rects.map(r => (r ? Math.round(r.w) : '없음')).join(' '));
+        if (!rects.every(Boolean)) continue;
+        const sorted = rects.slice().sort((a, b) => a.x - b.x);
+        ok(`  ${tag} 셋이 안 겹친다`,
+          sorted.every((r, i) => i === 0 || r.x >= sorted[i - 1].x + sorted[i - 1].w - 0.01),
+          sorted.map(r => Math.round(r.x) + '+' + Math.round(r.w)).join(' '));
+        ok(`  ${tag} 셋이 화면 안에 있다`,
+          sorted[0].x >= 0 && sorted[2].x + sorted[2].w <= w + 0.01,
+          Math.round(sorted[0].x) + ' ~ ' + Math.round(sorted[2].x + sorted[2].w));
+        // 손가락으로 눌러야 하는 자리다. 44 는 이 리포의 하단 버튼 줄이 쓰는 높이이고
+        // (위 「하단에 버튼이 셋」), 축소 배율(0.78)까지 감안해 34 를 하한으로 둔다.
+        ok(`  ${tag} 손가락이 닿는 크기다`, rects.every(r => r.h >= 34 && r.w >= 60),
+          rects.map(r => Math.round(r.w) + 'x' + Math.round(r.h)).join(' '));
+      }
+    }
+    g.view.w = w0; g.view.h = h0;
+  }
   state.paused = false;
 
   // 정지 화면이 유일한 설명서다. 내 덱 3종은 반드시 설명이 붙어야 한다.
