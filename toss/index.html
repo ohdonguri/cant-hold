@@ -7356,6 +7356,14 @@ function exitRunTap() {
   exitRun();
 }
 
+// 정지 화면에서 누를 수 있는 자리 셋. **셋을 한 게터로 낸다** — 따로 내면 검사가
+// 「셋이 안 겹친다」를 재려고 세 창을 각각 열어야 하고, 하나를 안 내보내면 그 줄만
+// 조용히 안 재진다. 셋은 같은 줄에 나란히 서므로 애초에 같이 봐야 하는 값이다.
+// (`drawPause` 가 매 프레임 새로 세우는 값이라 객체를 그대로 못 넘긴다 — 게터가 문이다.)
+function pauseButtonRects() {
+  return { shake: shakeToggleRect, sound: soundToggleRect, exit: exitRunRect };
+}
+
 // 읽기용 게터. 모듈 레벨 원시값이라 객체처럼 못 넘긴다(hitstopState 와 같은 사정).
 // 헤드리스가 「그 줄이 실제로 화면에 섰나」와 「확인을 기다리는 중인가」를 볼 창이다.
 function exitRunState() { return { armed: exitArmed, rect: exitRunRect }; }
@@ -7379,14 +7387,20 @@ function pausePlan(sections, panelW, s) {
 
   items.push({ t: 'title', y: h, f: 22 * s }); h += Math.round(29 * s);
   items.push({ t: 'sub', y: h, f: 12 * s }); h += Math.round(25 * s);
-  // 흔들림 토글은 절(section) 밖이다. 절 안에 넣으면 아래의 "안 들어가면 뒤에서부터
-  // 버린다" 로직에 걸려서 하필 작은 화면 — 흔들림이 제일 거슬리는 기기 — 에서 사라진다.
-  // 높이 예산에도 반드시 들어가야 한다. 안 넣으면 마지막 절이 화면 밖으로 밀린다.
-  items.push({ t: 'shake', y: h, f: 12 * s }); h += Math.round(27 * s);
-  items.push({ t: 'sound', y: h, f: 12 * s }); h += Math.round(27 * s);
-  // 나가기도 절 밖이고 예산에 들어간다 — 위 두 줄과 같은 이유다. 이 줄이 절에
-  // 들어가면 작은 화면에서 사라지는데, **여기가 이 판의 유일한 출구다**(#74).
-  items.push({ t: 'exit', y: h, f: 12 * s }); h += Math.round(27 * s);
+  // ── 누를 수 있는 것 셋은 절(section) 밖이고 예산에 반드시 들어간다 ──────────
+  // 절 안에 넣으면 아래의 「안 들어가면 뒤에서부터 버린다」 로직에 걸려서 하필 작은
+  // 화면 — 흔들림이 제일 거슬리는 기기 — 에서 사라진다. 나가기는 **이 판의 유일한
+  // 출구**라(#74) 더더욱 사라지면 안 된다. 예산에 안 넣으면 마지막 절이 화면 밖이다.
+  //
+  // **셋을 한 줄의 버튼으로 묶는다(#116).** 전에는 셋 다 화면 폭을 꽉 채운 글줄이라
+  // 위아래의 읽기 전용 설명과 생김새가 같았다 — 「여기를 누르면 바뀝니다」를 글자로
+  // 적어 놓고도 신고가 「뭘 누를 수 있는지 모르겠다」였다. 글자로 적는 대신 **모양을
+  // 다르게** 한다. 한 줄에 셋을 나란히 두면 세로도 81 → 66 으로 줄어 작은 화면에서
+  // 절이 하나 더 산다.
+  items.push({ t: 'btns', y: h, f: 11.5 * s }); h += Math.round(52 * s);   // 버튼 44 + 아래 여백 8
+  // 나가면 무엇을 잃는가. **버튼 안에 못 넣는다** — 문장이라 셋으로 나눈 칸에 안
+  // 들어간다. 버튼 바로 아래 한 줄로 두어 누르기 전에 읽히게 한다.
+  items.push({ t: 'exitnote', y: h, f: 11 * s }); h += Math.round(20 * s);
 
   for (let i = 0; i < sections.length; i++) {
     if (i) h += Math.round(13 * s);
@@ -7446,58 +7460,83 @@ function drawPause() {
       ctx.fillStyle = '#6e7681';
       ctx.font = `${it.f}px system-ui, sans-serif`;
       ctx.fillText('멈춰 있는 동안에는 배치도 합성도 되지 않습니다', pad, y);
-    } else if (it.t === 'shake' || it.t === 'sound') {
-      // 이 화면의 유일한 조작이다. 다른 곳은 전부 읽기 전용이라, 눌리는 줄이라는 게
-      // 보이도록 배경을 깔고 값을 강조색으로 낸다.
-      // 두 토글이 한 분기인 것은 의도다 — 따로 그리면 한쪽만 고쳐서 같은 줄인데
-      // 색·간격이 다른 화면이 나온다.
-      const on = it.t === 'shake' ? shakeEnabled : soundEnabled;
-      const label = it.t === 'shake' ? '화면 흔들림' : '소리';
-      const rh = Math.round(23 * plan.s);
-      const rect = { x: pad - 8, y: y - Math.round(5 * plan.s), w: panelW + 16, h: rh };
-      if (it.t === 'shake') shakeToggleRect = rect; else soundToggleRect = rect;
-      ctx.fillStyle = '#161b22';
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      // 이 줄들만 라벨 길이가 제각각이라(다른 줄은 두세 글자로 맞춰져 있다) 절의
-      // labelW 를 못 쓴다. 재서 붙이지 않으면 축소 배율에서 값이 라벨에 겹쳐
-      // "화면 흔들림켜짐"이 된다.
-      const gap = Math.round(12 * plan.s);
-      ctx.fillStyle = '#c9d1d9';
-      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
-      ctx.fillText(label, pad, y);
-      const vx = pad + ctx.measureText(label).width + gap;
-      const val = on ? '켜짐' : '꺼짐';
-      ctx.fillStyle = on ? '#58a6ff' : '#6e7681';
-      ctx.fillText(val, vx, y);
-      const hx = vx + ctx.measureText(val).width + gap;
+    } else if (it.t === 'btns') {
+      // ── 이 화면에서 누를 수 있는 것 전부 ────────────────────────
+      // 셋을 **한 분기에서 같이 그린다.** 따로 그리면 한쪽만 고쳐서 같은 줄인데
+      // 색·간격이 다른 화면이 나온다(전 세대에도 같은 주석이 있었다).
+      //
+      // 값은 **버튼 안 둘째 줄**이다. 라벨과 값을 가로로 붙이면 라벨 길이가 제각각이라
+      // (「화면 흔들림」 대 「소리」) 축소 배율에서 값이 라벨에 겹쳐 「화면 흔들림켜짐」이
+      // 된다 — 전 세대가 `measureText` 로 재서 붙이던 자리다. 세로로 쌓으면 그 계산이
+      // 통째로 없어진다.
+      const gap = Math.round(8 * plan.s);
+      const bh = Math.round(44 * plan.s);
+      const bw = (panelW - gap * 2) / 3;
+      const armed = exitArmed;
+      const defs = [
+        { key: 'shake', label: '화면 흔들림', on: shakeEnabled },
+        { key: 'sound', label: '소리', on: soundEnabled },
+        // 라벨은 「판 나가기」 그대로다 — 검사가 이 글자로 「출구가 화면에 있나」를 본다.
+        { key: 'exit', label: '판 나가기',
+          val: armed ? '한 번 더' : '나가기',
+          // 잃을 것이 없으면(준비 단계) 초록, 있으면 주황. 확인을 기다리는 동안만
+          // 빨강 — 색이 바뀌는 것이 「한 번 더 누르면 진짜」의 신호다.
+          color: armed ? '#f85149' : state.phase === 'build' ? '#7ee787' : '#d29922' },
+      ];
+      ctx.textAlign = 'center';
+      for (let i = 0; i < defs.length; i++) {
+        const d = defs[i];
+        const rect = { x: pad + i * (bw + gap), y, w: bw, h: bh };
+        if (d.key === 'shake') shakeToggleRect = rect;
+        else if (d.key === 'sound') soundToggleRect = rect;
+        else exitRunRect = rect;
+
+        // **테두리가 「누를 수 있다」의 신호다.** 배경만 깔면 위아래 글줄과 안 갈린다.
+        ctx.fillStyle = d.key === 'exit' && armed ? '#2d1618' : '#161b22';
+        roundRect(rect.x, rect.y, rect.w, rect.h, Math.round(8 * plan.s));
+        ctx.fill();
+        ctx.strokeStyle = d.key === 'exit' && armed ? '#f85149' : '#30363d';
+        ctx.lineWidth = Math.max(1, Math.round(plan.s));
+        ctx.stroke();
+
+        const cx = rect.x + rect.w / 2;
+        ctx.fillStyle = '#c9d1d9';
+        ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+        ctx.fillText(d.label, cx, rect.y + Math.round(9 * plan.s));
+
+        const val = d.val !== undefined ? d.val : (d.on ? '켜짐' : '꺼짐');
+        ctx.fillStyle = d.color !== undefined ? d.color : (d.on ? '#58a6ff' : '#6e7681');
+        ctx.font = `700 ${it.f}px system-ui, sans-serif`;
+        ctx.fillText(val, cx, rect.y + Math.round(25 * plan.s));
+      }
+      ctx.textAlign = 'left';
+    } else if (it.t === 'exitnote') {
+      // 나가면 무엇을 잃는가. **누르기 전에 화면에 떠 있어야 하는 문장이다.**
+      //
+      // **머리말과 본문을 따로 그린다.** 이어 붙여 한 번에 그리면 화면 결과는 같은데
+      // `draws.text` 에 남는 것이 합쳐진 한 줄이라, 검사의 「잃는 것을 화면에 적는다」
+      // (`exitRunNote()` 와 글자 그대로 대조)가 깨진다. 자를 흔들지 않으려고 나눈다 —
+      // 검사를 문구에 맞춰 고치면 다음에 문구만 바꿔도 검사가 같이 헐거워진다.
+      // **본문은 나가기 버튼의 값과 같은 색이다.** 잃을 것이 없으면 초록, 있으면
+      // 주황, 확인을 기다리는 동안은 빨강 — 버튼과 이 줄이 같은 색이라야 둘이 한
+      // 덩어리로 읽힌다. 회색으로 두면 「저장됩니다」가 안내문 사이에 묻힌다.
+      const noteColor = exitArmed ? '#f85149' : state.phase === 'build' ? '#7ee787' : '#d29922';
+      // 머리말 · 이음말 · 본문을 **따로** 그린다. 이어 붙이면 화면은 같은데
+      // `draws.text` 에 합쳐진 한 줄이 남아 검사의 「잃는 것을 화면에 적는다」
+      // (`exitRunNote()` 와 글자 그대로 대조)와 「확인을 화면으로 말한다」가 둘 다
+      // 깨진다. **검사를 문구에 맞춰 고치지 않고 그리는 쪽을 나눈다** — 문구에 맞춰
+      // 고치면 다음에 문구만 바꿔도 검사가 같이 헐거워진다.
+      ctx.font = `${it.f}px system-ui, sans-serif`;
+      const lead = exitArmed ? '한 번 더 누르면 나갑니다' : '판 나가기';
+      const sep = exitArmed ? '·' : '→';
+      ctx.fillStyle = exitArmed ? '#f85149' : '#6e7681';
+      ctx.fillText(lead, pad, y);
+      let nx = pad + ctx.measureText(lead + ' ').width;
       ctx.fillStyle = '#484f58';
-      ctx.font = `${it.f}px system-ui, sans-serif`;
-      ctx.fillText('여기를 누르면 바뀝니다', hx, y);
-    } else if (it.t === 'exit') {
-      // 토글 두 줄과 **같은 모양이다**(라벨 · 값 · 안내). 이 화면에서 눌리는 줄은
-      // 셋뿐이고, 셋이 같아 보여야 「눌러도 되는 줄」이 눈에 잡힌다.
-      // 값 자리에 오는 것은 **나가면 무엇을 잃는가**다 — 누르기 전에 읽히는 자리라
-      // 여기가 「미리 알린다」의 전부다.
-      const rh = Math.round(23 * plan.s);
-      const rect = { x: pad - 8, y: y - Math.round(5 * plan.s), w: panelW + 16, h: rh };
-      exitRunRect = rect;
-      ctx.fillStyle = exitArmed ? '#2d1618' : '#161b22';
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      const gap = Math.round(12 * plan.s);
-      const label = '판 나가기';
-      ctx.fillStyle = '#c9d1d9';
-      ctx.font = `700 ${it.f}px system-ui, sans-serif`;
-      ctx.fillText(label, pad, y);
-      const vx = pad + ctx.measureText(label).width + gap;
-      const note = exitRunNote();
-      // 잃을 것이 없으면(준비 단계) 초록, 있으면 주황이다. 확인을 기다리는 동안만
-      // 빨강 — 색이 바뀌는 것이 「한 번 더 누르면 진짜」의 신호다.
-      ctx.fillStyle = exitArmed ? '#f85149' : state.phase === 'build' ? '#7ee787' : '#d29922';
-      ctx.fillText(note, vx, y);
-      const hx = vx + ctx.measureText(note).width + gap;
-      ctx.fillStyle = exitArmed ? '#f85149' : '#484f58';
-      ctx.font = `${it.f}px system-ui, sans-serif`;
-      ctx.fillText(exitArmed ? '한 번 더 누르면 나갑니다' : '여기를 누르면 목록으로', hx, y);
+      ctx.fillText(sep, nx, y);
+      nx += ctx.measureText(sep + ' ').width;
+      ctx.fillStyle = noteColor;
+      ctx.fillText(exitRunNote(), nx, y);
     } else if (it.t === 'head') {
       ctx.fillStyle = '#58a6ff';
       ctx.font = `700 ${it.f}px system-ui, sans-serif`;
