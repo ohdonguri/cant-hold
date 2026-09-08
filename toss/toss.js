@@ -88,6 +88,17 @@ function relayout() {
   try { resize(); } catch { /* 게임이 아직 안 실렸다 */ }
 }
 
+// 전면 광고를 닫고 돌아왔을 때 게임을 되살린다. **게임 쪽에도 같은 장치가 있다** —
+// `index.html` 의 `reviveView` 가 `visibilitychange`·`pageshow`·`focus` 로 스스로
+// 돈다(#124). 여기서 한 번 더 부르는 것은 **전면 광고가 그 셋 중 어느 것도 안 쏠 수
+// 있어서**다. 웹뷰 안에 겹쳐 뜨는 광고라면 문서는 계속 visible 이고 포커스도 안 옮겨진다.
+// 멱등하므로 둘 다 불려도 손해가 없다. 옛 게임 판(그 함수가 없는)에서는 `resize()` 로
+// 떨어진다 — 이 파일은 게임보다 나중에 실리므로 이름이 없으면 그냥 없는 것이다.
+function reviveGame() {
+  try { reviveView(); return; } catch { /* 그 판에는 없다 */ }
+  relayout();
+}
+
 // 광고 SDK 초기화가 끝났는가. **두 광고가 같이 본다** — 전면도 배너도 초기화 전에
 // 부르면 실패하고 그 실패는 조용하다(아래 §붙이는 시점이 문제였다). 선언이 전면 절
 // 위에 있는 것은 전면이 이 파일에서 먼저 나오기 때문이지 전면 전용이라서가 아니다.
@@ -126,8 +137,11 @@ function showFullScreen() {
     fullReady = false;
     showFullScreenAd({
       options: { adGroupId: AD.fullScreen },
-      onEvent: (e) => { if (e.type === 'dismissed') preloadFullScreen(); },
-      onError: () => { preloadFullScreen(); },
+      // **닫히면 되살린다.** 아이폰에서 광고를 보고 오면 검은 화면이 뜨고 탭이 안
+      // 먹는다는 신고가 있었다(#124) — 웹뷰가 백그라운드에서 캔버스 백버퍼를 회수하고
+      // rAF 를 안 돌려준다. 광고가 그 상황을 가장 자주 만든다.
+      onEvent: (e) => { if (e.type === 'dismissed') { reviveGame(); preloadFullScreen(); } },
+      onError: () => { reviveGame(); preloadFullScreen(); },
     });
   } catch { preloadFullScreen(); }
 }
