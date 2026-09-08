@@ -299,6 +299,10 @@ const EXPOSE = [
   // `towerFacing`/`enemyFacing` 은 이력(경계 떨림)을 밖에서 밟는 유일한 통로다.
   'TOWER_DIRS', 'TOWER_DIR_FILES', 'ENEMY_DIR_FILES', 'TOWER_FACE_CHAIN', 'ENEMY_FACE_CHAIN',
   'towerFacing', 'enemyFacing', 'facingAsset', 'dirPath', 'muzzle',
+  // 걸음걸이(#117). 표(`GAIT`)와 식(`enemyGait`)을 **둘 다** 내보낸다 — 검사가
+  // 「어느 종류가 걷는가」를 손으로 베끼면 표를 고쳤을 때 검사만 옛 명단을 지키며
+  // 통과한다(PARTICLE_LIFE 와 같은 이유).
+  'GAIT', 'enemyGait',
   'FACE_STEP', 'FACE_MARGIN', 'FACE_AXIS_BIAS',
   'SPR', 'SPR_ASSET_PATH', 'sprite', 'drawSprite', 'snapshotRun', 'restoreRun', 'saveBundle', 'applyBundle', 'mergeBundle', 'STAGES', 'loadStage', 'lanes', 'pickStage', 'stageCardRects', 'laneLen',
   // 세이브 형식 버전과 「뜻이 안 바뀐 인덱스 수」. 테스트가 리터럴 3·5 를 베껴 두면

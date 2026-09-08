@@ -4476,6 +4476,64 @@ function poolDeck(g, st) {
   }
 }
 
+// ── 걸음걸이 (#117) ──────────────────────────────────────────
+// 적이 미끄러지듯 지나가는 문제다. 그림이 종류당 한 장이라 프레임을 못 굽고,
+// 대신 **그리는 자리를 이동거리에 맞춰 흔든다**(index.html §걸음걸이).
+//
+// 이 블록이 잠그는 것은 넷이다. 어느 것도 「보기 좋은가」가 아니다 — 그건 눈이
+// 볼 몫이고(tools/shot.js), 여기서는 **눈으로 못 보는 성질**만 잰다.
+{
+  console.log('걸음걸이');
+  const g = load();
+  const SIZE = 24;   // 화면에서 보병 크기(셀 41 x r 0.26 x 2.3)
+
+  // ① 다리가 있는 것만 걷는다. **명단을 여기 안 적는다** — `GAIT` 를 그대로 읽는다.
+  //    베껴 두면 표에서 한 종류를 빼도 검사가 옛 명단을 지키며 통과한다.
+  const walks = k => {
+    let lo = Infinity, hi = -Infinity;
+    for (let d = 0; d < 4; d += 0.01) {
+      const { dy } = g.enemyGait(k, d, SIZE);
+      lo = Math.min(lo, dy); hi = Math.max(hi, dy);
+    }
+    return hi - lo;
+  };
+  const legged = Object.keys(g.GAIT);
+  const rest = Object.keys(g.ENEMY).filter(k => !legged.includes(k));
+  ok('걷는 종류가 표에 있다', legged.length > 0, legged.join(','));
+  ok('  표에 있는 것은 실제로 흔들린다', legged.every(k => walks(k) > 0.5),
+    legged.map(k => k + ' ' + walks(k).toFixed(2)).join(' '));
+  // 다리 없는 것을 흔들면 걷는 게 아니라 **떠는 것**으로 보인다.
+  ok('  표에 없는 것은 한 자리도 안 흔들린다', rest.every(k => walks(k) === 0),
+    rest.join(','));
+
+  // ② 위상이 **시간이 아니라 이동거리**다. 같은 거리면 같은 자세라야 한다 —
+  //    이게 「슬로우가 걸리면 걸음도 느려진다」와 「멈추면 그 자리에 선다」의 실질이다.
+  //    시간으로 돌리면 얼어붙은 놈이 제자리에서 계속 걷는다.
+  const a = g.enemyGait('grunt', 1.234, SIZE);
+  const b = g.enemyGait('grunt', 1.234, SIZE);
+  ok('  같은 거리면 같은 자세다', a.dy === b.dy && a.sy === b.sy, JSON.stringify(a));
+  const moved = g.enemyGait('grunt', 1.234 + 0.25, SIZE);
+  ok('  거리가 달라지면 자세도 달라진다', moved.dy !== a.dy, a.dy.toFixed(3) + ' → ' + moved.dy.toFixed(3));
+
+  // ③ 그림 밖으로 안 나간다. 「들림」은 그림 크기 비율이라 셀이 커지면 같이 커지는데,
+  //    상한이 없으면 큰 화면에서 적이 막대에서 떠 버린다. 표의 최대 lift 가 0.06 이라
+  //    10% 를 상한으로 둔다.
+  const worst = [];
+  for (const k of legged)
+    for (let d = 0; d < 4; d += 0.01) {
+      const r = g.enemyGait(k, d, SIZE);
+      worst.push(Math.abs(r.dy) / SIZE, Math.abs(r.sy - 1));
+    }
+  ok('  흔들림이 그림의 10% 안이다', Math.max(...worst) <= 0.1, Math.max(...worst).toFixed(4));
+
+  // ④ 크기에 비례한다. 픽셀로 박으면 셀이 다른 기기에서 보병만 안 튀거나 정예만
+  //    과하게 튄다.
+  const small = g.enemyGait('elite', 0.3, 20).dy;
+  const big = g.enemyGait('elite', 0.3, 40).dy;
+  ok('  그림이 두 배면 흔들림도 두 배다', Math.abs(big - small * 2) < 1e-9,
+    small.toFixed(3) + ' → ' + big.toFixed(3));
+}
+
 // ── 처치 연출 ────────────────────────────────────────────────
 // 적이 사라지는 순간이 안 읽히는 문제라, 확인할 건 "죽였을 때만 난다"와
 // "무엇으로 죽였는지가 그림으로 갈린다" 둘이다.
