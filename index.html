@@ -7957,31 +7957,85 @@ rafId = requestAnimationFrame(frame);
      로고는 픽셀 아트라 image-rendering:pixelated 로 확대한다. 보간하면 격자가
      뭉개져서 CI 가 아니라 흐린 그림이 된다.
 
-     1.5초 뒤 스스로 사라지고, 기다리기 싫으면 탭 한 번으로 건너뛴다. 사라진 뒤에는
+     스스로 사라지고, 기다리기 싫으면 탭 한 번으로 건너뛴다. 사라진 뒤에는
      DOM 에서 빠진다 — 투명하게만 두면 그 위의 탭을 계속 먹는다.
+
+     ── 왜 시계가 아니라 프레임을 세는가 ──────────────────────────────────
+     **토스에서는 이 카드를 아무도 못 봤다.** 미니앱은 토스가 띄우는 네이티브 로딩
+     화면(전체이용가 고지) 밑에서 부팅하는데, `setTimeout` 은 HTML 을 파싱하는 그
+     순간부터 흐른다. 토스가 화면을 넘겨줄 즈음에는 1.5초가 이미 다 가서 `remove()`
+     까지 끝나 있다 — 사람 눈에는 「인트로를 넣은 적이 없는 게임」이다.
+
+     **토스가 도와줄 방법이 없다.** SDK 의 export 목록에 스플래시가 걷히는 시점을
+     알려주는 이벤트가 없고(`@apps-in-toss/web-framework`), `apps-in-toss.config.ts`
+     의 타입(`config.d.cts`)에도 스플래시·로딩 항목이 아예 없다. 그 화면은 토스
+     것이라 짧게 만들 수도, 거기 얹을 수도 없다.
+
+     그래서 **시계 대신 프레임을 센다.** `requestAnimationFrame` 은 화면에 그릴
+     기회가 있을 때만 불린다. 웹뷰가 스플래시 밑에서 합성을 멈추면 콜백이 안 오므로
+     시간이 안 흐르고, 화면이 넘어오는 그 순간부터 카운트가 시작된다.
+
+     프레임 간격은 **100ms 로 자른다.** 멈추는 대신 느려지기만 하는 웹뷰(1fps 로
+     떨구는 식)에서는 간격을 그대로 더하면 한 프레임에 1초가 들어와 결국 똑같이 다
+     태운다. 자르면 그런 웹뷰에서도 프레임 수만큼만 흐른다.
+
+     rAF 가 영영 안 오는 경우를 대비해 벽시계로 상한을 하나 둔다. **인트로가 게임을
+     영구히 막는 것이 프레임을 못 세는 것보다 훨씬 나쁘다.**
      ══════════════════════════════════════════════════════════════════════ -->
-<div id="ebIntro" aria-hidden="true"><img alt="" src="data:image/png;base64,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"></div>
+<div id="ebIntro" aria-hidden="true"><img alt="" src="data:image/png;base64,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">
+  <!-- SPECIAL THANKS. **고칠 자리는 아래 <span> 안쪽 하나뿐이다.** 이름은 ` · ` 로
+       잇는다. 비워 두면 아래 스크립트가 절을 통째로 걷어서 카드가 로고만 있던 예전
+       모습으로 돌아간다 — 라벨만 남고 아래가 빈 화면은 만들다 만 것으로 읽힌다. -->
+  <p class="ebThanks"><b>SPECIAL THANKS</b><span>선릉에스쿱스 · frogyong</span></p>
+</div>
 <style>
   #ebIntro {
     position: fixed; inset: 0; z-index: 9999; background: #111111;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 30px;
     transition: opacity .38s ease;
   }
   #ebIntro img {
     width: min(58vw, 320px); image-rendering: pixelated;
     opacity: 0; transform: scale(.94);
-    animation: ebIn .5s cubic-bezier(.2,.7,.3,1) forwards;
   }
+  /* 로고보다 한참 어둡다. 같은 밝기로 두면 스튜디오 이름과 명단이 한 덩어리로 읽혀서
+     로고가 「SPECIAL THANKS 의 머리말」이 된다. 색은 게임 화면의 흐린 글자와 같은
+     값이다(#6e7681 · #484f58) — 인트로만 다른 회색을 쓰면 다른 앱에서 온 화면이 된다. */
+  #ebIntro .ebThanks {
+    margin: 0; padding: 0 24px; max-width: 340px; text-align: center;
+    font: 500 11.5px/1.75 system-ui, -apple-system, sans-serif;
+    color: #6e7681; opacity: 0;
+  }
+  #ebIntro .ebThanks b {
+    display: block; margin-bottom: 8px;
+    font: 700 9.5px/1 system-ui, -apple-system, sans-serif;
+    letter-spacing: .22em; color: #484f58;
+  }
+  /* **애니메이션은 `go` 가 붙어야 시작한다.** CSS 애니메이션은 문서 시계를 따라가므로
+     그냥 두면 토스 스플래시 밑에서 페이드인이 혼자 다 돌아 버린다 — 아래 스크립트가
+     첫 프레임에서 붙인다. 명단은 로고보다 0.22초 늦게 든다. 동시에 뜨면 눈이 어디를
+     볼지 못 정한다. */
+  #ebIntro.go img { animation: ebIn .5s cubic-bezier(.2,.7,.3,1) forwards; }
+  #ebIntro.go .ebThanks { animation: ebFade .5s ease .22s forwards; }
   @keyframes ebIn { to { opacity: 1; transform: scale(1); } }
+  @keyframes ebFade { to { opacity: 1; } }
   #ebIntro.out { opacity: 0; pointer-events: none; }
   @media (prefers-reduced-motion: reduce) {
-    #ebIntro img { animation: none; opacity: 1; transform: none; }
+    #ebIntro.go img, #ebIntro.go .ebThanks { animation: none; opacity: 1; transform: none; }
   }
 </style>
 <script>
 (() => {
   const el = document.getElementById('ebIntro');
   if (!el) return;
+
+  // 이름이 비었으면 절을 걷는다. 라벨만 남고 그 아래가 빈 화면은 「만들다 말았다」로
+  // 읽힌다 — 안 넣은 것보다 나쁘다.
+  const thanks = el.querySelector('.ebThanks');
+  const named = !!thanks && thanks.querySelector('span').textContent.trim() !== '';
+  if (thanks && !named) thanks.remove();
+
   let done = false;
   const close = () => {
     if (done) return;
@@ -7989,8 +8043,27 @@ rafId = requestAnimationFrame(frame);
     el.classList.add('out');
     setTimeout(() => el.remove(), 420);
   };
+
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  setTimeout(close, reduce ? 700 : 1500);
+  // 읽을 것이 늘면 머무는 시간도 늘어야 한다. 이름 몇 줄을 1.5초에 두면 있으나 마나다.
+  const DWELL = reduce ? (named ? 1100 : 700) : (named ? 2400 : 1500);
+
+  // **시계가 아니라 프레임을 센다**(위 머리 주석). 첫 프레임에서 `go` 를 붙여 페이드인도
+  // 같이 시작한다 — 카드 전체가 한 신호로 출발해야 사람이 로고가 드는 것을 본다.
+  let acc = 0, last = null;
+  const tick = (t) => {
+    if (done) return;
+    if (last === null) el.classList.add('go');
+    else acc += Math.min(t - last, 100);   // 느려지기만 하는 웹뷰 대비 (머리 주석)
+    last = t;
+    if (acc >= DWELL) { close(); return; }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
+  // 벽시계 상한. rAF 가 안 오는 웹뷰에서도 인트로가 게임을 영구히 막지는 않는다.
+  setTimeout(close, 15000);
+
   el.addEventListener('pointerdown', close);
 })();
 </script>
