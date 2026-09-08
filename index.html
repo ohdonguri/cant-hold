@@ -7623,7 +7623,7 @@ function pausePlan(sections, panelW, s) {
   // 적어 놓고도 신고가 「뭘 누를 수 있는지 모르겠다」였다. 글자로 적는 대신 **모양을
   // 다르게** 한다. 한 줄에 셋을 나란히 두면 세로도 81 → 66 으로 줄어 작은 화면에서
   // 절이 하나 더 산다.
-  items.push({ t: 'btns', y: h, f: 11.5 * s }); h += Math.round(46 * s);
+  items.push({ t: 'btns', y: h, f: 11.5 * s }); h += Math.round(52 * s);   // 버튼 44 + 아래 여백 8
   // 나가면 무엇을 잃는가. **버튼 안에 못 넣는다** — 문장이라 셋으로 나눈 칸에 안
   // 들어간다. 버튼 바로 아래 한 줄로 두어 누르기 전에 읽히게 한다.
   items.push({ t: 'exitnote', y: h, f: 11 * s }); h += Math.round(20 * s);
@@ -7743,12 +7743,26 @@ function drawPause() {
       // `draws.text` 에 남는 것이 합쳐진 한 줄이라, 검사의 「잃는 것을 화면에 적는다」
       // (`exitRunNote()` 와 글자 그대로 대조)가 깨진다. 자를 흔들지 않으려고 나눈다 —
       // 검사를 문구에 맞춰 고치면 다음에 문구만 바꿔도 검사가 같이 헐거워진다.
+      // **본문은 나가기 버튼의 값과 같은 색이다.** 잃을 것이 없으면 초록, 있으면
+      // 주황, 확인을 기다리는 동안은 빨강 — 버튼과 이 줄이 같은 색이라야 둘이 한
+      // 덩어리로 읽힌다. 회색으로 두면 「저장됩니다」가 안내문 사이에 묻힌다.
+      const noteColor = exitArmed ? '#f85149' : state.phase === 'build' ? '#7ee787' : '#d29922';
+      // 머리말 · 이음말 · 본문을 **따로** 그린다. 이어 붙이면 화면은 같은데
+      // `draws.text` 에 합쳐진 한 줄이 남아 검사의 「잃는 것을 화면에 적는다」
+      // (`exitRunNote()` 와 글자 그대로 대조)와 「확인을 화면으로 말한다」가 둘 다
+      // 깨진다. **검사를 문구에 맞춰 고치지 않고 그리는 쪽을 나눈다** — 문구에 맞춰
+      // 고치면 다음에 문구만 바꿔도 검사가 같이 헐거워진다.
       ctx.font = `${it.f}px system-ui, sans-serif`;
-      const lead = exitArmed ? '한 번 더 누르면 나갑니다' : '판 나가기 →';
+      const lead = exitArmed ? '한 번 더 누르면 나갑니다' : '판 나가기';
+      const sep = exitArmed ? '·' : '→';
       ctx.fillStyle = exitArmed ? '#f85149' : '#6e7681';
       ctx.fillText(lead, pad, y);
-      ctx.fillStyle = exitArmed ? '#f85149' : '#8b949e';
-      ctx.fillText(exitRunNote(), pad + ctx.measureText(lead + ' ').width, y);
+      let nx = pad + ctx.measureText(lead + ' ').width;
+      ctx.fillStyle = '#484f58';
+      ctx.fillText(sep, nx, y);
+      nx += ctx.measureText(sep + ' ').width;
+      ctx.fillStyle = noteColor;
+      ctx.fillText(exitRunNote(), nx, y);
     } else if (it.t === 'head') {
       ctx.fillStyle = '#58a6ff';
       ctx.font = `700 ${it.f}px system-ui, sans-serif`;
