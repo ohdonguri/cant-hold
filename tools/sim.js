@@ -331,6 +331,10 @@ const EXPOSE = [
   // 판 나가기. 핸들러(pointerdown)에 로직을 안 남기고 이 함수들만 부르므로 헤드리스가
   // 탭 없이 「눌렀다 · 한 번 더 눌렀다」를 밟을 수 있다(mergePlace 와 같은 규칙).
   'exitRun', 'exitRunTap', 'exitRunNote', 'exitRunState',
+  // 정지 화면의 버튼 셋(#116). 좌표를 검사에 베끼면 배치를 고쳤을 때 검사만 옛 자리를
+  // 지키며 통과한다 — `deckBackRect` 와 같은 이유다. 셋을 한 게터로 내는 근거는
+  // index.html 의 `pauseButtonRects` 주석에 적었다.
+  'pauseButtonRects',
 ];
 
 // `opts.history` 는 **새로고침**을 흉내내는 통로다. 앞선 페이지가 쓰던 히스토리를
