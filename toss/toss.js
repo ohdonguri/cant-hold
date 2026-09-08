@@ -35,8 +35,8 @@ import { TossAds, loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/web-f
 // **앱인토스 콘솔에서 발급받아 채운다.** 비어 있으면 광고 호출 자체를 안 한다 —
 // 빈 ID 로 부르면 네이티브가 에러를 뱉고 그게 판마다 반복된다.
 const AD = {
-  fullScreen: '',   // TODO: 콘솔 > 광고 > 전면 광고 그룹 ID
-  banner: '',       // TODO: 콘솔 > 광고 > 배너 광고 그룹 ID
+  fullScreen: '',                          // TODO: 콘솔 > 광고 > 전면 광고 그룹 ID
+  banner: 'ait.v2.live.ce271d27543a4493',  // 콘솔 > 광고 > 배너 광고 그룹 ID
 };
 
 // 보드가 없는 화면. 여기서만 배너를 띄운다.
@@ -163,8 +163,12 @@ function tick() {
 }
 
 try {
-  if (!AD.fullScreen || !AD.banner) {
-    console.warn('[toss] 광고 그룹 ID 가 비어 있다 — toss/toss.js 의 AD 를 채워야 광고가 뜬다');
+  // **어느 쪽이 비었는지 이름을 찍는다.** 둘을 따로 발급받으므로 한쪽만 채워진
+  // 기간이 실제로 생긴다(배너 먼저 받았다). 「비어 있다」로만 찍으면 채운 쪽까지
+  // 안 뜨는 줄 알고 콘솔을 다시 뒤지게 된다.
+  const missing = Object.entries(AD).filter(([, id]) => !id).map(([k]) => k);
+  if (missing.length) {
+    console.warn(`[toss] 광고 그룹 ID 가 비어 있다: ${missing.join(', ')} — toss/toss.js 의 AD 를 채워야 그 광고가 뜬다`);
   }
   TossAds.initialize({});
 } catch { /* 토스 밖(로컬 vite dev)에서는 없는 게 정상이다 */ }

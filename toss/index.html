@@ -4056,7 +4056,9 @@ function cloudToggle() {}
 const RESUME_GAP = 14, RESUME_H = 52, CLOUD_GAP = 10, CLOUD_H = 42;
 // 로그인 줄이 없는 판(토스판)에서는 그 자리를 빼야 꼬리가 실제 높이로 잡힌다.
 // 안 빼면 목록 아래에 52px 짜리 빈 구멍이 남는다.
-const STAGE_TAIL_H = RESUME_GAP + RESUME_H + (CLOUD_UI ? CLOUD_GAP + CLOUD_H : 0);   // 118
+// 상태 문구(버튼 아래 6px + 글자 14px)와 바닥 여백까지 확보한다.
+const CLOUD_STATUS_H = 28;
+const STAGE_TAIL_H = RESUME_GAP + RESUME_H + (CLOUD_UI ? CLOUD_GAP + CLOUD_H + CLOUD_STATUS_H : 0);
 
 // 카드 높이 하한이 **둘**인 이유는 카드 안의 줄 수가 둘이기 때문이다.
 //   `full`     제목(y+12) · 설명(y+36) · 셋째 줄(y+58 · 11px) → 내용 바닥 69 + 여백 3
