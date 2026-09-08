@@ -3760,8 +3760,43 @@ function updateCombat(dt) {
 // ═════════════════════════════════════════════════════════════
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const view = { w: 0, h: 0, cell: 0, ox: 0, oy: 0 };
+const view = { w: 0, h: 0, top: 0, cell: 0, ox: 0, oy: 0 };
 const HUD_TOP = 100, HUD_BOTTOM = 150;
+
+// 노치·상태표시줄이 먹는 위쪽 높이. **CSS 에 물어본다** — 기기마다 다르고
+// (아이폰 노치 47~59 · 구형 상태표시줄 20 · 안드로이드·데스크톱 0) 자바스크립트로는
+// 알 방법이 없다. `env(safe-area-inset-top)` 이 정본이고, 그 값을 읽으려면 실제로
+// 요소 하나에 먹여 보는 수밖에 없다.
+//
+// **헤드리스에서 죽으면 안 된다.** `tools/sim.js` 의 `document` 는 `createElement` 가
+// 캔버스 스텁을 돌려주고 `body` 가 아예 없다. 그래서 통째로 감싸고 0 으로 떨어진다 —
+// 밸런스 도구가 이 줄 때문에 안 도는 일은 없다.
+function safeInsetTop() {
+  try {
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:env(safe-area-inset-top);';
+    document.body.appendChild(probe);
+    const h = Math.round(probe.getBoundingClientRect().height);
+    probe.remove();
+    return Number.isFinite(h) ? h : 0;
+  } catch { return 0; }
+}
+
+// **바닥값이 있다 — `env()` 가 0 을 주는 판이 실재하기 때문이다.**
+//
+// 안드로이드는 `targetSdk 35+` 부터 edge-to-edge 가 강제라(이 리포는 36) 웹뷰가
+// 상태표시줄 밑까지 깔린다. 그런데 안드로이드 웹뷰는 그 인셋을
+// `env(safe-area-inset-top)` 으로 **안 내주는 일이 잦다** — 아이폰만 고치고 나서
+// 「안드로이드도 내려야 될 것 같은데」가 그래서 나왔다.
+//
+// 기기에서 값을 받아 오는 길(Capacitor 인셋 플러그인)을 새로 낼 수도 있지만,
+// **그러면 웹판·토스판에는 없는 의존이 하나 생기고 게임이 한 벌이 아니게 된다.**
+// 바닥값 하나면 세 채널이 같은 코드로 산다.
+//
+// 24 는 안드로이드 상태표시줄의 표준 높이(24dp)다. 아이폰에서는 `env()` 가 47~59 를
+// 주므로 이 값이 안 쓰이고, 데스크톱·웹에서는 그냥 위 여백 24px 이 된다 —
+// 신고의 「전체적으로 좀 내려서 간격을 놔야 될 것 같다」가 그것이다.
+const TOP_GAP_MIN = 24;
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -3772,12 +3807,23 @@ function resize() {
   // **35px 로 여섯 자리가 준다**(실측). 그만큼 「빈 칸을 탭해 소환」(#68)의 아이콘
   // 셋이 칸에 비해 커지고, 더 낮은 화면에서는 칸 밖으로 나간다.
   const reserve = window.__bottomReserve || 0;
+  // 화면 위를 기기가 먹는 높이(노치·상태표시줄). `viewport-fit=cover` 라 페이지가
+  // 그 밑까지 깔리는데, HUD 는 y=14 부터 글을 쓰므로 **아이폰에서 「웨이브 n」이
+  // 상태표시줄과 겹쳤다**(실제 신고). 안드로이드·데스크톱은 0 이라 아무것도 안 바뀐다.
+  view.top = Math.max(safeInsetTop(), TOP_GAP_MIN);
   view.w = window.innerWidth;
-  view.h = window.innerHeight - reserve;
+  view.h = window.innerHeight - reserve - view.top;
   // CSS 는 height:100% 라 캔버스가 화면 끝까지 늘어난다. 잘라 쓸 때는 그 높이도 같이
   // 줄여야 한다 — 백버퍼만 짧아지면 그림이 세로로 늘어난다. 0 일 때는 값을 비워
   // 원래의 100% 로 돌려놓는다(웹판은 이 줄을 지나도 아무것도 안 바뀐다).
-  canvas.style.height = reserve ? view.h + 'px' : '';
+  canvas.style.height = view.h + 'px';   // view.top 이 늘 0 이 아니라 조건이 없어졌다
+  // **캔버스를 통째로 내린다 — 그리는 쪽에 변환을 걸지 않는다.** 변환으로 밀면
+  // `drawPause`·`stageCardRects` 가 세워 두는 탭 자리들이 전부 변환 전 좌표라
+  // 손가락이 그만큼 어긋난다(그 값들은 `view` 로 계산해 그대로 저장된다).
+  // 캔버스를 내리면 캔버스 좌표계가 곧 안전영역 아래이고, 밖에서 들어오는 것은
+  // 포인터의 `clientY` 하나뿐이라 그것만 빼면 된다(`evY`).
+  // 위에 남는 띠는 `body` 배경(#0d1117)이 그대로 칠한다 — 게임이 칠하는 색과 같다.
+  canvas.style.marginTop = view.top + 'px';
   canvas.width = Math.round(view.w * dpr);
   canvas.height = Math.round(view.h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -5104,8 +5150,14 @@ function choiceLabel(opt) {
 }
 
 // ── 입력 ─────────────────────────────────────────────────────
+// 포인터의 세로 좌표를 캔버스 좌표로 옮긴다. `resize` 가 캔버스를 안전영역만큼
+// 내려 두므로(`marginTop`) `clientY` 는 그만큼 앞선다. **밖에서 들어오는 좌표는
+// 여기 하나뿐이다** — 그림 쪽은 캔버스 좌표를 그대로 쓰므로 손댈 곳이 없다.
+// 안전영역이 0 인 기기(안드로이드·데스크톱)에서는 항등이라 아무것도 안 바뀐다.
+const evY = e => e.clientY - view.top;
+
 canvas.addEventListener('pointerdown', e => {
-  const px = e.clientX, py = e.clientY;
+  const px = e.clientX, py = evY(e);
   cloudPreload();   // 첫 터치에 미리 받아 둔다
   // 오디오는 사용자 제스처 안에서만 열린다(2.9). 아래 정지 화면 분기보다 **위**여야
   // 정지 화면을 탭해도 열린다 — 그 분기는 탭을 통째로 먹고 return 한다.
@@ -5207,22 +5259,22 @@ canvas.addEventListener('pointermove', e => {
   // 스테이지 목록 끌기. 문턱 8px 은 아래 타워 드래그와 **같은 값이다** — 두 화면에서
   // 「탭인가 끌기인가」의 기준이 다르면 손가락이 배운 것을 화면마다 다시 배워야 한다.
   if (stageDrag) {
-    const dy = e.clientY - stageDrag.y;
+    const dy = evY(e) - stageDrag.y;
     if (Math.abs(dy) > 8) stageDrag.moved = true;
     if (stageDrag.moved) stageScroll = stageDrag.scroll - dy;   // 상한은 metrics 가 조인다
     return;
   }
   if (!drag) return;
   drag.px = e.clientX;
-  drag.py = e.clientY;
-  if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8) drag.moved = true;
+  drag.py = evY(e);
+  if (Math.hypot(e.clientX - drag.sx, evY(e) - drag.sy) > 8) drag.moved = true;
 });
 
 canvas.addEventListener('pointerup', e => {
   if (stageDrag) {
     const moved = stageDrag.moved;
     stageDrag = null;
-    if (!moved) stageTap(e.clientX, e.clientY);
+    if (!moved) stageTap(e.clientX, evY(e));
     return;
   }
   if (!drag) return;
@@ -5236,7 +5288,7 @@ canvas.addEventListener('pointerup', e => {
   }
 
   const from = state.towers.find(t => t.id === d.id);
-  const c = pxToCell(e.clientX, e.clientY);
+  const c = pxToCell(e.clientX, evY(e));
   const overId = c ? occupancy().get(c.gx + ',' + c.gy) : undefined;
   if (!from || overId === undefined || overId === d.id) return;
 
