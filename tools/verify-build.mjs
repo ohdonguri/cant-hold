@@ -103,8 +103,8 @@ async function shoot(browser, url) {
   page.on('pageerror', e => errors.push(String(e)));
   await page.addInitScript(SEED_SCRIPT);
   await page.goto(url);
-  // EASTBIRD 인트로를 걷는다. 실제 시각의 setTimeout(1.5초)으로 사라지는 블록이라
-  // 위 가상 시계(rAF·performance.now)로는 안 앞당겨진다. 두 페이지를 잇따라 띄우는
+  // EASTBIRD 인트로를 걷는다. 저 블록은 **프레임을 세서** 사라지므로(index.html 의 머리
+  // 주석) 수명이 이 하네스가 돌리는 프레임 수에 달려 있다. 두 페이지를 잇따라 띄우는
   // 검사라 「찍는 순간 인트로가 남아 있었나」가 원본과 압축본에서 갈리고, 그러면
   // 코드가 같아도 픽셀 비교가 실패한다. 비교 대상은 게임 화면이므로 걷고 시작한다.
   await page.evaluate(() => {

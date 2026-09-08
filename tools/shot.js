@@ -104,11 +104,12 @@ const capture = async (browser) => {
 
   await page.addInitScript(SEED_SCRIPT);
   await page.goto(URL);
-  // EASTBIRD 인트로를 걷는다. 저 블록은 실제 시각의 setTimeout(1.5초)으로 사라지는데
-  // 이 하네스가 가상 시계로 묶는 것은 rAF·performance.now 뿐이라 안 앞당겨진다. 그대로
-  // 두면 1-initial 이 통째로 로고 화면이고, 뒤 컷들은 페이드가 걸린 순간과 겹쳐서
-  // 런마다 md5 가 갈린다. 이 하네스가 보는 것은 게임 화면이므로 찍기 전에 없앤다.
-  // (init 스크립트로는 못 한다 — 그 시점엔 아직 파싱 전이라 요소가 없다.)
+  // EASTBIRD 인트로를 걷는다. 저 블록은 **프레임을 세서** 사라진다(index.html 의 머리
+  // 주석 — 토스 스플래시 밑에서 시계가 다 타 버리던 것을 고친 자리다). 즉 수명이 이
+  // 하네스가 몇 프레임을 돌리느냐에 달려 있어서, 컷마다·런마다 「찍는 순간 인트로가
+  // 남아 있었나」가 갈린다. 그대로 두면 1-initial 이 통째로 로고 화면이고 뒤 컷들은
+  // 페이드가 걸린 순간과 겹쳐서 md5 가 흔들린다. 이 하네스가 보는 것은 게임 화면이므로
+  // 찍기 전에 없앤다. (init 스크립트로는 못 한다 — 그 시점엔 아직 파싱 전이라 요소가 없다.)
   await page.evaluate(() => {
     const el = document.getElementById('ebIntro');
     if (el) el.remove();
