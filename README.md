@@ -190,6 +190,21 @@ cd toss && npm run build     sync + vite build → toss/dist/
 
 ## 계정 (선택)
 
+### 서버 규칙 누락 사고 (2026-09-08 확인)
+
+9월 4일 배포된 공용 프로젝트의 Firestore 규칙에는 오토런 서킷 경로만 있었고,
+`games/canthold/saves/{uid}`가 빠져 있었다. 관리자 콘솔에서는 기록을 읽고 수정할 수
+있어도 게임의 인증된 사용자는 읽기·쓰기가 모두 거부됐다. 로컬 기록만 보이면서
+서버의 해금 변경이 적용되지 않은 원인이다.
+
+복구에는 [canthold 규칙 조각](docs/canthold-firestore.rules)을 기존 규칙의
+`match /databases/{database}/documents` 안에 추가한다. **이 조각이나 다른 게임의
+단독 규칙으로 공용 프로젝트 규칙 전체를 교체하면 안 된다.** 기존 게임 경로를 보존하고,
+본인 읽기 허용·타인 읽기 거부를 Rules Playground에서 확인한 뒤 게시한다.
+
+로그인 버튼 아래 상태 문구는 화면 안에 별도 공간을 확보한다. 서버 권한 오류가
+다시 발생해도 `저장 거부됨`을 볼 수 있어야 한다.
+
 로그인 없이도 끝까지 돌아간다. 진행도는 항상 `localStorage` 에 먼저 남고,
 로그인은 **기기를 옮길 때** 쓴다. SDK 를 못 받아와도 게임은 그대로 진행된다.
 
@@ -220,9 +235,9 @@ cd toss && npm run build     sync + vite build → toss/dist/
 오리진이라 한 번 로그인하면 어디서나 같은 사람이다 (`eastbird-studio/docs/sso-migration.md`).
 `index.html` 의 config 값은 공개돼도 되는 식별자다 — 접근 통제는 아래 규칙이 한다.
 
-규칙은 게임마다 따로 두지 않는다. 스튜디오 공용 파일 하나가 다섯 게임을 다 받는다 —
-`eastbird-studio/firestore.rules` 의 `match /games/{gameId}/saves/{uid}` 다. 새 게임을
-붙일 때 **두 곳**을 같이 고쳐야 한다.
+Firestore 규칙은 프로젝트 전체에 적용된다. `eastbird-studio/firestore.rules`에는
+`match /games/{gameId}/saves/{uid}` 공용 규칙이 있지만, 로컬 파일과 실제 배포본이
+같다고 가정하면 안 된다. 해당 공용 파일에 새 게임을 붙일 때는 두 곳을 같이 고친다.
 
 - `knownGame()` 의 화이트리스트에 게임 id (`canthold`) 를 넣는다
 - `validSave()` 에 그 게임의 세이브 모양 분기를 (`chSave()`) 더한다
@@ -230,9 +245,10 @@ cd toss && npm run build     sync + vite build → toss/dist/
 둘 중 하나만 하면 절반만 열린다. 화이트리스트에 없으면 **읽기부터** `permission-denied`
 로 떨어지는데, 로그인 자체는 멀쩡히 되므로 증상이 로그인 문제로 안 보인다.
 
-**고친 규칙을 실제로 올리는 건 사람이 Firebase 콘솔에서 해야 한다** (이 환경에는 콘솔
-권한도 firebase CLI 도 없다). 올리기 전에는 화면 아래에 `저장 거부됨 — 서버 규칙을
-확인해야 한다` 가 뜨고, 진행도는 `localStorage` 에만 남는다. 게임은 그대로 끝까지 돌아간다.
+규칙 파일을 고치거나 게임을 배포하는 것만으로 Firebase 규칙이 갱신되지는 않는다.
+현재 배포 규칙을 확인하고 필요한 변경을 병합한 뒤 Firebase 콘솔이나 CLI로 따로 게시한다.
+권한이 거부되면 `저장 거부됨 — 서버 규칙을 확인해야 한다`가 뜨고 진행도는
+`localStorage`에만 남는다. 로그인 성공 자체는 저장 성공을 뜻하지 않는다.
 
 규칙을 고쳤으면 올리기 전에 에뮬레이터로 확인할 수 있다 (Java 필요).
 

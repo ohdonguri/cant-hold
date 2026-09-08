@@ -7,6 +7,21 @@ const { load } = require('./sim');
 const html = fs.readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
 const source = html.slice(html.indexOf("const SAVE_KEY ="), html.indexOf('// ── 스테이지 선택'));
 const stages = load().STAGES;
+
+test('cloud error text fits below login on short and tall screens', () => {
+  const g = load();
+  g.state.phase = 'stage';
+  g.cloud.msg = '저장 거부됨 — 서버 규칙을 확인해야 한다';
+  g.cloud.ok = false;
+  for (const height of [568, 658, 844]) {
+    g.view.h = height;
+    g.draws.reset();
+    g.render();
+    const text = g.draws.geom.find(e => e.m === 'fillText' && e.a[0] === g.cloud.msg);
+    assert.ok(text, 'error must be drawn');
+    assert.ok(text.a[2] + 14 <= height, `error bottom ${text.a[2] + 14} exceeds ${height}`);
+  }
+});
 const copy = x => structuredClone(x);
 const bundle = (unlocked = 1) => ({ v: 3, unlocked, best: [unlocked === 1 ? 0 : 30],
   cleared: [unlocked > 1], run: null });

@@ -123,7 +123,10 @@ function stubCtx(log, texts, geom, images, xform) {
     get(_, p) {
       if (p === 'measureText') return () => ({ width: 10 });
       if (p === 'canvas') return {};
-      if (texts && p === 'fillText') return s => { log.push(p); texts.push(String(s)); };
+      if (texts && p === 'fillText') return (...a) => {
+        log.push(p); texts.push(String(a[0]));
+        if (geom) geom.push({ m: p, a });
+      };
       if (geom && GEOM.includes(p)) return (...a) => { log.push(p); geom.push({ m: p, a }); };
       if (images && p === 'drawImage') return (...a) => { log.push(p); images.push(a); };
       if (xform && XFORM.includes(p)) return (...a) => { log.push(p); xform.push({ m: p, a }); };
@@ -309,7 +312,7 @@ const EXPOSE = [
   // 스테이지 선택 화면의 아래 두 줄. 카드 높이 하한(index.html stageCardRects)이
   // 좁은 화면에서 이 둘을 화면 밖으로 밀어내지 않는지 테스트가 봐야 하는데,
   // 좌표식을 테스트에 베껴 두면 레이아웃을 고쳤을 때 테스트만 옛 값을 지키며 통과한다.
-  'resumeRect', 'cloudRect',
+  'resumeRect', 'cloudRect', 'cloud',
   // 목록 스크롤(#50). `stageListMetrics` 는 「칸이 얼마고 얼마나 넘치는가」의 정본이라
   // 테스트가 좌표식을 베끼지 않게 내보낸다. `stageTap` 은 핸들러 대신 부르는 정문이고
   // (헤드리스가 탭 없이 밟는다), `setStageScroll` 은 스크롤을 감는 유일한 통로다 —
