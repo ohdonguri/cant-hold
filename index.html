@@ -3813,7 +3813,11 @@ function resize() {
   // 화면 위를 기기가 먹는 높이(노치·상태표시줄). `viewport-fit=cover` 라 페이지가
   // 그 밑까지 깔리는데, HUD 는 y=14 부터 글을 쓰므로 **아이폰에서 「웨이브 n」이
   // 상태표시줄과 겹쳤다**(실제 신고). 안드로이드·데스크톱은 0 이라 아무것도 안 바뀐다.
-  view.top = Math.max(safeInsetTop(), TOP_GAP_MIN);
+  // 위쪽을 게임이 아닌 것이 먹는 높이. `__bottomReserve` 와 **같은 통로다** —
+  // 웹판·안드로이드는 항상 0 이고, 토스판이 X·더보기 버튼 높이를 넣는다
+  // (toss/toss.js §위쪽 조작 자리). 기기 안전영역과는 **더한다** — 그 버튼들은
+  // 상태표시줄 아래에 따로 얹히는 것이라 겹치지 않는다.
+  view.top = Math.max(safeInsetTop(), TOP_GAP_MIN) + (window.__topReserve || 0);
   view.w = window.innerWidth;
   view.h = window.innerHeight - reserve - view.top;
   // CSS 는 height:100% 라 캔버스가 화면 끝까지 늘어난다. 잘라 쓸 때는 그 높이도 같이
