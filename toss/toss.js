@@ -35,8 +35,8 @@ import { TossAds, loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/web-f
 // **앱인토스 콘솔에서 발급받아 채운다.** 비어 있으면 광고 호출 자체를 안 한다 —
 // 빈 ID 로 부르면 네이티브가 에러를 뱉고 그게 판마다 반복된다.
 const AD = {
-  fullScreen: '',                          // TODO: 콘솔 > 광고 > 전면 광고 그룹 ID
-  banner: 'ait.v2.live.ce271d27543a4493',  // 콘솔 > 광고 > 배너 광고 그룹 ID
+  fullScreen: 'ait.v2.live.498fb69217df489a',  // 콘솔 > 광고 > 전면 광고 그룹 ID
+  banner: 'ait.v2.live.ce271d27543a4493',      // 콘솔 > 광고 > 배너 광고 그룹 ID
 };
 
 // ── 광고가 왜 안 뜨는지 화면에 적는다 ────────────────────────
@@ -88,6 +88,11 @@ function relayout() {
   try { resize(); } catch { /* 게임이 아직 안 실렸다 */ }
 }
 
+// 광고 SDK 초기화가 끝났는가. **두 광고가 같이 본다** — 전면도 배너도 초기화 전에
+// 부르면 실패하고 그 실패는 조용하다(아래 §붙이는 시점이 문제였다). 선언이 전면 절
+// 위에 있는 것은 전면이 이 파일에서 먼저 나오기 때문이지 전면 전용이라서가 아니다.
+let adsReady = false;
+
 // ── 전면 광고 ────────────────────────────────────────────────
 // **미리 받아 둔다.** 판이 끝난 그 순간에 받기 시작하면 결과 화면이 빈 채로 몇 초
 // 걸린다. 부팅에서 한 번 받아 두고, 한 번 보여줄 때마다 다음 것을 다시 받는다.
@@ -95,6 +100,12 @@ let fullReady = false, fullLoading = false;
 
 function preloadFullScreen() {
   if (!AD.fullScreen || fullReady || fullLoading) return;
+  // **배너와 같은 경주다.** `TossAds.initialize` 가 끝나기 전에 부르면 실패하고,
+  // 그 실패는 `catch` 가 삼킨다. 배너는 화면이 바뀔 때 다시 붙어서 증상이
+  // 「첫 화면에서만 안 뜬다」였는데, 전면은 부팅에서 한 번 받아 두고 판이 끝날 때
+  // 쓰는 것이라 **첫 판의 결과 화면이 통째로 광고 없이 지나간다.** 초기화가 끝나면
+  // `onInitialized` 가 여기를 다시 부른다.
+  if (!adsReady) return;
   try {
     if (!loadFullScreenAd.isSupported()) return;
     fullLoading = true;
@@ -191,7 +202,6 @@ function ensureHost() {
 //   ② 실패하면 재시도한다 — 화면 전환에 기대지 않고 이 파일이 직접 다시 부른다
 //   ③ 붙인 뒤의 결과를 `callbacks` 로 받는다. 「안 찼다(onNoFill)」와 「못 그렸다
 //      (onAdFailedToRender)」가 갈려야 콘솔 문제인지 코드 문제인지 가른다
-let adsReady = false;
 let wantBanner = false;
 let retryT = null, retries = 0;
 const RETRY_MAX = 5;
