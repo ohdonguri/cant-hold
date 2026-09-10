@@ -148,6 +148,10 @@ function copyAssets() {
     recursive: true,
     filter: src => !src.slice(src.lastIndexOf('/') + 1).startsWith('.'),
   });
+  cpSync(join(ROOT, 'assets', 'terrain'), join(OUT_DIR, 'assets', 'terrain'), {
+    recursive: true,
+    filter: src => !src.slice(src.lastIndexOf('/') + 1).startsWith('.'),
+  });
 }
 
 // ── 검사 ──────────────────────────────────────────────────────
@@ -205,10 +209,21 @@ function verify({ html, out, minJs }) {
     towers: ['shredder', 'eroder', 'frost', 'mortar', 'marksman', 'arc', 'mint'],
     enemies: ['grunt', 'armored', 'warded', 'swift', 'regen', 'immune', 'swarm', 'elite'],
   };
-  const spriteFiles = ['towers', 'enemies'].flatMap(group =>
-    spriteNames[group].map(name => `assets/sprites/${group}/${name}.png`));
+  const spriteFiles = ['towers', 'enemies'].flatMap(group => {
+    const template = spriteRefs.find(p => p.includes(`/${group}/`));
+    if (!template) throw new Error('스프라이트 경로 누락: ' + group);
+    return spriteNames[group].flatMap(name => {
+      const base = template.replace('${key}', name);
+      return group === 'enemies'
+        ? [base, base.replace('.png','-side.png'), base.replace('.png','-up.png')]
+        : [base];
+    });
+  });
   const missingSprites = spriteFiles.filter(p => !existsSync(join(OUT_DIR, p)));
   if (missingSprites.length) throw new Error('배포 폴더에 없는 스프라이트: ' + missingSprites.join(', '));
+  const terrainFiles = [...out.matchAll(/['"](assets\/terrain\/[^'"]+\.png)['"]/g)].map(m => m[1]);
+  if (new Set(terrainFiles).size !== 8 || terrainFiles.some(p => !existsSync(join(OUT_DIR, p))))
+    throw new Error('배포용 지형 PNG 누락: ' + terrainFiles.join(', '));
 
   // 참조를 긁는 검사만으로는 **링크를 통째로 지운 경우**를 못 잡는다 — 참조가
   // 없으니 대조할 것도 없어서 조용히 통과한다. 홈 화면 추가에 반드시 있어야 하는

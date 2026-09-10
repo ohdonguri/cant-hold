@@ -65,6 +65,9 @@ const DRIVE = `(() => {
   state.selected = state.towers[0].id;
   state.wave = 9;
   rushWave();
+  // Page load may render one extra menu/build frame. Start the cosmetic clock
+  // with this controlled battle, not with the browser's asynchronous startup.
+  artTime = 0;
 })();`;
 
 // 게임 루프가 정확히 n 프레임 돌 때까지 기다린다.
@@ -115,6 +118,8 @@ async function shoot(browser, url) {
   await runFrames(page, 120, true);     // 마지막 프레임에서 시계를 세우고 찍는다
   const shot = await page.screenshot();
   const snap = await page.evaluate(() => ({
+    // Ignore floating-point summation noise, not a real frame difference.
+    artClock: Math.round(artTime * 1e9) / 1e9,
     wave: state.wave, life: state.life, gold: Math.round(state.gold),
     towers: state.towers.map(t => t.kind + t.star).sort().join(','),
     enemies: state.enemies.length,

@@ -5,6 +5,8 @@
   "scripts": {
     "test": "node --test tools/cloud-save.test.js && node tools/test.js && node tools/seedcheck.js",
     "seedcheck": "node tools/seedcheck.js",
+    "art:check": "node tools/art-check.js",
+    "terrain:check": "node tools/terrain-check.js",
     "tune": "node tools/tune.js",
     "curve": "node tools/curve.js",
     "affinity": "node tools/affinity.js",
