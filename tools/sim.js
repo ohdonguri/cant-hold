@@ -229,6 +229,7 @@ function patch(src, overrides) {
 }
 
 const EXPOSE = [
+  'STAGE_THEMES', 'stageTheme', 'drawAuraFields', 'drawAnimatedTower', 'enemyMotion', 'drawEffects', 'paintedTerrain',
   'CFG', 'state', 'update', 'KINDS', 'KIND_KEYS', 'ENEMY', 'WAVES', 'STAR_MULT',
   'waveHp', 'summon', 'summonCost', 'canPlace', 'occupancy', 'firstOpenRow', 'nextUnlockWave',
   'canMerge', 'mergeAllowed', 'mergeTowers', 'mergeablePair', 'mergeResultSize', 'mergeSpot', 'drawMergePreview',

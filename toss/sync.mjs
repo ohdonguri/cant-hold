@@ -38,6 +38,8 @@ const SRC = join(here, '..', 'index.html');
 const OUT = join(here, 'index.html');
 const SPRITES_SRC = join(here, '..', 'assets', 'sprites');
 const SPRITES_OUT = join(here, 'public', 'assets', 'sprites');
+const TERRAIN_SRC = join(here, '..', 'assets', 'terrain');
+const TERRAIN_OUT = join(here, 'public', 'assets', 'terrain');
 
 function filesUnder(dir, prefix = '') {
   if (!existsSync(dir)) return [];
@@ -47,12 +49,12 @@ function filesUnder(dir, prefix = '') {
   }).sort();
 }
 
-function spriteDrift() {
-  const srcFiles = filesUnder(SPRITES_SRC);
-  const outFiles = filesUnder(SPRITES_OUT);
+function spriteDrift(src = SPRITES_SRC, out = SPRITES_OUT) {
+  const srcFiles = filesUnder(src);
+  const outFiles = filesUnder(out);
   if (srcFiles.join('\n') !== outFiles.join('\n')) return true;
   return srcFiles.some(rel =>
-    !readFileSync(join(SPRITES_SRC, rel)).equals(readFileSync(join(SPRITES_OUT, rel))));
+    !readFileSync(join(src, rel)).equals(readFileSync(join(out, rel))));
 }
 
 let s = readFileSync(SRC, 'utf8');
@@ -187,7 +189,7 @@ if (process.argv.includes('--check')) {
     console.error('toss/index.html 이 웹판과 어긋나 있다. `node toss/sync.mjs` 로 다시 만들 것.');
     process.exit(1);
   }
-  if (spriteDrift()) {
+  if (spriteDrift() || spriteDrift(TERRAIN_SRC, TERRAIN_OUT)) {
     console.error('toss/public 스프라이트가 웹판과 어긋나 있다. `node toss/sync.mjs` 로 다시 만들 것.');
     process.exit(1);
   }
@@ -200,6 +202,8 @@ if (process.argv.includes('--check')) {
     recursive: true,
     filter: src => !src.slice(src.lastIndexOf('/') + 1).startsWith('.'),
   });
+  rmSync(TERRAIN_OUT, { recursive: true, force: true });
+  cpSync(TERRAIN_SRC, TERRAIN_OUT, { recursive: true });
   // **바이트로 잰다.** `s.length` 는 UTF-16 글자 수라 한글이 1 로 세어져서, 같은
   // 자를 두 쪽에 대면 실제로는 5KB 만 줄었는데 100KB 가 줄어든 것처럼 보인다.
   const kb = (n) => (n / 1024).toFixed(0);

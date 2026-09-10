@@ -4188,7 +4188,7 @@ function poolDeck(g, st) {
     !!loadedPng && g.draws.images[0] && g.draws.images[0][0] === loadedPng,
     loadedPng ? 'PNG' : 'PNG 등록 없음');
 
-  const pendingPath = 'assets/sprites/enemies/grunt.png';
+  const pendingPath = g.SPR_ASSET_PATH.grunt;
   const pendingPng = g.images.get(pendingPath);
   g.draws.reset();
   g.drawSprite('grunt', g.ENEMY.grunt.color, 80, 80, 40);
@@ -4196,7 +4196,7 @@ function poolDeck(g, st) {
     !!pendingPng && g.draws.images[0] && g.draws.images[0][0] !== pendingPng,
     pendingPng ? '도트 fallback' : 'PNG 등록 없음');
 
-  const brokenPath = 'assets/sprites/enemies/armored.png';
+  const brokenPath = g.SPR_ASSET_PATH.armored;
   const brokenPng = g.images.fail(brokenPath);
   g.draws.reset();
   g.drawSprite('armored', g.ENEMY.armored.color, 80, 80, 44);
@@ -4430,7 +4430,9 @@ function poolDeck(g, st) {
 
     at(right, 0.3);
     const r1 = shown(g, map);
-    const flipRight = g.draws.count('scale');
+    // Positive scale is body squash/stretch, not a facing flip.
+    const flipCount = () => g.draws.xform.filter(x => x.m === 'scale' && x.a[0] < 0).length;
+    const flipRight = flipCount();
     ok('적이 오른쪽으로 걸으면 옆모습이다', r1 === 'side', r1);
     // 뒤집는 쪽이 오른쪽인 것은 형제 프로젝트(resolveSpriteFacing)와 같은 규칙이다.
     ok('  오른쪽은 뒤집어 그린다', flipRight === 1, '뒤집기 ' + flipRight + '회');
@@ -4438,12 +4440,12 @@ function poolDeck(g, st) {
     at(down, 0.5);
     const r2 = shown(g, map);
     ok('아래로 걸으면 기존 그림(정면)이다', r2 === '기존 그림', r2);
-    ok('  정면은 안 뒤집는다', g.draws.count('scale') === 0, '뒤집기 ' + g.draws.count('scale') + '회');
+    ok('  정면은 안 뒤집는다', flipCount() === 0, '뒤집기 ' + flipCount() + '회');
 
     at(left, 0.5);
     const r3 = shown(g, map);
     ok('왼쪽으로 걸으면 옆모습을 안 뒤집는다',
-      r3 === 'side' && g.draws.count('scale') === 0, r3 + ' / 뒤집기 ' + g.draws.count('scale'));
+      r3 === 'side' && flipCount() === 0, r3 + ' / 뒤집기 ' + flipCount());
 
     // 멈춰 있으면 방향이 안 튄다. 기절·빙결은 위치 갱신 앞에서 빠지므로 이동 벡터가
     // 그대로 남아야 한다 — 0 으로 덮으면 걷던 놈이 죽은 듯이 정면을 본다.
@@ -5032,7 +5034,8 @@ function poolDeck(g, st) {
   // 통째로 타 버린다 — 수명만 믿으면 그 프레임에 화염이 아예 안 그려진다.
   // 렌더 없이 update 만 여러 번 돌린 상태가 정확히 그 조건이다.
   {
-    const t = fired('marksman', null, 1);
+    // 관측소는 이제 기계식 쇠뇌이므로 광원 방출이 있는 마력로로 검사한다.
+    const t = fired('arc', null, 1);
     for (let i = 0; i < 3; i++) g.update(1 / 30);   // x4 의 남은 스텝
     state.enemies.length = 0;
     state.beams.length = 0;
