@@ -1629,13 +1629,13 @@ const BLAST_RADIUS = 0.8;
 const BASE_SPEED = 0.85;   // 칸/초
 
 const ENEMY = {
-  grunt:   { name: '보병', tag: '병', hp: 1.0,  armor: 5,  mres: 0,    speed: 1.0,  r: 0.26, leak: 1, color: '#8b949e' },
+  grunt:   { name: '보병', tag: '병', hp: 1.0,  armor: 5,  mres: 0,    speed: 1.0,  r: 0.26, leak: 1, color: '#b9a583' },
   armored: { name: '중갑', tag: '중', hp: 0.6,  armor: 40, mres: 0,    speed: 0.85, r: 0.28, leak: 2, color: '#a8b3c4' },
   warded:  { name: '마갑', tag: '마', hp: 0.9,  armor: 5,  mres: 0.45, speed: 1.0,  r: 0.26, leak: 2, color: '#a371f7' },
-  swift:   { name: '질주', tag: '질', hp: 0.5,  armor: 0,  mres: 0,    speed: 2.5,  r: 0.20, leak: 1, color: '#7ee787' },
+  swift:   { name: '질주', tag: '질', hp: 0.5,  armor: 0,  mres: 0,    speed: 2.5,  r: 0.20, leak: 1, color: '#e8b74b' },
   regen:   { name: '재생', tag: '재', hp: 1.1,  armor: 8,  mres: 0.1,  speed: 0.9,  r: 0.26, leak: 2, color: '#3fb950', regen: 0.03 },
   immune:  { name: '면역', tag: '면', hp: 1.3,  armor: 12, mres: 0.15, speed: 1.0,  r: 0.28, leak: 2, color: '#f0883e', immune: true },
-  swarm:   { name: '군집', tag: '군', hp: 0.18, armor: 0,  mres: 0,    speed: 1.2,  r: 0.15, leak: 1, color: '#58a6ff' },
+  swarm:   { name: '군집', tag: '군', hp: 0.18, armor: 0,  mres: 0,    speed: 1.2,  r: 0.15, leak: 1, color: '#59c8ce' },
   elite:   { name: '정예', hp: 6.0, tag: '정',  armor: 25, mres: 0.25, speed: 0.7,  r: 0.42, leak: 5, color: '#f85149', elite: true },
 };
 
@@ -2887,7 +2887,8 @@ const sprCache = new Map();
 // 빠졌을 때는 아래 32x32 도트 생성기로 돌아가므로 첫 프레임이 빈 그림이 되지 않는다.
 const SPR_ASSET_PATH = {};
 for (const key of KIND_KEYS) SPR_ASSET_PATH[key] = `assets/sprites/towers/${key}.png`;
-for (const key of Object.keys(ENEMY)) SPR_ASSET_PATH[key] = `assets/sprites/enemies/${key}.png`;
+// A versioned family prevents older up/side frames from replacing the new designs.
+for (const key of Object.keys(ENEMY)) SPR_ASSET_PATH[key] = `assets/sprites/enemies/fantasy/${key}.png`;
 
 // ── 방향별 그림 ───────────────────────────────────────────────
 // 몹은 걸어가는 쪽을, 포탑은 쏘는 쪽을 본다. 방향 그림은 **아직 한 장도 없고**
@@ -2975,6 +2976,14 @@ function loadAsset(id, path) {
   spriteAssets.set(id, image);
 }
 for (const [key, path] of Object.entries(SPR_ASSET_PATH)) loadAsset(key, path);
+loadAsset('terrain-grassland', 'assets/terrain/grassland.png');
+loadAsset('terrain-road', 'assets/terrain/earth-road.png');
+loadAsset('terrain-canyon', 'assets/terrain/canyon.png');
+loadAsset('terrain-wetland', 'assets/terrain/wetland.png');
+loadAsset('terrain-alpine', 'assets/terrain/alpine.png');
+loadAsset('terrain-ruins', 'assets/terrain/ruins.png');
+loadAsset('terrain-fortress', 'assets/terrain/fortress.png');
+loadAsset('terrain-wasteland', 'assets/terrain/wasteland.png');
 // 방향 그림을 **기존 그림 뒤에** 건다. 지금은 전부 404 로 떨어지고(아직 한 장도
 // 없다) 그때는 facingAsset 이 기존 그림으로 돌아가므로 화면이 안 바뀐다. 순서가
 // 중요하다 — 브라우저는 만든 순서대로 요청을 걸므로 실제로 있는 15장이 먼저 간다.
@@ -3647,6 +3656,7 @@ function muzzle(t, tx, ty) {
   const dx = tx - c.x, dy = ty - c.y;
   const len = Math.hypot(dx, dy) || 1;   // 적이 타워와 같은 칸이면 0 이 된다
   t.flash = MUZZLE_LIFE;
+  t.artKick = 0.24;
   t.mzDx = dx / len;
   t.mzDy = dy / len;
   t.mzShown = false;
@@ -3678,9 +3688,16 @@ function muzzle(t, tx, ty) {
 // killEnemy() 를 부르는 훨씬 흔한 정상 킬에서 조용히 깨진다 —
 // 그래서 호출부 플래그가 아니라 e.dead 하나로 잠갔다.
 function beam(t, e) {
-  const c = towerCenter(t);
-  state.beams.push({ x1: c.x, y1: c.y, x2: e.x + 0.5, y2: e.y + 0.5, t: 0.09, color: KINDS[t.kind].color });
+  const c = towerEffectOrigin(t);
+  state.beams.push({ x1: c.x, y1: c.y, x2: e.x + 0.5, y2: e.y + 0.5, t: t.kind === 'marksman' ? 0.24 : 0.09, color: KINDS[t.kind].color, kind: t.kind });
   if (!e.dead) spawnSparks(t, e);
+}
+
+function towerEffectOrigin(t) {
+  const c = towerCenter(t), size = towerFootprint(t);
+  const height = t.kind === 'marksman' ? 0.30 : t.kind === 'arc' ? 0.22 : 0.12;
+  return { x: c.x + (t.mzDx || 0) * size * 0.16,
+    y: c.y - height * size + (t.mzDy || 0) * size * 0.12 };
 }
 
 function updateShells(dt) {
@@ -5552,6 +5569,8 @@ function endWave() {
   // 비용을 두고 경쟁하기 때문이다. 고정값이면 덱 슬롯 낭비가 된다.
   for (const t of state.towers) {
     if (t.kind !== 'mint') continue;
+    t.artIncome = Math.round(CFG.MINT_BASE * STAR_MULT[t.star]);
+    t.artCoin = 1.1;
     state.gold += Math.round(CFG.MINT_BASE * STAR_MULT[t.star]);
     if (t.b3 === 'A') state.gold += Math.min(40 * t.star, Math.round(state.gold * 0.03));
     if (t.b5 === 'A1') state.gold += Math.round(CFG.GOLD_BASE * Math.pow(CFG.GOLD_GROWTH, state.wave) * 0.25);
@@ -5952,6 +5971,11 @@ function updateParticles(dt) {
 // 타격 효과는 웨이브가 끝나도 사라져야 한다. 감쇠를 전투 루프 안에 두면
 // 마지막 한 방의 빔이 화면에 그대로 남는다.
 function decayEffects(dt) {
+  artTime += dt;
+  for (const t of state.towers) {
+    t.artKick = Math.max(0, (t.artKick || 0) - dt);
+    t.artCoin = Math.max(0, (t.artCoin || 0) - dt);
+  }
   for (const b of state.beams) b.t -= dt;
   state.beams = state.beams.filter(b => b.t > 0);
   for (const b of state.blasts) b.t -= dt;
@@ -6395,11 +6419,104 @@ function gateLines() {
   return out;
 }
 
+// Visual themes are keyed by stage name, never by gameplay geometry or difficulty.
+const STAGE_THEMES = {
+  '외곽 도로': ['초원의 옛길', '#13241e', '#293e2b', '#314932', '#827459', '#a28d68', '#4e4535', 'grass'],
+  '이중 병목': ['붉은 협곡', '#281d19', '#54392c', '#634330', '#927453', '#b89a6d', '#594832', 'canyon'],
+  '갈래길': ['갈라진 자작숲', '#17291e', '#304c34', '#38573a', '#8a8060', '#b4a37b', '#554b39', 'forest'],
+  '역류': ['거슬러 흐르는 여울', '#102932', '#21434e', '#29525c', '#607e83', '#92b0ae', '#355459', 'water'],
+  '분수령': ['눈 녹은 산등성이', '#1b2830', '#3b5050', '#465c58', '#8b9690', '#bdc9bd', '#586760', 'snow'],
+  '합수': ['물안개 습지', '#142d2a', '#2b4940', '#34564a', '#778271', '#a9af8c', '#4c574a', 'marsh'],
+  '매듭': ['뒤엉킨 뿌리숲', '#25251a', '#434728', '#505232', '#8f7951', '#baa16b', '#584c32', 'roots'],
+  '겹친 복도': ['잊힌 지하 회랑', '#1d1c30', '#383547', '#413e51', '#73717d', '#a09cab', '#4a4658', 'ruins'],
+  '두겹 고리': ['달빛의 환상석', '#151e36', '#293953', '#31415b', '#6c8194', '#9bb6c7', '#3d536b', 'runes'],
+  '세물머리': ['세 강의 합류지', '#102b32', '#275155', '#2c605e', '#7f9b91', '#b4c5ad', '#456861', 'delta'],
+  '빗장': ['봉인된 성문', '#29221e', '#494336', '#514b3c', '#827a67', '#b3a58a', '#524a3e', 'fortress'],
+  '턱': ['층층이 깎인 절벽', '#2d2820', '#5b4d35', '#68583e', '#a38d69', '#d0b68a', '#69593f', 'terrace'],
+  '재': ['구름 걸린 고갯길', '#202d31', '#3b5052', '#455c5b', '#879894', '#bdccc4', '#536762', 'pass'],
+  '후미': ['달빛이 고인 만', '#142332', '#294459', '#315066', '#7c909a', '#aec4c7', '#4a6271', 'bay'],
+  '선돌': ['거석의 황야', '#252831', '#444c49', '#4e5850', '#889183', '#bbc2a5', '#565e54', 'menhir'],
+  '잘록이': ['바람의 좁은 목', '#302321', '#634539', '#714f40', '#a78065', '#d3aa82', '#705540', 'gorge'],
+  '톱날': ['뾰족바위 채석장', '#27262b', '#504952', '#5c535c', '#9a8990', '#c4b0b3', '#66565e', 'quarry'],
+  '사슬': ['묶여 있는 폐성', '#20232e', '#3c4550', '#454f5c', '#7f8993', '#acb8bd', '#505966', 'chains'],
+  '샛문': ['담쟁이 비밀 정원', '#182b24', '#345341', '#3f614b', '#9a9472', '#c7c19a', '#635f49', 'garden'],
+  '겹굽이': ['황혼의 굽은 계곡', '#2e2333', '#574153', '#644a5e', '#a08c8a', '#c6adaa', '#6a575e', 'dusk'],
+};
+function stageTheme() {
+  const t = STAGE_THEMES[STAGES[state.stage]?.name] || STAGE_THEMES['외곽 도로'];
+  return { title: t[0], sky: t[1], ground: t[2], ground2: t[3], road: t[4], light: t[5], shade: t[6], motif: t[7] };
+}
+// A separate animation clock: paused gameplay freezes art; rendering consumes no RNG.
+let artTime = 0;
+function artHash(x, y, salt = 0) {
+  return ((x * 73856093) ^ (y * 19349663) ^ (salt * 83492791)) >>> 0;
+}
+function paintedTerrain() {
+  const motif = stageTheme().motif;
+  const families = {
+    grass:'grassland', forest:'grassland', roots:'grassland', garden:'grassland',
+    canyon:'canyon', terrace:'canyon', gorge:'canyon', dusk:'canyon',
+    water:'wetland', marsh:'wetland', delta:'wetland', bay:'wetland',
+    snow:'alpine', pass:'alpine', ruins:'ruins', runes:'ruins',
+    fortress:'fortress', chains:'fortress', menhir:'wasteland', quarry:'wasteland',
+  };
+  const family = families[motif];
+  const ground = spriteAssets.get('terrain-' + family);
+  const road = spriteAssets.get('terrain-road');
+  const tint = {forest:'#74956b18', roots:'#59451c25', garden:'#76a96c18',
+    terrace:'#d2aa6320', gorge:'#642e2825', dusk:'#703b7338',
+    marsh:'#52633324', delta:'#329d9020', bay:'#17245455',
+    pass:'#a9baba18', runes:'#353ea738', chains:'#26335430', quarry:'#84607928'}[motif];
+  return ground?.complete && ground.naturalWidth && road?.complete && road.naturalWidth
+    ? { ground, road, family, tint } : null;
+}
+function drawStageBackdrop() {
+  const th = stageTheme(), { w, h, ox, oy, cell } = view;
+  ctx.fillStyle = th.sky;
+  ctx.fillRect(0, 0, w, h);
+  const painted = paintedTerrain();
+  if (painted) {
+    // Place rich border scenery outside the unchanged, interactive 7x10 board.
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(painted.ground, ox - cell, oy - cell * 1.6,
+      cell * (CFG.BOARD_W + 2), cell * (CFG.BOARD_H + 3.2));
+    if (painted.tint) {
+      ctx.fillStyle = painted.tint;
+      ctx.fillRect(ox-cell, oy-cell*1.6, cell*(CFG.BOARD_W+2), cell*(CFG.BOARD_H+3.2));
+    }
+    ctx.restore();
+    return;
+  }
+  // Broad quiet silhouettes behind the board, kept away from interactive information.
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  for (let i = 0; i < 12; i++) {
+    const n = artHash(i, state.stage, 71), bw = w / 9;
+    const peak = oy - 8 - (n % 36);
+    ctx.fillStyle = i % 2 ? th.ground : th.ground2;
+    ctx.beginPath();
+    ctx.moveTo(i * bw - bw, oy + 12);
+    ctx.lineTo(i * bw + bw * 0.3, peak);
+    ctx.lineTo(i * bw + bw * 1.6, oy + 12);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.fillStyle = th.light;
+  ctx.font = '600 10px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(th.title, ox + 4, oy - 9);
+  ctx.fillStyle = '#00000038';
+  ctx.fillRect(ox - 4, oy + 5, CFG.BOARD_W * cell + 8, CFG.BOARD_H * cell + 3);
+}
+
 function drawBoard() {
   const { cell, ox, oy } = view;
   const open = firstOpenRow();
   const U = 16;                              // 칸 하나를 16 도트로 본다
   const px = cell / U;
+  const th = stageTheme();
+  const painted = paintedTerrain();
   const dot = (x, y, i, j, w, h, c) => {
     ctx.fillStyle = c;
     ctx.fillRect(Math.round(x + i * px), Math.round(y + j * px),
@@ -6408,15 +6525,59 @@ function drawBoard() {
   // 같은 칸은 늘 같은 무늬가 나오도록 좌표에서 값을 뽑는다
   const hash = (gx, gy) => ((gx * 73856093) ^ (gy * 19349663) ^ 0x9e3779b9) >>> 0;
 
-  for (let gy = 0; gy < CFG.BOARD_H; gy++) {
+  if (!painted) for (let gy = 0; gy < CFG.BOARD_H; gy++) {
     for (let gx = 0; gx < CFG.BOARD_W; gx++) {
       if (isPath(gx, gy)) continue;
       const { x, y } = cellToPx(gx, gy);
-      dot(x, y, 0, 0, U, U, (gx + gy) % 2 ? '#1a212e' : '#1d2533');
+      dot(x, y, 0, 0, U, U, (gx + gy) % 2 ? th.ground : th.ground2);
       const h = hash(gx, gy);
       for (let n = 0; n < 4; n++) {
         const v = (h >> (n * 8)) & 255;
-        dot(x, y, v & 15, (v >> 4) & 15, 1, 1, n < 2 ? '#222b3a' : '#161c27');
+        dot(x, y, v & 15, (v >> 4) & 15, 1, 1, n < 2 ? th.ground2 : th.ground);
+      }
+      const m = th.motif;
+      // Low-relief decoration leaves the tile centre clear for placement.
+      if (['water', 'marsh', 'delta', 'bay'].includes(m)) {
+        dot(x, y, 1, 3 + h % 6, 6, 1, th.road + '65');
+        dot(x, y, 8, 10 + h % 3, 5, 1, th.light + '38');
+        if (m === 'marsh' || m === 'delta') {
+          dot(x, y, 12, 1, 1, 4, '#82926b');
+          dot(x, y, 14, 2, 1, 3, '#526b48');
+        }
+      } else if (['grass', 'forest', 'roots', 'garden'].includes(m)) {
+        dot(x, y, 1, 11, 1, 3, '#6b8051');
+        dot(x, y, 3, 12, 1, 2, '#91a365');
+        if (h % 3 === 0) dot(x, y, 13, 2, 2, 2, m === 'garden' ? '#ca9fb4' : '#84956b');
+        if (m === 'roots') {
+          dot(x, y, 0, 1, 10, 2, '#786045');
+          dot(x, y, 8, 2, 2, 4, '#69523d');
+        }
+        if (m === 'forest' && h % 4 === 0) {
+          dot(x, y, 13, 0, 2, 6, '#9caa8d');
+          dot(x, y, 13, 2, 1, 1, '#4b5849');
+        }
+      } else if (['ruins', 'fortress', 'runes', 'chains'].includes(m)) {
+        dot(x, y, 0, 0, 16, 1, th.shade);
+        dot(x, y, gx % 2 ? 5 : 11, 0, 1, 4, th.shade);
+        if (m === 'runes' && h % 3 === 0) {
+          dot(x, y, 2, 2, 3, 1, '#7896b3');
+          dot(x, y, 3, 1, 1, 4, '#7896b3');
+        }
+        if (m === 'chains') {
+          dot(x, y, 1, 1, 4, 1, '#879095');
+          dot(x, y, 1, 3, 4, 1, '#657681');
+          dot(x, y, 1, 1, 1, 3, '#657681');
+          dot(x, y, 4, 1, 1, 3, '#657681');
+        }
+      } else {
+        // Strata, snow ledges and standing stones distinguish mountain stages.
+        dot(x, y, 1, 1, 5 + h % 7, 2, th.shade);
+        dot(x, y, 2, 1, 4 + h % 4, 1, th.light + '65');
+        if (['snow', 'pass'].includes(m)) dot(x, y, 0, 0, 5 + h % 6, 2, '#b8ccbd');
+        if (['menhir', 'quarry', 'gorge'].includes(m) && h % 3 === 0) {
+          dot(x, y, 12, 1, 2, 4, th.shade);
+          dot(x, y, 12, 0, 1, 3, th.light);
+        }
       }
     }
   }
@@ -6427,24 +6588,53 @@ function drawBoard() {
     for (let gx = 0; gx < CFG.BOARD_W; gx++) {
       if (!isPath(gx, gy)) continue;
       const { x, y } = cellToPx(gx, gy);
-      dot(x, y, 0, 0, U, U, '#46515f');
+      if (painted) {
+        // One continuous material, clipped to the authoritative gameplay cells.
+        // No painted-in route: visual and collision paths cannot drift apart.
+        const im = painted.road, sw = im.naturalWidth / 4, sh = im.naturalHeight / 4;
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(im, (gx % 4) * sw, (gy % 4) * sh, sw, sh, x, y, cell, cell);
+        if (th.motif !== 'grass') {
+          ctx.fillStyle = th.road + '65'; ctx.fillRect(x,y,cell,cell);
+          if (painted.family === 'ruins' || painted.family === 'fortress') {
+            dot(x,y,0,8,16,0.35,th.shade+'70');
+            dot(x,y,gx%2?5:11,0,0.35,8,th.shade+'70');
+          }
+        }
+        // A thin irregular turf lip, never a regular paving/checkerboard pattern.
+        for (let i = 0; i < U; i++) {
+          const lip = 0.4 + (hash(gx * U + i, gy) % 3) * 0.25;
+          if (!isPath(gx, gy - 1)) dot(x,y,i,0,1,lip,th.ground2);
+          if (!isPath(gx, gy + 1)) dot(x,y,i,U-lip,1,lip,th.ground);
+          if (!isPath(gx - 1, gy)) dot(x,y,0,i,lip,1,th.ground2);
+          if (!isPath(gx + 1, gy)) dot(x,y,U-lip,i,lip,1,th.ground);
+        }
+        ctx.restore();
+        continue;
+      }
+      dot(x, y, 0, 0, U, U, th.road);
 
       const h = hash(gx, gy);
       for (let n = 0; n < 4; n++) {
         const v = (h >> (n * 8)) & 255;
-        dot(x, y, v & 15, (v >> 4) & 15, 1, 1, n < 2 ? '#4d5867' : '#3e4855');
+        dot(x, y, v & 15, (v >> 4) & 15, 1, 1, n < 2 ? th.light + '60' : th.shade + '55');
       }
+      // Staggered paving joints, not asphalt lane markings.
+      dot(x, y, 0, 8, 16, 1, th.shade + '70');
+      dot(x, y, 5, 0, 1, 8, th.shade + '60');
+      dot(x, y, 11, 9, 1, 7, th.shade + '60');
 
       const N = isPath(gx, gy - 1), S = isPath(gx, gy + 1);
       const W = isPath(gx - 1, gy), E = isPath(gx + 1, gy);
-      if (!N) dot(x, y, 0, 0, U, 1, '#5b6675');
-      if (!S) dot(x, y, 0, U - 1, U, 1, '#2f3742');
-      if (!W) dot(x, y, 0, 0, 1, U, '#535e6d');
-      if (!E) dot(x, y, U - 1, 0, 1, U, '#343d49');
+      if (!N) dot(x, y, 0, 0, U, 1, th.light);
+      if (!S) dot(x, y, 0, U - 1, U, 1, th.shade);
+      if (!W) dot(x, y, 0, 0, 1, U, th.light);
+      if (!E) dot(x, y, U - 1, 0, 1, U, th.shade);
 
       // 진행 방향 점선. 통로가 어느 쪽으로 뻗는지 한눈에 보인다.
-      if (W || E) { dot(x, y, 2, 7, 3, 1, '#697484'); dot(x, y, 9, 7, 3, 1, '#697484'); }
-      else if (N || S) { dot(x, y, 7, 2, 1, 3, '#697484'); dot(x, y, 7, 9, 1, 3, '#697484'); }
+      if (W || E) dot(x, y, 2, 4, 2, 1, th.light + '65');
+      else if (N || S) dot(x, y, 7, 2, 1, 2, th.light + '65');
     }
   }
 
@@ -6497,7 +6687,7 @@ function drawTower(t) {
   const k = KINDS[t.kind];
   const sel = state.selected === t.id;
 
-  ctx.fillStyle = '#22272e';
+  ctx.fillStyle = '#15201a70';
   ctx.strokeStyle = STAR_COLOR[t.star];
   ctx.lineWidth = sel ? 3 : 2;
   roundRect(x + 2, y + 2, w - 2, w - 2, 6);
@@ -6509,8 +6699,8 @@ function drawTower(t) {
   const icx = x + 2 + (w - 2) / 2, icy = y + 2 + (w - 2) / 2 - cell * 0.08;
   // 5성은 2x2 라 그림도 두 배다(size 가 2). 방향은 크기와 무관하다 — 같은 한 장을
   // 같은 규칙으로 뒤집으므로 여기서 갈릴 것이 없다.
-  const isz = cell * 0.82 * size;
-  if (!drawSprite(t.kind, k.color, icx, icy, isz, isz, towerFacing(t))) {
+  const isz = cell * 0.90 * size;
+  if (!drawAnimatedTower(t, icx, icy, isz)) {
     ctx.fillStyle = k.color;
     ctx.font = `700 ${Math.round(cell * 0.42 * size)}px system-ui, sans-serif`;
     ctx.fillText(k.tag, icx, icy);
@@ -6521,6 +6711,35 @@ function drawTower(t) {
   ctx.fillText('★' + t.star, x + 2 + (w - 2) / 2, y + w - cell * 0.18);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
+}
+
+function drawAnimatedTower(t, x, y, size) {
+  const k = KINDS[t.kind];
+  const { image, flip } = facingAsset(t.kind, towerFacing(t));
+  if (!image || !image.complete || !image.naturalWidth)
+    return drawSprite(t.kind, k.color, x, y, size, size, towerFacing(t));
+  const kick = Math.sin(Math.PI * Math.min(1, (t.artKick || 0) / 0.24));
+  const idle = Math.sin(artTime * 3 + t.id * 0.73);
+  // Cut at the stone plinth. It never recoils or turns with the upper mechanism.
+  // Overlap the cut by two source pixels so motion cannot reveal a hairline seam.
+  const W = image.naturalWidth, H = image.naturalHeight;
+  const cut = Math.floor(H * 0.79), top = y - size / 2, left = x - size / 2;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  if (flip) { ctx.translate(x * 2, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(image, 0, cut, W, H - cut, left, top + size * cut / H, size, size * (H - cut) / H);
+  let dx = 0, dy = 0, sy = 1;
+  if (['mortar', 'marksman'].includes(t.kind)) {
+    dx = -kick * size * 0.025;
+    dy = kick * size * 0.032;
+  } else if (t.kind === 'shredder') sy = 1 - kick * 0.065;
+  else if (t.kind === 'eroder') sy = 1 + idle * 0.012;
+  else if (t.kind === 'arc') dy = idle * size * 0.01 - kick * size * 0.025;
+  else if (t.kind === 'mint') sy = 1 + Math.sin((t.artCoin || 0) * 18) * Math.min(0.035, (t.artCoin || 0) * 0.05);
+  const sh = Math.min(H, cut + 2), dh = sh / H * size * sy;
+  ctx.drawImage(image, 0, 0, W, sh, left + dx, top + size * sh / H - dh + dy, size, dh);
+  ctx.restore();
+  return true;
 }
 
 // 사거리는 숫자로 적어봐야 어디까지 닿는지 모른다. 그래서 원으로 그린다.
@@ -6539,7 +6758,7 @@ function drawRange(t, alpha) {
   ctx.globalAlpha = alpha === undefined ? 1 : alpha;
 
   roundRect(cx - r, cy - r, r * 2, r * 2, 6);
-  ctx.fillStyle = k.color + (aura ? '2e' : '14');
+  ctx.fillStyle = k.color + (aura ? '0c' : '08');
   ctx.fill();
   ctx.strokeStyle = k.color;
   ctx.lineWidth = 2;
@@ -6553,28 +6772,67 @@ function drawRange(t, alpha) {
 // 적이 그 안에 들어온 순간이 그대로 읽힌다.
 function drawAuraFields() {
   const { cell } = view;
-  for (const t of state.towers) {
-    if (!AURA_KINDS.has(t.kind)) continue;
-    const size = towerFootprint(t);
-    const { x, y } = cellToPx(t.gx, t.gy);
-    const r = towerRange(t) * cell;
-    const cx = x + cell * size / 2, cy = y + cell * size / 2;
-    ctx.fillStyle = KINDS[t.kind].color + '16';
-    roundRect(cx - r, cy - r, r * 2, r * 2, 6);
-    ctx.fill();
+  // Union each aura kind per tile. Two same-kind towers do not double opacity.
+  for (const kind of AURA_KINDS) {
+    const towers = state.towers.filter(t => t.kind === kind);
+    if (!towers.length) continue;
+    const t = towers[0];
+    const ranges = towers.map(t => ({ ...towerCenter(t), r: towerRange(t) }));
+    ctx.save(); ctx.beginPath();
+    for (const c of ranges) ctx.rect(view.ox + (c.x - c.r) * cell, view.oy + (c.y - c.r) * cell, c.r * 2 * cell, c.r * 2 * cell);
+    ctx.clip();
+    for (let gy = 0; gy < CFG.BOARD_H; gy++) {
+      for (let gx = 0; gx < CFG.BOARD_W; gx++) {
+        if (!isPath(gx, gy)) continue;
+        if (!ranges.some(c => gx + 1 > c.x - c.r && gx < c.x + c.r && gy + 1 > c.y - c.r && gy < c.y + c.r)) continue;
+        // The union clip covers partial edge tiles from every same-kind tower.
+        ctx.save();
+        const p = cellToPx(gx, gy), q = cell / 16;
+        const phase = (artTime * 0.5 + (artHash(gx, gy) % 100) / 100) % 1;
+        ctx.fillStyle = KINDS[t.kind].color + '13';
+        ctx.fillRect(p.x, p.y, cell, cell);
+        ctx.globalAlpha = 0.10 + Math.sin(phase * Math.PI) * 0.08;
+        ctx.strokeStyle = KINDS[t.kind].color;
+        ctx.lineWidth = Math.max(1, q);
+        ctx.beginPath();
+        if (t.kind === 'shredder') {
+          ctx.moveTo(p.x + q * 2, p.y + q * 5);
+          ctx.lineTo(p.x + q * 6, p.y + q * 7);
+          ctx.lineTo(p.x + q * 5, p.y + q * 10);
+          ctx.lineTo(p.x + q * 12, p.y + q * 13);
+        } else if (t.kind === 'frost') {
+          const ax = p.x + q * 4, ay = p.y + q * 5;
+          ctx.moveTo(ax - q * 2, ay); ctx.lineTo(ax + q * 2, ay);
+          ctx.moveTo(ax, ay - q * 2); ctx.lineTo(ax, ay + q * 2);
+          ctx.moveTo(p.x + q * 10, p.y + q * 12); ctx.lineTo(p.x + q * 14, p.y + q * 12);
+        } else {
+          const yy = p.y + q * (12 - phase * 3);
+          ctx.moveTo(p.x + q * 2, yy); ctx.lineTo(p.x + q * 6, yy);
+          ctx.moveTo(p.x + q * 9, yy - q * 5); ctx.lineTo(p.x + q * 13, yy - q * 5);
+        }
+        ctx.stroke(); ctx.restore();
+      }
+    }
+    ctx.restore();
   }
 }
 
-function drawEffects() {
+function drawEffects(overlay = false) {
   const { cell, ox, oy } = view;
   const P = (gx, gy) => ({ x: ox + gx * cell, y: oy + gy * cell });
 
-  for (const p of state.patches) {
+  for (const p of overlay ? [] : state.patches) {
     const c = P(p.x, p.y);
     ctx.fillStyle = 'rgba(210,153,34,0.18)';
     ctx.beginPath();
     ctx.arc(c.x, c.y, p.r * cell, 0, Math.PI * 2);
     ctx.fill();
+    for (let i = 0; i < 5; i++) {
+      const a = i * 2.4, r = p.r * cell * 0.6;
+      const f = (artTime * 2 + i * 0.21) % 1;
+      ctx.fillStyle = i % 2 ? '#f5c66d90' : '#ed883a80';
+      ctx.fillRect(c.x + Math.cos(a) * r, c.y + Math.sin(a) * r - f * cell * 0.12, 2, 3);
+    }
   }
 
   // 빔은 두 겹이다. 한 겹이면 굵기를 어떻게 잡아도 "선"이지 "빛"이 아니다.
@@ -6582,8 +6840,59 @@ function drawEffects() {
   // lineCap 은 건드리지 않는다 — ctx 전역이라 복구를 한 번 빠뜨리면
   // 그 뒤의 모든 stroke(디버프 막대·블라스트 링)로 새어 나간다.
   for (const b of state.beams) {
+    if ((b.kind === 'marksman') !== overlay) continue;
     const a = P(b.x1, b.y1), c = P(b.x2, b.y2);
     const al = Math.min(1, b.t * 8);
+    if (b.kind === 'shredder' || b.kind === 'eroder') {
+      ctx.save();
+      ctx.globalAlpha = al;
+      ctx.strokeStyle = b.kind === 'shredder' ? '#f4b46c' : '#d99aff';
+      ctx.lineWidth = Math.max(1, cell * 0.04);
+      // Aura towers strike at the victim; they no longer masquerade as lasers.
+      for (let i = 0; i < 3; i++) {
+        const dx = (i - 1) * cell * 0.12;
+        ctx.beginPath();
+        if (b.kind === 'shredder') {
+          ctx.moveTo(c.x + dx - cell * 0.05, c.y - cell * 0.12);
+          ctx.lineTo(c.x + dx + cell * 0.04, c.y + cell * 0.09);
+        } else {
+          const rise = (1 - b.t / 0.09) * cell * 0.22;
+          ctx.moveTo(c.x + dx, c.y - rise);
+          ctx.lineTo(c.x + dx + cell * 0.06, c.y - rise - cell * 0.07);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+      continue;
+    }
+    if (b.kind === 'marksman') {
+      const dx = c.x - a.x, dy = c.y - a.y, len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len || (dy === 0 ? 1 : 0), uy = dy / len;
+      // Visual flight only: damage/target selection still happen at fire time.
+      const flight = Math.max(0, Math.min(1, (0.24 - b.t) / 0.16));
+      c.x = a.x + dx * flight; c.y = a.y + dy * flight;
+      const point = (d, side = 0) => ({x:c.x + cell*(ux*d-uy*side), y:c.y + cell*(uy*d+ux*side)});
+      const line = (p,q) => {
+        ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+      };
+      ctx.save(); ctx.globalAlpha = Math.min(1, Math.max(0, b.t / 0.08));
+      ctx.strokeStyle = '#483528'; ctx.lineWidth = Math.max(2, cell * 0.075);
+      line(point(-0.46),point(-0.08));
+      ctx.strokeStyle = '#c99b60'; ctx.lineWidth = Math.max(1, cell * 0.035);
+      line(point(-0.46),point(-0.08));
+      ctx.strokeStyle = '#b9d6ad';
+      for (const side of [-1,1]) line(point(-0.43,side*0.085),point(-0.30));
+      ctx.fillStyle = '#e9e2c8';
+      ctx.beginPath(); ctx.moveTo(c.x, c.y);
+      ctx.lineTo(c.x - ux * cell * 0.23 + uy * cell * 0.07, c.y - uy * cell * 0.23 - ux * cell * 0.07);
+      ctx.lineTo(c.x - ux * cell * 0.23 - uy * cell * 0.07, c.y - uy * cell * 0.23 + ux * cell * 0.07);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#d6bb88';
+      const spread = 0.08 + Math.max(0,Math.min(1,1-b.t/0.08))*0.16;
+      if (flight === 1) for (const side of [-1,1]) line(point(0.02,side*spread),point(0.09,side*(spread+0.05)));
+      ctx.restore();
+      continue;
+    }
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(c.x, c.y);
@@ -6598,6 +6907,7 @@ function drawEffects() {
     ctx.globalAlpha = 1;
   }
 
+  if (overlay) return;
   // 총구 화염. 빔 뒤에 그려야 빔 위에 얹혀서 "여기서 나갔다"로 읽힌다.
   // 게이트는 둘이다 — 아직 살아 있거나(flash), 살아 있던 적이 없더라도 이 프레임에
   // 태어난 것(mzShown === false). 두 번째가 없으면 배속에서 화염이 update 사이에
@@ -6606,14 +6916,24 @@ function drawEffects() {
   for (const t of state.towers) {
     const live = t.flash > 0;
     if (!live && t.mzShown !== false) continue;
-    const c = towerCenter(t);
-    // 발밑이 아니라 몸 바깥 끝이다. 상수로 박으면 5성 2x2 의 몸 안에서 빛난다.
-    const off = towerFootprint(t) * 0.45;
-    const p = P(c.x + t.mzDx * off, c.y + t.mzDy * off);
+    // Each mechanism has its own emission height above the fixed plinth.
+    const src = towerEffectOrigin(t);
+    const p = P(src.x, src.y);
     // 래치로 들어온 프레임은 수명이 이미 다 탔다. 알파를 수명으로 계산하면
     // 0 이 되어 게이트만 통과하고 아무것도 안 보인다 — 그 한 프레임은 최대로 낸다.
     const a = live ? Math.min(1, t.flash / MUZZLE_LIFE) : 1;
     t.mzShown = true;
+    // Mechanical release and upper-body recoil replace a glowing gun muzzle.
+    if (t.kind === 'marksman') continue;
+    if (t.kind === 'shredder' || t.kind === 'eroder') {
+      ctx.save();
+      ctx.globalAlpha = a * 0.85;
+      ctx.fillStyle = t.kind === 'shredder' ? '#e3bd87' : '#b585ed';
+      for (let i = 0; i < 3; i++)
+        ctx.fillRect(p.x + (i - 1) * cell * 0.1, p.y - cell * (0.05 + i % 2 * 0.07), cell * 0.045, cell * 0.045);
+      ctx.restore();
+      continue;
+    }
     ctx.fillStyle = KINDS[t.kind].color;
     ctx.globalAlpha = a * 0.5;
     ctx.beginPath();
@@ -6632,10 +6952,14 @@ function drawEffects() {
     const x = s.x + (s.tx - s.x) * k, y = s.y + (s.ty - s.y) * k;
     const c = P(x, y);
     const arc = Math.sin(k * Math.PI) * cell * 0.7;
-    ctx.fillStyle = '#d29922';
+    ctx.fillStyle = '#242638';
     ctx.beginPath();
-    ctx.arc(c.x, c.y - arc, 4, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y - arc, Math.max(3, cell * 0.085), 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = '#9b9dab';
+    ctx.fillRect(c.x - 2, c.y - arc - 3, 2, 2);
+    ctx.fillStyle = '#ffc36a';
+    ctx.fillRect(c.x + 2, c.y - arc - 6, 2, 3);
   }
 
   for (const b of state.blasts) {
@@ -6645,6 +6969,49 @@ function drawEffects() {
     ctx.beginPath();
     ctx.arc(c.x, c.y, b.r * cell * (1.4 - b.t * 1.6), 0, Math.PI * 2);
     ctx.stroke();
+    const burst = Math.max(0, b.t / 0.25);
+    ctx.save();
+    ctx.globalAlpha = burst;
+    for (let i = 0; i < 8; i++) {
+      const angle = i * Math.PI / 4;
+      const r = b.r * cell * (1 - burst) * 0.8;
+      const s = Math.max(2, cell * 0.12 * burst);
+      ctx.fillStyle = i % 2 ? '#efad54' : '#ead1a2';
+      ctx.fillRect(c.x + Math.cos(angle) * r - s / 2, c.y + Math.sin(angle) * r - s / 2, s, s);
+    }
+    ctx.restore();
+  }
+  drawTowerAmbient();
+}
+
+function drawTowerAmbient() {
+  const { cell, ox, oy } = view;
+  for (const t of state.towers) {
+    const c = towerCenter(t), size = towerFootprint(t);
+    const x = ox + c.x * cell, y = oy + c.y * cell;
+    ctx.save();
+    if (t.kind === 'frost' || t.kind === 'eroder' || t.kind === 'arc') {
+      for (let i = 0; i < 3; i++) {
+        const phase = (artTime * (t.kind === 'arc' ? 0.9 : 0.45) + i / 3 + t.id * 0.17) % 1;
+        ctx.globalAlpha = Math.sin(phase * Math.PI) * 0.65;
+        ctx.fillStyle = t.kind === 'frost' ? '#c9f0ff' : KINDS[t.kind].color;
+        const xx = x + Math.sin(i * 2.4 + artTime) * cell * 0.17 * size;
+        const yy = y - cell * size * (0.16 + phase * 0.30);
+        ctx.fillRect(xx, yy, Math.max(1, cell * 0.035), Math.max(1, cell * 0.035));
+      }
+    }
+    if (t.kind === 'mint' && t.artCoin > 0) {
+      const p = 1 - t.artCoin / 1.1;
+      ctx.globalAlpha = Math.min(1, t.artCoin * 3);
+      const yy = y - cell * (0.35 + p * 0.6);
+      ctx.fillStyle = '#ffda74';
+      ctx.fillRect(x - cell * 0.06, yy, cell * 0.12, cell * 0.16);
+      ctx.fillStyle = '#80531f';
+      ctx.fillRect(x - 0.5, yy + 2, 1, cell * 0.1);
+      ctx.textAlign = 'center'; ctx.font = '700 11px system-ui, sans-serif';
+      ctx.fillStyle = '#ffe4a0'; ctx.fillText('+' + t.artIncome + 'G', x, yy - 4);
+    }
+    ctx.restore();
   }
 }
 
@@ -6654,6 +7021,39 @@ function mixHex(a, b, t) {
   const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
   const m = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
   return '#' + m(r1, r2) + m(g1, g2) + m(b1, b2);
+}
+
+// Distance-driven gait follows the real movement speed, including slow, stun and
+// pause. Pure rendering: no timers, random draws or combat-state mutations.
+function enemyMotion(e) {
+  const stride = {grunt:1.5,armored:1.1,elite:0.9,swift:1.65,warded:0.7,regen:1.1,immune:1.2,swarm:2.3};
+  const phase = ((e.dist || 0) * (stride[e.kind] || 1) + (e.id || 0) * 0.381966) * Math.PI * 2;
+  const step = Math.sin(phase), hop = (1 - Math.cos(phase * 2)) / 2;
+  const side = Math.abs(e.mvx || 0) > Math.abs(e.mvy || 0) ? Math.sign(e.mvx) : 0;
+  let lift = 0, sx = 1, sy = 1, tilt = 0;
+  switch (e.kind) {
+    case 'swift':
+      lift = hop * 0.24; sx = 1 + hop * 0.10; sy = 1 - hop * 0.08;
+      tilt = side * (0.10 + step * 0.06); break;
+    case 'warded':
+      lift = 0.13 + step * 0.09; tilt = Math.cos(phase) * 0.075; break;
+    case 'regen':
+    case 'immune': {
+      const soft = e.kind === 'regen' ? 0.13 : 0.075;
+      sx = 1 + Math.cos(phase * 2) * soft;
+      sy = 1 - Math.cos(phase * 2) * soft;
+      lift = hop * 0.09; tilt = step * 0.035; break;
+    }
+    case 'swarm':
+      lift = hop * 0.19; sx = 1 + (1-hop) * 0.09;
+      sy = 1 - (1-hop) * 0.09; tilt = step * 0.10; break;
+    default: {
+      const weight = e.kind === 'elite' ? 0.035 : e.kind === 'armored' ? 0.045 : 0.09;
+      lift = hop * weight; tilt = step * (e.kind === 'grunt' ? 0.085 : 0.045);
+      sy = 1 - (1-hop) * weight * 0.5;
+    }
+  }
+  return {lift,sx,sy,tilt};
 }
 
 function drawEnemies() {
@@ -6670,16 +7070,38 @@ function drawEnemies() {
       : e.frozen > 0 ? '#79c0ff'
       : e.slowAmt > 0 ? mixHex(d.color, '#79c0ff', Math.min(1, e.slowAmt / CFG.SLOW_CAP) * 0.75)
       : d.color;
-    // 걸음걸이는 **그림에만 준다.** 아래의 디버프 막대·체력 막대는 `cy` 를 그대로
-    // 쓴다 — 막대까지 같이 흔들면 읽어야 하는 수치가 떨리고, 여러 마리가 겹쳤을 때
-    // 어느 막대가 누구 것인지 못 따라간다.
-    const size = r * 2.3;
-    const gait = enemyGait(e.kind, e.dist, size);
-    if (!drawSprite(e.kind, tint, cx, cy + gait.dy, size, size * gait.sy, enemyFacing(e))) {
+    const pose = enemyMotion(e), size = r * 2.3;
+    // Ground contact stays fixed; only the body bounces. UI bars remain stable.
+    ctx.save();
+    ctx.globalAlpha = 0.24 - pose.lift * 0.4;
+    ctx.fillStyle = '#081611';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + size * 0.43, r * (0.8 - pose.lift), r * 0.23, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.translate(cx, cy + size * 0.43);
+    ctx.rotate(pose.tilt);
+    ctx.scale(pose.sx, pose.sy);
+    const bodyY = -size * 0.43 - size * pose.lift / pose.sy;
+    if (!drawSprite(e.kind, tint, 0, bodyY, size, size, enemyFacing(e))) {
       ctx.fillStyle = tint;
       ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.arc(0, bodyY, r, 0, Math.PI * 2);
       ctx.fill();
+    }
+    ctx.restore();
+    // Keep status effects around the feet so species silhouettes remain legible.
+    if (e.slowAmt > 0 || e.frozen > 0) {
+      ctx.save();
+      ctx.strokeStyle = e.frozen > 0 ? '#d8f7ff' : '#8acbdc';
+      ctx.globalAlpha = e.frozen > 0 ? 0.85 : 0.50;
+      ctx.lineWidth = Math.max(1, cell * 0.035);
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy + r * 0.7);ctx.lineTo(cx - r * 0.6, cy + r);
+      ctx.lineTo(cx + r * 0.6, cy + r);ctx.lineTo(cx + r, cy + r * 0.7);
+      if(e.frozen>0){ctx.lineTo(cx+r*0.85,cy-r*0.5);ctx.lineTo(cx,cy-r);ctx.lineTo(cx-r*0.85,cy-r*0.5);ctx.closePath();}
+      ctx.stroke();ctx.restore();
     }
     // 디버프 막대. 방깎은 주황, 마방깎·마법취약은 보라.
     // 수치가 안 보이면 디버프 타워가 일하는지 알 수가 없다.
@@ -7356,8 +7778,7 @@ function render() {
   if (state.phase === 'deck') { drawDeckSelect(); drawToast(); return; }
 
   layoutButtons();
-  ctx.fillStyle = '#0d1117';
-  ctx.fillRect(0, 0, view.w, view.h);
+  drawStageBackdrop();
   // 경로 선과 보드 밖에서 들어오는 적이 보드 밖으로 새지 않게 잘라낸다.
   // 드래그 중인 타워는 손가락을 따라 보드 밖으로 나가야 하므로 클립 밖에서 그린다.
   ctx.save();
@@ -7377,6 +7798,7 @@ function render() {
   drawEffects();
   drawEnemies();
   drawCorpses();
+  drawEffects(true); // Bolts must not be hidden beneath the target sprite.
   drawParticles();
   ctx.restore();
 
