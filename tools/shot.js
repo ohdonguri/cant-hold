@@ -750,10 +750,9 @@ const capture = async (browser) => {
         if (d < bestD) { bestD = d; best = { gx: x, gy: y }; }
       }
     state.picker = { mode: 'summon', gx: best.gx, gy: best.gy, sel: null };
-    // 12시 아이콘을 한 번 탭한다 — **첫 탭이라 아무것도 안 지어진다.** 고른 상태는
-    // 창에 매여 있어서(state.picker.sel) 얼려 놔도 안 풀린다.
+    // 길게 누르는 중의 미리보기를 고정한다.
     const ic = pickerLayout().icons[1];
-    pickerTap(ic.cx, ic.cy);
+    state.picker.press = { k: ic.k, held: true };
     __freeze();
   });
   await page.waitForTimeout(200);

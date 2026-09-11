@@ -1,0 +1,71 @@
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+const root=join(dirname(fileURLToPath(import.meta.url)),'..');
+const browser=await chromium.launch();
+try {
+ const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true});
+ const errors=[];
+ page.on('pageerror',e=>errors.push(String(e)));
+ await page.route('**/*',r=>r.request().url().startsWith('file:')?r.continue():r.abort());
+ await page.goto(pathToFileURL(join(root,'index.html')).href);
+ const reset=()=>page.evaluate(()=>{
+  document.getElementById('ebIntro')?.remove(); restart(); pickStage(0);
+  ['shredder','frost','marksman'].forEach(toggleDeckPick); startRun();
+  tuteMerged=true; window.update=()=>{}; state.gold=1000; state.toast=null;
+ });
+ const menu=()=>page.evaluate(()=>{
+  const occ=occupancy();
+  for(let gy=firstOpenRow();gy<CFG.BOARD_H;gy++) for(let gx=0;gx<CFG.BOARD_W;gx++) if(canPlace(gx,gy,1,occ)){
+   state.picker={mode:'summon',gx,gy,sel:null};
+   const r=pickerRects()[0]; return {x:r.cx,y:r.cy+view.top};
+  }
+ });
+ const info=()=>page.evaluate(()=>({count:state.towers.length,gold:state.gold,preview:pickerSel()}));
+ await reset(); let p=await menu();
+ await page.touchscreen.tap(p.x,p.y);
+ assert.equal((await info()).count,1,'one icon tap must install');
+ assert.equal((await info()).gold,990,'exactly one charge');
+ assert.equal(await page.evaluate(()=>state.picker),null,'installation closes picker');
+ console.log('PASS single-tap installation');
+ await reset(); p=await menu();
+ await page.mouse.move(p.x,p.y); await page.mouse.down(); await page.waitForTimeout(520);
+ assert.equal((await info()).count,0,'holding must not install');
+ assert.equal((await info()).preview,'shredder','holding previews range');
+ await page.mouse.up(); assert.equal((await info()).count,0,'releasing a hold must not install');
+ assert.equal((await info()).gold,1000); assert.equal((await info()).preview,null);
+ await page.mouse.click(p.x,p.y); assert.equal((await info()).count,1,'tap after preview installs');
+ console.log('PASS hold preview without spending');
+ await reset(); p=await menu();
+ await page.mouse.move(p.x,p.y); await page.mouse.down(); await page.mouse.move(p.x+25,p.y); await page.mouse.up();
+ assert.equal((await info()).count,0,'sliding cancels installation');
+ await page.mouse.move(p.x,p.y); await page.mouse.down();
+ await page.locator('canvas').dispatchEvent('pointercancel'); await page.mouse.up();
+ assert.equal((await info()).count,0,'canceled input never installs');
+ console.log('PASS move/cancel');
+ await reset(); p=await menu(); await page.evaluate(()=>{state.gold=0;});
+ await page.mouse.click(p.x,p.y); assert.equal((await info()).count,0); assert.equal((await info()).gold,0);
+ console.log('PASS insufficient gold');
+ await reset(); p=await menu(); await page.mouse.click(p.x,p.y);
+ const tower=await page.evaluate(()=>{const t=state.towers[0],p=cellToPx(t.gx,t.gy);return {x:p.x+view.cell/2,y:p.y+view.cell/2+view.top};});
+ await page.evaluate(()=>{const original=drawRange;window.__ranges=[];window.drawRange=t=>{window.__ranges.push(t.id);return original(t);};});
+ const ranges=()=>page.evaluate(()=>{window.__ranges=[];render();return window.__ranges.length;});
+ await page.mouse.click(tower.x,tower.y); assert.equal(await ranges(),0,'short selection does not show range');
+ await page.mouse.move(tower.x,tower.y); await page.mouse.down(); await page.waitForTimeout(520);
+  assert.equal(await ranges(),1,'holding installed tower shows range');
+ mkdirSync(join(root,'.shots','placement'),{recursive:true});
+ await page.screenshot({path:join(root,'.shots','placement','hold-range.png')});
+ await page.mouse.up(); assert.equal(await ranges(),0,'range hides on release');
+ console.log('PASS installed tower hold');
+ p=await menu(); await page.mouse.click(p.x,p.y);
+ const centers=await page.evaluate(()=>state.towers.map(t=>{const p=cellToPx(t.gx,t.gy);return {x:p.x+view.cell/2,y:p.y+view.cell/2+view.top};}));
+ await page.mouse.move(centers[0].x,centers[0].y); await page.mouse.down();
+ await page.waitForTimeout(520);
+ await page.mouse.move(centers[1].x,centers[1].y,{steps:5}); await page.mouse.up();
+ assert.equal((await info()).count,1,'drag merge still works after holding');
+ assert.equal(await page.evaluate(()=>state.towers[0].star),2);
+ console.log('PASS hold then drag merge');
+ assert.deepEqual(errors,[],'no browser errors');
+} finally {await browser.close();}
