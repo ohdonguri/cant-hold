@@ -213,7 +213,7 @@ const CFG = {
 // 그래서 배수를 2보다 확실히 크게 잡아 합성 자체가 화력 증가가 되도록 했다.
 const STAR_MULT = [0, 1, 2, 3, 4, 5, 6, 7].map(s => s === 0 ? 0 : Math.pow(CFG.STAR_RATIO, s - 1));
 
-const STAR_COLOR = ['#000', '#8b949e', '#58a6ff', '#3fb950', '#d29922', '#f85149', '#a371f7', '#ffd700'];
+const STAR_COLOR = ['#000', '#9ca3af', '#4ade80', '#38bdf8', '#a78bfa', '#fb923c', '#f43f5e', '#facc15'];
 
 // 워3식 방어력 감쇠. 음수 방어력(파쇄 분기)도 그대로 처리된다.
 function armorReduction(armor) {
@@ -6687,12 +6687,15 @@ function drawTower(t) {
   const k = KINDS[t.kind];
   const sel = state.selected === t.id;
 
+  ctx.save();
   ctx.fillStyle = '#15201a70';
   ctx.strokeStyle = STAR_COLOR[t.star];
   ctx.lineWidth = sel ? 3 : 2;
   roundRect(x + 2, y + 2, w - 2, w - 2, 6);
   ctx.fill();
+  if (t.star === 7) { ctx.shadowColor = STAR_COLOR[7]; ctx.shadowBlur = cell * 0.18; }
   ctx.stroke();
+  ctx.shadowBlur = 0;
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -6706,11 +6709,68 @@ function drawTower(t) {
     ctx.fillText(k.tag, icx, icy);
   }
 
-  ctx.fillStyle = STAR_COLOR[t.star];
-  ctx.font = `700 ${Math.round(cell * 0.26)}px system-ui, sans-serif`;
-  ctx.fillText('★' + t.star, x + 2 + (w - 2) / 2, y + w - cell * 0.18);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
+  // 성급 탭은 그림 위가 아니라 테두리 하단에 붙인다. 2x2 타워도 탭 크기는 같다.
+  const tabH = Math.max(10, cell * 0.30), tabW = Math.max(20, cell * 0.60);
+  const tabY = y + w - tabH + 1;
+  ctx.fillStyle = '#111b20'; ctx.strokeStyle = '#627078'; ctx.lineWidth = 1;
+  roundRect(icx - tabW / 2, tabY, tabW, tabH, tabH * 0.35);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f5f7fa';
+  ctx.font = `700 ${Math.max(9, Math.round(cell * 0.25))}px system-ui, sans-serif`;
+  ctx.fillText('★' + t.star, icx, tabY + tabH / 2);
+  if (t.star >= 3) drawTowerTech(t, x + w - cell * 0.24, y + cell * 0.24, Math.max(7, cell * 0.20));
+  if (t.star === 7 && t.t7) {
+    drawTraitBadge(t.t7, x + w - cell * 0.24, y + w - cell * 0.20, Math.max(7, cell * 0.19));
+  }
+  ctx.restore();
+}
+
+// 색은 성급에만 쓴다. A=조준, B=방사의 모양과 5성의 1/2로 분기를 구분한다.
+function drawTowerTech(t, cx, cy, r) {
+  ctx.save();
+  ctx.fillStyle = '#111b20'; ctx.strokeStyle = '#a7b0b8'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = '#f5f7fa'; ctx.fillStyle = '#f5f7fa';
+  ctx.lineWidth = Math.max(1, r * 0.15);
+  const h = r * 0.60;
+  if (t.b3 === 'A') {
+    ctx.beginPath(); ctx.arc(cx, cy, h * 0.66, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - h, cy); ctx.lineTo(cx + h, cy);
+    ctx.moveTo(cx, cy - h); ctx.lineTo(cx, cy + h); ctx.stroke();
+  } else if (t.b3 === 'B') {
+    ctx.beginPath();
+    for (let i = 0; i < 16; i++) {
+      const a = i * Math.PI / 8 - Math.PI / 2, d = i % 2 ? h * 0.45 : h;
+      const px = cx + Math.cos(a) * d, py = cy + Math.sin(a) * d;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.font = `700 ${r * 1.3}px system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', cx, cy);
+  }
+  if (t.star >= 5 && /^[AB][12]$/.test(t.b5 || '')) {
+    const n = t.b5.slice(1), nr = r * 0.55;
+    ctx.fillStyle = '#111b20'; ctx.strokeStyle = '#a7b0b8'; ctx.lineWidth = 1;
+    roundRect(cx + r * 0.1, cy + r * 0.25, nr * 1.8, nr * 1.8, nr * 0.45);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#f5f7fa'; ctx.font = `700 ${Math.max(8, r)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(n, cx + r * 0.1 + nr * 0.9, cy + r * 0.25 + nr * 0.9);
+  }
+  ctx.restore();
+}
+
+function drawTraitBadge(trait, cx, cy, r) {
+  const tag = { engrave: '각', overclock: '속', crystal: '결', collector: '금', execute: '처', stalwart: '불', resonance: '공' }[trait];
+  if (!tag) return;
+  ctx.save();
+  ctx.fillStyle = '#111b20'; ctx.strokeStyle = '#a7b0b8'; ctx.lineWidth = 1;
+  roundRect(cx - r, cy - r, r * 2, r * 2, r * 0.4); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f5f7fa'; ctx.font = `700 ${Math.max(9, r * 1.25)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tag, cx, cy);
+  ctx.restore();
 }
 
 function drawAnimatedTower(t, x, y, size) {
@@ -7380,10 +7440,14 @@ function drawDrag() {
     if (!canMerge(from, t)) continue;
     const s = towerFootprint(t);
     const { x, y } = cellToPx(t.gx, t.gy);
-    ctx.strokeStyle = '#7ee787';
-    ctx.lineWidth = 3;
-    roundRect(x + 1, y + 1, cell * s - 3, cell * s - 3, 7);
+    ctx.save();
+    ctx.strokeStyle = '#f5f7fa';
+    ctx.lineWidth = 1.5;
+    if (branchChain(from) !== branchChain(t)) ctx.setLineDash([3, 3]);
+    // 합성 강조선은 성급 테두리 바깥에 그려 색을 덮지 않는다.
+    roundRect(x - 1, y - 1, cell * s + 1, cell * s + 1, 7);
     ctx.stroke();
+    ctx.restore();
   }
 
   // 지금 손가락이 올라가 있는 상대. 여기서 놓으면 어떻게 되는지 놓기 전에 보여준다.
@@ -7408,6 +7472,7 @@ function drawDrag() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(KINDS[from.kind].tag, drag.px, drag.py);
+  if (from.star >= 3) drawTowerTech(from, drag.px + r * 0.7, drag.py - r * 0.7, Math.max(7, cell * 0.20));
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 1;
@@ -7666,7 +7731,9 @@ function drawInfo() {
   if (t.t7) parts.push(TRAITS[t.t7].name);
   ctx.fillStyle = '#8b949e';
   ctx.font = '11px system-ui, sans-serif';
-  ctx.fillText(parts.join(' · ') || '분기 없음', pad + 96, y + 2);
+  if (t.star >= 3) drawTowerTech(t, pad + 103, y + 8, 8);
+  const techX = pad + (t.star >= 3 ? 116 : 96);
+  fitText(parts.join(' · ') || '분기 없음', techX, y + 2, view.w - techX - pad, 11);
 
   const dps = t.kind === 'mint' ? 0 : towerDmg(t) / towerCd(t);
   ctx.fillStyle = '#6e7681';
@@ -7732,7 +7799,13 @@ function drawChoice() {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#e6edf3';
     ctx.font = '700 16px system-ui, sans-serif';
-    fitText(info.name, r.x + 18, r.y + 18, r.w - 36, 16);
+    const badgeX = r.x + r.w - 27, badgeY = r.y + 27;
+    if (c.tier === 7 && !inherit) drawTraitBadge(r.opt, badgeX, badgeY, 12);
+    else {
+      const chain = inherit ? c.chains[r.opt] : c.tier === 3 ? { b3: r.opt } : { b3: t.b3, b5: r.opt };
+      drawTowerTech({ ...chain, star: chain.b5 ? 5 : 3 }, badgeX, badgeY, 12);
+    }
+    fitText(info.name, r.x + 18, r.y + 18, r.w - 70, 16);
     ctx.fillStyle = '#8b949e';
     // 줄임말을 풀어 쓰면 한 줄로는 안 들어간다. 안 접으면 카드 밖으로 흘러 나가서
     // 뒷부분이 통째로 안 읽힌다. 물려받기 카드는 줄기마다 한 줄씩 필요해서 더 준다.
@@ -8260,7 +8333,7 @@ rafId = requestAnimationFrame(frame);
   <!-- 빌드 도장. **웹판에서는 비어 있고** 토스판 sync.mjs 만 채운다. 기기에는
        콘솔이 없어서, QR 로 켠 판이 방금 올린 것인지 예전 것인지 화면에서 가릴
        방법이 없으면 테스트가 성립이 안 된다(toss.js 의 AD_DEBUG 와 같은 사정). -->
-  <p class="ebVer">v1.0.4</p>
+  <p class="ebVer">v1.0.5</p>
 </div>
 <style>
   #ebIntro {
