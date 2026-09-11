@@ -2147,11 +2147,11 @@ function poolDeck(g, st) {
   ok('④ 열자마자는 아무것도 안 골라져 있다', g.pickerState().sel === null,
     String(g.pickerState().sel));
 
-  // ④ 첫 탭 = 고르기. 사거리가 뜨고 **골드는 안 나간다.**
+  // ④ 길게 누르는 미리보기. 골드가 나가지 않는다.
   const selK = L.icons[2].k;
   const goldSel = state.gold;
-  ok('  아이콘을 누르면 골라진다 (안 지어진다)',
-    g.pickerTap(L.icons[2].cx, L.icons[2].cy) === 'select'
+  ok('  아이콘을 꾹 누르면 미리 본다 (안 지어진다)',
+    (state.picker.press = { k: selK, held: true }, true)
     && g.pickerState().sel === selK
     && state.towers.length === 0 && state.gold === goldSel,
     `${g.pickerState().sel} · ${state.towers.length}대 ${state.gold}G`);
@@ -2175,14 +2175,14 @@ function poolDeck(g, st) {
   ok('  ㄴ. 칸 안에 유령이 하나 는다',
     g.draws.count('drawImage') - imgBare === 1,
     `그림 ${imgBare} → ${g.draws.count('drawImage')}`);
-  ok('  ㄷ. 「한 번 더 누르면」을 글자로도 말한다',
-    g.draws.text.some(t => t.includes('한 번 더 누르면')),
+  ok('  ㄷ. 「손을 떼면 취소」를 글자로도 말한다',
+    g.draws.text.some(t => t.includes('손을 떼면 취소')),
     g.draws.text.slice(-4).join(' / '));
 
   // 다른 아이콘을 누르면 **선택이 옮겨간다.** 짓지 않는다 — 이 줄이 없으면
   // 「둘째 탭이면 무조건 짓는다」는 구현이 통과한다.
   ok('  다른 아이콘을 누르면 선택이 그리로 옮겨간다',
-    g.pickerTap(mid.cx, mid.cy) === 'select' && g.pickerState().sel === mid.k
+    (state.picker.press = { k: mid.k, held: true }, g.pickerState().sel === mid.k)
     && state.towers.length === 0 && state.gold === goldSel,
     `${g.pickerState().sel} · ${state.towers.length}대`);
   g.draws.reset(); g.render();
@@ -2200,14 +2200,14 @@ function poolDeck(g, st) {
   state.gold = g.summonCost() - 1;
   state.toast = null;
   ok('골드가 모자라도 고를 수는 있다',
-    g.pickerTap(L.icons[0].cx, L.icons[0].cy) === 'select'
+    (state.picker.press = { k: L.icons[0].k, held: true }, true)
     && g.pickerState().sel === L.icons[0].k, String(g.pickerState().sel));
   g.draws.reset(); g.render();
   ok('  사거리도 그대로 보인다',
     g.draws.count('clip') - clipBare === 1, `클립 ${clipBare} → ${g.draws.count('clip')}`);
   ok('  이유가 화면에 뜬다', g.draws.text.some(t => t.includes('골드 부족')),
     g.draws.text.filter(t => t.includes('G')).join(' '));
-  ok('  둘째 탭에서 막힌다',
+  ok('  골드가 부족하면 설치를 막는다',
     g.pickerTap(L.icons[0].cx, L.icons[0].cy) === 'reject' && state.towers.length === 0,
     String(state.towers.length));
   ok('  「골드 부족」 을 그때 띄운다', !!state.toast && state.toast.text.includes('골드 부족'),
@@ -2216,12 +2216,10 @@ function poolDeck(g, st) {
     g.pickerState().open === true && g.pickerState().sel === L.icons[0].k);
   state.gold = keep;
 
-  // ③ 두 번 눌러야 선다. **같은 아이콘을 두 번**이고, 첫 번에는 아직 안 선다.
+  // 짧은 아이콘 탭 한 번으로 설치한다. 누르기 미리보기는 별도 브라우저 테스트에서 검증한다.
+  delete state.picker.press;
   const before = state.gold;
-  ok('③ 첫 탭은 고르기만 한다', g.pickerTap(mid.cx, mid.cy) === 'select'
-    && state.towers.length === 0 && state.gold === before,
-    `${state.towers.length}대 ${state.gold}G`);
-  ok('  같은 아이콘을 다시 누르면 그 칸에 선다',
+  ok('  아이콘을 한 번 누르면 그 칸에 선다',
     g.pickerTap(mid.cx, mid.cy) === 'build'
     && state.towers.length === 1 && state.towers[0].gx === spot.gx && state.towers[0].gy === spot.gy
     && state.towers[0].kind === mid.k,
@@ -5926,7 +5924,7 @@ function poolDeck(g, st) {
   safe('소환 부채꼴', () => { state.picker = { mode: 'summon', gx: 2, gy: 8, sel: null }; });
   safe('소환 부채꼴 · 종류를 고른 상태', () => {
     const ic = g.pickerLayout().icons[0];
-    g.pickerTap(ic.cx, ic.cy);
+    state.picker.press = { k: ic.k, held: true };
   });
   safe('소환 부채꼴 · 고른 채로 골드 부족', () => { state.gold = 0; });
   safe('일시정지', () => {
