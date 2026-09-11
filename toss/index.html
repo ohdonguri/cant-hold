@@ -4563,6 +4563,7 @@ function pickStage(i) {
 // ── 빈 칸 탭 → 소환 ───────────────────────────────────────────
 // 빈 칸을 누르면 소환 아이콘이 열린다. 짧은 탭은 즉시 설치하고,
 // 450ms 누르면 해당 종류의 사거리와 유령만 보인다. 손을 떼면 조회를 끝낸다.
+const PICKER_ACT_H = 44;          // 2x2 합성 배치/취소 버튼 높이
 const PICK_R = 58, PICK_ICON_R = 24, PICK_HIT_R = 28;
 const PICK_SEL_R = PICK_HIT_R;
 const PICK_STEP = Math.PI / 3;    // 아이콘 사이 60°
@@ -8277,7 +8278,7 @@ rafId = requestAnimationFrame(frame);
   <!-- 빌드 도장. **웹판에서는 비어 있고** 토스판 sync.mjs 만 채운다. 기기에는
        콘솔이 없어서, QR 로 켠 판이 방금 올린 것인지 예전 것인지 화면에서 가릴
        방법이 없으면 테스트가 성립이 안 된다(toss.js 의 AD_DEBUG 와 같은 사정). -->
-  <p class="ebVer">v1.0.6</p>
+  <p class="ebVer">v1.0.7</p>
 </div>
 <style>
   #ebIntro {
