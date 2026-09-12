@@ -21,6 +21,46 @@
     font-family: system-ui, -apple-system, sans-serif;
   }
   canvas { display: block; width: 100%; height: 100%; }
+  html.guide-open, body.guide-open { touch-action: pan-y; }
+  .tower-guide { --tower-accent:#79c0ff; box-sizing:border-box; width:min(620px,calc(100% - 20px)); height:min(860px,calc(100dvh - 36px)); max-height:calc(100dvh - 36px); margin:auto; padding:0; border:1px solid #40516a; border-radius:18px; background:#101722; color:#edf3fc; box-shadow:0 24px 90px #0009; }
+  .tower-guide[open] { display:flex; flex-direction:column; }
+  .tower-guide::backdrop { background:rgba(3,7,13,.86); }
+  .tower-guide * { box-sizing:border-box; }
+  .tower-guide button { font:inherit; cursor:pointer; touch-action:manipulation; }
+  .tower-guide button:focus-visible, .guide-scroll:focus-visible { outline:2px solid #8cc7ff; outline-offset:-3px; }
+  .guide-header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px 12px; flex-shrink:0; }
+  .guide-eyebrow { font-size:11px; color:#a9bbd1; letter-spacing:.03em; }
+  .guide-header h1 { margin:3px 0 0; font-size:23px; }
+  .guide-close { min-height:40px; padding:0 13px; border:1px solid #46566d; border-radius:9px; color:#e4edfa; background:#1c293a; }
+  .guide-intro { margin:0 16px 12px; padding:12px; border:1px solid #534b29; border-radius:10px; background:#292719; flex-shrink:0; }
+  .guide-intro strong { font-size:15px; color:#ffdb82; }
+  .guide-intro p { margin:5px 0 10px; font-size:12px; color:#d0c6a4; }
+  .guide-milestones { display:flex; flex-wrap:wrap; gap:5px; font-size:10px; color:#ffe8b2; }
+  .guide-milestones span { padding:4px 6px; background:#3b3420; border-radius:5px; }
+  .guide-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; padding:0 16px 12px; flex-shrink:0; }
+  .guide-tab { min-height:38px; padding:7px 2px; border:1px solid #344258; border-radius:8px; color:#c1cde0; background:#192334; font-size:12px!important; }
+  .guide-tab[aria-pressed="true"] { border-color:var(--tower-accent); background:#25384c; color:#fff; font-weight:700; }
+  .guide-scroll { min-height:0; overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y; -webkit-overflow-scrolling:touch; border-top:1px solid #2c394c; }
+  .guide-detail { padding:18px 18px 26px; }
+  .guide-tower { display:flex; gap:14px; align-items:center; }
+  .guide-sprite { width:66px; height:66px; object-fit:contain; image-rendering:pixelated; flex-shrink:0; }
+  .guide-tower h2 { font-size:22px; color:var(--tower-accent); margin:4px 0; }
+  .guide-tower p, .guide-path p, .guide-trait p { margin:5px 0 0; font-size:13px; line-height:1.55; color:#d2dce9; word-break:keep-all; overflow-wrap:anywhere; }
+  .guide-tip { color:#9cafc6; font-size:12px; line-height:1.5; }
+  .guide-section-title { font-size:16px; margin:23px 0 8px; }
+  .guide-note { color:#aebed2; font-size:12px; line-height:1.6; margin:6px 0 14px; }
+  .guide-path { padding:14px; margin:12px 0; background:#192334; border:1px solid #34445b; border-left:3px solid var(--tower-accent); border-radius:10px; }
+  .guide-tier { font-size:11px; color:#a9cfff; font-weight:700; }
+  .guide-path h3 { margin:6px 0 0; font-size:17px; }
+  .guide-children { display:grid; gap:9px; margin-top:14px; }
+  .guide-child { padding:11px 12px; border-radius:8px; background:#101a28; border:1px solid #2b3b51; }
+  .guide-child h4 { margin:5px 0 0; font-size:14px; }
+  .guide-seven-note { padding:12px; border:1px solid #665234; border-radius:8px; color:#f0d9ab; background:#2b251d; font-size:13px; line-height:1.6; }
+  .guide-traits { display:grid; gap:9px; }
+  .guide-trait { border:1px solid #354255; background:#192334; border-radius:8px; padding:12px; }
+  .guide-trait h3 { font-size:14px; margin:0; color:#efd2ff; }
+  @media(min-width:500px) { .guide-children, .guide-traits { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media(max-height:650px) { .guide-header { padding:10px 14px 8px; } .guide-header h1 { font-size:20px; } .guide-intro { padding:8px 10px; margin-bottom:8px; } .guide-intro p { margin-bottom:6px; } .guide-tabs { gap:4px; padding-bottom:8px; } .guide-tab { min-height:32px; } }
 </style>
 </head>
 <body>
@@ -2357,6 +2397,124 @@ const TRAITS = {
 };
 const TRAIT_KEYS = Object.keys(TRAITS);
 
+// ── 도감과 체력 데이터 ──────────────────────────────────────
+// 실제 분기 정의를 읽는다. 밸런스 문구가 바뀌면 도감도 함께 바뀐다.
+function towerGuideData(kind) {
+  return {
+    kind, ...KINDS[kind], maxStar: CFG.STAR_MAX,
+    paths: ['A', 'B'].map(key => ({ key, ...BRANCH[kind][key],
+      children: [key + '1', key + '2'].map(child => ({ key: child, ...BRANCH[kind][child] })) })),
+    traits: TRAIT_KEYS.map(key => ({ key, ...TRAITS[key] })),
+  };
+}
+function lifeHearts(life, maximum = CFG.START_LIFE) {
+  const value = Math.max(0, Math.min(maximum, life));
+  return Array.from({ length: Math.ceil(maximum / 2) }, (_, i) => Math.max(0, Math.min(2, value - i * 2)) / 2);
+}
+
+// ── 도감 화면 ────────────────────────────────────────────────
+// 긴 설명은 네이티브 스크롤/포커스가 있는 dialog에 표시한다. 게임 상태에는 저장하지 않는다.
+let towerGuideOpen = false, towerGuideDialog = null, guideWasPaused = false;
+let guideEntryRect = null;
+function drawGuideButton(y = 36) {
+  const r = { x: view.w - 106, y, w: 90, h: 36 };
+  guideEntryRect = r;
+  ctx.save();
+  ctx.fillStyle = '#1c293a'; ctx.strokeStyle = '#516785'; ctx.lineWidth = 1;
+  roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#dbeaff'; ctx.font = '600 13px system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('타워 도감', r.x + r.w / 2, r.y + r.h / 2);
+  ctx.restore();
+}
+function guideNode(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function openTowerGuide(kind = 'shredder') {
+  if (towerGuideOpen) return;
+  if (!KINDS[kind]) kind = 'shredder';
+  if (!towerGuideDialog) {
+    const dialog = guideNode('dialog', 'tower-guide');
+    dialog.setAttribute('aria-labelledby', 'tower-guide-title');
+    dialog.innerHTML = '<header class="guide-header"><div><span class="guide-eyebrow">성장 경로 미리보기</span><h1 id="tower-guide-title">타워 도감</h1></div><button class="guide-close" type="button" aria-label="도감 닫기">닫기 ×</button></header><div class="guide-intro"><strong>모든 타워는 ★7까지 성장합니다</strong><p>같은 종류 · 같은 성급 두 개를 합성하세요.</p><div class="guide-milestones"><span>★1 시작</span><span>★3 분기</span><span>★5 상위 분기</span><span>★7 최종 특성</span></div></div><nav class="guide-tabs" aria-label="타워 선택"></nav><div class="guide-scroll" tabindex="0"><div class="guide-detail"></div></div>';
+    for (const key of KIND_KEYS) {
+      const button = guideNode('button', 'guide-tab', KINDS[key].name);
+      button.type = 'button'; button.dataset.kind = key;
+      button.addEventListener('click', () => showTowerGuideKind(key));
+      dialog.querySelector('.guide-tabs').append(button);
+    }
+    dialog.querySelector('.guide-close').addEventListener('click', closeTowerGuide);
+    dialog.addEventListener('cancel', e => { e.preventDefault(); closeTowerGuide(); });
+    document.body.append(dialog);
+    towerGuideDialog = dialog;
+  }
+  guideWasPaused = state.paused;
+  state.paused = true;
+  towerGuideOpen = true;
+  cancelTowerPress(); stageDrag = null;
+  document.documentElement.classList.add('guide-open');
+  document.body.classList.add('guide-open');
+  showTowerGuideKind(kind);
+  towerGuideDialog.showModal();
+  towerGuideDialog.querySelector('.guide-close').focus();
+}
+function closeTowerGuide() {
+  if (!towerGuideOpen) return;
+  towerGuideDialog.close();
+  towerGuideOpen = false;
+  state.paused = guideWasPaused;
+  document.documentElement.classList.remove('guide-open');
+  document.body.classList.remove('guide-open');
+}
+function showTowerGuideKind(kind) {
+  const data = towerGuideData(kind), dialog = towerGuideDialog;
+  dialog.style.setProperty('--tower-accent', data.color);
+  for (const button of dialog.querySelectorAll('.guide-tab'))
+    button.setAttribute('aria-pressed', String(button.dataset.kind === kind));
+  const detail = dialog.querySelector('.guide-detail');
+  detail.replaceChildren();
+  const hero = guideNode('section', 'guide-tower');
+  const source = spriteAssets.get(kind);
+  if (source) {
+    const img = guideNode('img', 'guide-sprite'); img.src = source.src; img.alt = '';
+    hero.append(img);
+  }
+  const summary = guideNode('div');
+  summary.append(guideNode('span', 'guide-eyebrow', data.role + ' · 최대 ★' + data.maxStar),
+    guideNode('h2', '', data.name), guideNode('p', '', data.blurb));
+  hero.append(summary); detail.append(hero);
+  detail.append(guideNode('p', 'guide-tip', data.how));
+  const heading = guideNode('h2', 'guide-section-title', '★3 → ★5  나의 성장 경로');
+  detail.append(heading, guideNode('p', 'guide-note', '3성에서 고른 길에 따라 5성 선택지가 달라집니다. 각 단계에서 하나를 고르세요.'));
+  for (const path of data.paths) {
+    const route = guideNode('section', 'guide-path');
+    route.append(guideNode('span', 'guide-tier', '★3 · ' + path.key + ' 경로'),
+      guideNode('h3', '', path.name), guideNode('p', '', path.desc));
+    const descendants = guideNode('div', 'guide-children');
+    for (const child of path.children) {
+      const card = guideNode('article', 'guide-child');
+      card.append(guideNode('span', 'guide-tier', '↳ ★5'), guideNode('h4', '', child.name), guideNode('p', '', child.desc));
+      descendants.append(card);
+    }
+    route.append(descendants); detail.append(route);
+  }
+  detail.append(guideNode('h2', 'guide-section-title', '★7  최종 공통 특성'),
+    guideNode('p', 'guide-seven-note', '아래 공통 특성 중 무작위 3개가 제시되며, 하나를 선택합니다. 기존 3성·5성 분기는 유지됩니다.'));
+  const traits = guideNode('div', 'guide-traits');
+  for (const trait of data.traits) {
+    const card = guideNode('article', 'guide-trait');
+    card.append(guideNode('h3', '', trait.name), guideNode('p', '', trait.desc));
+    traits.append(card);
+  }
+  detail.append(traits, guideNode('p', 'guide-note', '공통 특성의 효과는 타워의 공격 방식과 역할에 맞춰 고르세요.'));
+  dialog.querySelector('.guide-scroll').scrollTop = 0;
+}
+
+
+
 
 // ═════════════════════════════════════════════════════════════
 // 픽셀 스프라이트
@@ -3786,7 +3944,7 @@ function updateCombat(dt) {
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const view = { w: 0, h: 0, top: 0, cell: 0, ox: 0, oy: 0 };
-const HUD_TOP = 100, HUD_BOTTOM = 150;
+const HUD_TOP = 124, HUD_BOTTOM = 150;
 
 // 노치·상태표시줄이 먹는 위쪽 높이. **CSS 에 물어본다** — 기기마다 다르고
 // (아이폰 노치 47~59 · 구형 상태표시줄 20 · 안드로이드·데스크톱 0) 자바스크립트로는
@@ -4571,6 +4729,7 @@ function drawStageSelect() {
   ctx.fillStyle = '#e6edf3';
   ctx.font = '700 22px system-ui, sans-serif';
   ctx.fillText('스테이지', 16, 44);
+  drawGuideButton();
 
   ctx.fillStyle = '#8b949e';
   fitText('맵마다 좋은 자리가 다르다. 깨면 다음이 열린다.', 16, 78, view.w - 32, 13);
@@ -5137,6 +5296,7 @@ function drawDeckSelect() {
   ctx.fillStyle = '#e6edf3';
   ctx.font = '700 22px system-ui, sans-serif';
   ctx.fillText('덱 선택', 16, 44);
+  drawGuideButton();
   ctx.fillStyle = '#8b949e';
   fitText(`${CFG.DECK_SIZE}종만 고른다. 고른 종류만 소환된다.`, 16, 76, view.w - 32, 13);
   // 둘째 줄이 제약 판에서는 **막힌 이유**로 바뀐다. 줄을 새로 늘리지 않는 이유는
@@ -5145,7 +5305,7 @@ function drawDeckSelect() {
   // **고를 수 있을 때** 하는 말이라, 못 고르는 판에서 자리를 내주는 게 맞다.
   const limit = deckLimitNote();
   ctx.fillStyle = limit ? '#d29922' : '#6e7681';
-  fitText(limit || '빠진 종류가 어느 웨이브에서 아플지가 이 판의 첫 결정이다.',
+  fitText(limit || '최대 ★7까지 성장 · 타워 도감에서 분기를 미리 보세요',
     16, 96, view.w - 32, 13);
 
   for (const it of deckLayout()) {
@@ -5278,6 +5438,13 @@ const evY = e => e.clientY - view.top;
 
 canvas.addEventListener('pointerdown', e => {
   const px = e.clientX, py = evY(e);
+  if (towerGuideOpen) return;
+  if ((state.phase === 'stage' || state.phase === 'deck' || state.paused) && guideEntryRect) {
+    const r = guideEntryRect;
+    if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) {
+      openTowerGuide(selectedTower()?.kind || state.deckPick[0] || 'shredder'); return;
+    }
+  }
   if (drag || state.picker?.press) return; // 다른 손가락이 진행 중인 입력을 덮지 않는다.
   cloudPreload();   // 첫 터치에 미리 받아 둔다
   // 오디오는 사용자 제스처 안에서만 열린다(2.9). 아래 정지 화면 분기보다 **위**여야
@@ -5518,6 +5685,7 @@ function navDrop() {
 // history 가 같은 경로로 움직인다. 직접 goBack() 을 부르면 화면만 뒤로 가고 항목은
 // 그대로 남아서, 목록에서 뒤로가기를 한 번 헛눌러야 나가게 된다.
 function navBack() {
+  if (towerGuideOpen) { closeTowerGuide(); return; }
   if (navPushed && nav) { nav.back(); return; }
   goBack();
 }
@@ -5546,6 +5714,7 @@ window.addEventListener('popstate', e => {
 // 「뒤로」 한 번이 하는 일. **열려 있는 것을 먼저 닫는다** — ESC 가 이미 그 규칙이라
 // (아래 keydown) 뒤로가기가 다른 순서로 움직이면 같은 화면에서 두 키가 다른 뜻이 된다.
 function goBack() {
+  if (towerGuideOpen) { closeTowerGuide(); return; }
   // mergePlace(#24)·소환 피커(#68) 둘 다 `state.picker` 다. 지우는 것으로 닫는 것은
   // ESC 와 한 글자도 안 다르다 — 두 모드 다 커밋 전에는 판을 안 건드린다(2.10).
   // 탭과 **같은 순서다**(#124). 판이 끝났으면 모달이 떠 있어도 그것부터 나간다 —
@@ -5568,6 +5737,7 @@ function goBack() {
 // ESC 는 「뒤로」 키다. p 는 정지 전용이라 화면을 안 옮긴다 — 두 키를 한 함수로 묶으면
 // 덱 화면에서 p 가 목록으로 나가는 화면이 된다.
 window.addEventListener('keydown', e => {
+  if (towerGuideOpen) return; // dialog가 ESC와 포커스를 처리한다
   if (e.key === 'Escape') { e.preventDefault(); navBack(); return; }
   if (e.key !== 'p' && e.key !== 'P') return;
   e.preventDefault();
@@ -7652,25 +7822,55 @@ function drawForecast() {
 
     ctx.fillStyle = i === 0 ? '#e6edf3' : '#6e7681';
     ctx.font = `${i === 0 ? '700 ' : ''}11px system-ui, sans-serif`;
-    ctx.fillText(`w${w}`, x, 66);
+    ctx.fillText(`w${w}`, x, 88);
 
     let gx = x + 26;
     for (const [kind, count] of groups) {
       const d = ENEMY[kind];
       ctx.fillStyle = i === 0 ? d.color : d.color + '99';
       ctx.font = '700 12px system-ui, sans-serif';
-      ctx.fillText(d.tag, gx, 65);
+      ctx.fillText(d.tag, gx, 87);
       gx += 13;
       ctx.fillStyle = i === 0 ? '#8b949e' : '#484f58';
       ctx.font = '11px system-ui, sans-serif';
-      ctx.fillText(String(count), gx, 66);
+      ctx.fillText(String(count), gx, 88);
       gx += ctx.measureText(String(count)).width + 7;
     }
   }
 }
 
+function drawLifeHearts() {
+  const hearts = lifeHearts(state.life);
+  const gap = 2;
+  const size = Math.min(14, (view.w - 32 - 78 - gap * (hearts.length - 1)) / hearts.length);
+  ctx.save();
+  hearts.forEach((fill, i) => {
+    const x = 16 + i * (size + gap), y = 44;
+    const shape = () => {
+      ctx.beginPath();
+      [[0,2],[2,0],[4,0],[6,2],[8,0],[10,0],[12,2],[12,5],[6,11],[0,5]].forEach(([px,py], j) => {
+        if (j === 0) ctx.moveTo(x + px * size / 12, y + py * size / 12);
+        else ctx.lineTo(x + px * size / 12, y + py * size / 12);
+      });
+      ctx.closePath();
+    };
+    shape(); ctx.fillStyle = '#35232d'; ctx.fill();
+    ctx.strokeStyle = '#895166'; ctx.lineWidth = 1; ctx.stroke();
+    if (fill > 0) {
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, size * fill, size); ctx.clip();
+      shape(); ctx.fillStyle = state.life <= 5 ? '#ff555f' : '#ff7798'; ctx.fill(); ctx.restore();
+    }
+  });
+  ctx.textAlign = 'right'; ctx.font = '700 11px system-ui, sans-serif';
+  ctx.fillStyle = state.life <= 5 ? '#ff7279' : '#ffb6ca';
+  ctx.fillText(`체력 ${Math.max(0, state.life)}/${CFG.START_LIFE}`, view.w - 16, 44);
+  ctx.restore();
+}
+
 function drawHud() {
   ctx.textBaseline = 'top';
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, view.w, HUD_TOP - 4);
 
   // 최상단 진행 바
   if (state.phase === 'build') {
@@ -7699,9 +7899,9 @@ function drawHud() {
   ctx.fillStyle = '#e3b341';
   ctx.font = '700 18px system-ui, sans-serif';
   ctx.fillText(`${state.gold} G`, view.w - 16, 16);
-  ctx.fillStyle = state.life <= 5 ? '#f85149' : '#7ee787';
+  ctx.fillStyle = '#7ee787';
   ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(`정수 ${state.essence}   관문 ${state.life}`, view.w - 16, 42);
+  ctx.fillText(`정수 ${state.essence}`, view.w - 16, 66);
   ctx.textAlign = 'left';
 
   ctx.fillStyle = '#8b949e';
@@ -7710,8 +7910,9 @@ function drawHud() {
     state.phase !== 'build' ? `남은 적 ${state.enemies.length + state.spawnQueue.length}`
       : state.wave === 0 ? '준비되면 시작을 누른다'
       : `다음 웨이브까지 ${state.timer.toFixed(1)}s`,
-    16, 42);
+    16, 66);
 
+  drawLifeHearts();
   drawForecast();
 
   for (const b of buttons) {
@@ -8445,6 +8646,7 @@ function drawPause() {
       ctx.fillStyle = '#e6edf3';
       ctx.font = `700 ${it.f}px system-ui, sans-serif`;
       ctx.fillText('일시정지', pad, y);
+      drawGuideButton(y - 6);
     } else if (it.t === 'sub') {
       ctx.fillStyle = '#6e7681';
       ctx.font = `${it.f}px system-ui, sans-serif`;
