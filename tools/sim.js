@@ -251,7 +251,7 @@ const EXPOSE = [
   //   BLAST_RADIUS        박격포 무분기 폭발 반경
   'towerCenter', 'distTo', 'BEAM_HALF', 'BLAST_RADIUS',
   'BRANCH', 'TRAITS', 'TRAIT_KEYS', 'mergeCost', 'isPath', 'pathCells',
-  'applyStacks', 'debuffScale', 'effArmor', 'effMres',
+  'applyStacks', 'debuffScale', 'freeze', 'effArmor', 'effMres',
   'applyArmor', 'spawnEnemy', 'rollDeck', 'damage', 'killEnemy',
   'spawnKillFx', 'aliveParticles', 'resetParticles', 'drawParticles', 'PARTICLE_CAP', 'fireTower',
   'PARTICLE_LIFE', 'MUZZLE_LIFE', 'SPARK_LIFE',
