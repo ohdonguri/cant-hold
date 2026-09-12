@@ -4,7 +4,7 @@
   "description": "이번 웨이브는 못 막습니다 — 성급 합성 타워디펜스",
   "scripts": {
     "test:merge": "node tools/five-star-merge-check.mjs",
-    "test": "node --test tools/cloud-save.test.js && node tools/test.js && node tools/seedcheck.js",
+    "test": "node --test tools/cloud-save.test.js tools/bgm.test.js && node tools/test.js && node tools/seedcheck.js",
     "seedcheck": "node tools/seedcheck.js",
     "art:check": "node tools/art-check.js",
     "terrain:check": "node tools/terrain-check.js",
