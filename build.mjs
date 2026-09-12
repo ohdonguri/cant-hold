@@ -177,7 +177,7 @@ function verify({ html, out, minJs }) {
     // 안 보내서 오디오를 아예 안 여는데, 소리는 그 제스처 없이는 원리적으로 안 난다 —
     // 즉 압축본이 사운드를 통째로 잃어도 렌더 비교가 두 페이지에서 똑같이 조용하다.
     // 여기가 유일한 그물이다.
-    'sfxUnlock',
+    'sfxUnlock', 'bgmTick', 'BGM_THEMES',
   ];
   const missing = must.filter(k => !out.includes(k));
   if (missing.length) throw new Error('압축본에서 사라진 것: ' + missing.join(', '));
