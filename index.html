@@ -8033,33 +8033,49 @@ function drawTutorial() {
   ctx.restore();
 }
 
-// 덱 5종. 뭐가 나올 수 있는지 모르면 합성 계획을 세울 수 없다.
+// 현재 덱. 배경 그림과 분리해 종류와 설치 수를 읽을 수 있게 한다.
 function belowBoardY() { return view.oy + view.cell * CFG.BOARD_H + 12; }
+
+// 보드 밖에도 지형 그림이 있으므로 텍스트 밑에는 투명도 없는 바탕을 둔다.
+// 상세 패널은 짧은 화면의 판매 버튼 위 54px 공간 안에 들어간다.
+function drawInfoPanel(y, w, h) {
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#101820';
+  ctx.strokeStyle = '#465665';
+  ctx.lineWidth = 1;
+  roundRect(8, y, w, h, 8);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
 
 function drawDeck() {
   const y = belowBoardY();
-  const pad = 12;
+  const pad = 16;
+  drawInfoPanel(y - 8, Math.min(view.w - 16, 44 + state.deck.length * 42), 36);
   ctx.textBaseline = 'top';
-  ctx.fillStyle = '#6e7681';
-  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = '#c9d6e2';
+  ctx.font = '600 12px system-ui, sans-serif';
   ctx.fillText('덱', pad, y + 5);
 
-  let x = pad + 22;
+  let x = pad + 26;
   for (const k of state.deck) {
     const n = state.towers.filter(t => t.kind === k).length;
-    drawSprite(k, KINDS[k].color, x + 8, y + 9, 18);
-    ctx.fillStyle = '#484f58';
-    ctx.font = '10px system-ui, sans-serif';
-    ctx.fillText(String(n), x + 19, y + 6);
-    x += 36;
+    drawSprite(k, KINDS[k].color, x + 8, y + 9, 20);
+    ctx.fillStyle = '#f0f6fc';
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.fillText(String(n), x + 22, y + 5);
+    x += 42;
   }
 }
 
 function drawInfo() {
   const t = selectedTower();
   if (!t) { drawDeck(); return; }
-  const y = belowBoardY() - 4;
-  const pad = 12;
+  const y = belowBoardY() - 5;
+  const pad = 16;
+  drawInfoPanel(y - 6, view.w - 16, 52);
   const k = KINDS[t.kind];
 
   ctx.textBaseline = 'top';
@@ -8071,19 +8087,19 @@ function drawInfo() {
   if (t.b3) parts.push(BRANCH[t.kind][t.b3].name);
   if (t.b5) parts.push(BRANCH[t.kind][t.b5].name);
   if (t.t7) parts.push(TRAITS[t.t7].name);
-  ctx.fillStyle = '#8b949e';
+  ctx.fillStyle = '#c9d6e2';
   ctx.font = '11px system-ui, sans-serif';
   if (t.star >= 3) drawTowerTech(t, pad + 103, y + 8, 8);
   const techX = pad + (t.star >= 3 ? 116 : 96);
   fitText(parts.join(' · ') || '분기 없음', techX, y + 2, view.w - techX - pad, 11);
 
   const dps = t.kind === 'mint' ? 0 : towerDmg(t) / towerCd(t);
-  ctx.fillStyle = '#6e7681';
+  ctx.fillStyle = '#d7e2ed';
   fitText(
     t.kind === 'mint'
       ? `수입 ${Math.round(CFG.MINT_BASE * STAR_MULT[t.star])}G/웨이브`
       : `DPS ${Math.round(dps)}   ${AURA_KINDS.has(t.kind) ? '오라' : '사거리'} ${towerRange(t).toFixed(1)}`,
-    pad, y + 19, view.w - pad * 2, 11);
+    pad, y + 18, (view.w - pad * 2) * .5 - 6, 11);
 
   // 합성 값과 2x2 는 집어들기 전에 알아야 한다. 값을 모르면 합성이 도박이 되고,
   // 커지는 걸 모르면 자리를 비워 둘 수가 없다 — 이 게임의 공간 압박이 그 계획에서 나온다.
@@ -8091,17 +8107,17 @@ function drawInfo() {
     const cost = mergeIsFree() ? 0 : mergeCost(t.star);
     const bits = [`합성 ${cost === 0 ? '무료' : cost + 'G'}`];
     if (mergeResultSize(t) > towerFootprint(t)) bits.push('합치면 2x2');
-    ctx.fillStyle = state.gold < cost ? '#a14a45' : '#6e7681';
+    ctx.fillStyle = state.gold < cost ? '#ff9b93' : '#d7e2ed';
     ctx.textAlign = 'right';
-    fitText(bits.join(' · '), view.w - pad, y + 19, view.w * 0.5, 11);
+    fitText(bits.join(' · '), view.w - pad, y + 18, (view.w - pad * 2) * .5, 11);
     ctx.textAlign = 'left';
   }
 
   // 세 번째 줄은 "그래서 이게 뭘 하는가". 분기 이름만 늘어놓으면 ('이자 · 투자')
   // 고른 본인도 그게 무슨 효과였는지 나중에 다시 읽을 데가 없다.
   const last = t.t7 ? TRAITS[t.t7] : t.b5 ? BRANCH[t.kind][t.b5] : t.b3 ? BRANCH[t.kind][t.b3] : null;
-  ctx.fillStyle = '#565f6a';
-  fitText(last ? `${last.name} — ${last.desc}` : k.how, pad, y + 35, view.w - pad * 2, 11);
+  ctx.fillStyle = '#e6edf3';
+  fitText(last ? `${last.name} — ${last.desc}` : k.how, pad, y + 32, view.w - pad * 2, 12, 11);
 }
 
 function drawChoice() {
